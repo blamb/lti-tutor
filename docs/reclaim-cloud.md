@@ -36,7 +36,7 @@ Environment name `lti-tutor` → `https://lti-tutor.ca.reclaim.cloud`.
 
    The database node (`node17689`, 10.100.2.10) accepts password logins from the application node (`pg_hba`: `host all all 0.0.0.0/0 md5`) and listens on 5432.
 
-3. After adding the two secrets, **Apply** in the Variables dialog, then **Restart** the Application Servers layer. `npm start` builds, applies the migrations and starts; `https://lti-tutor.ca.reclaim.cloud/healthz` should answer `{"status":"ok"}` within a minute. The node's **Log** (`nodejs.log`) shows the install, build and start output.
+3. After adding the two secrets, **Apply** in the Variables dialog, then **Restart** the Application Servers layer. (Done 2026-10-13; `/healthz` answered `{"status":"ok","env":"production"}`.) Note that with `NODE_ENV=production` npm skips devDependencies, which is why `typescript`, `tsx` and the `@types/*` packages live in `dependencies`. `npm start` builds, applies the migrations and starts; `https://lti-tutor.ca.reclaim.cloud/healthz` should answer `{"status":"ok"}` within a minute. The node's **Log** (`nodejs.log`) shows the install, build and start output.
 4. Register the tool in Moodle: *Site administration → Plugins → External tool → Manage tools → Dynamic registration* with `https://lti-tutor.ca.reclaim.cloud/register`.
 
 ## Logs and updates
