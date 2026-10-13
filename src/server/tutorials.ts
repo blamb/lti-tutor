@@ -1084,21 +1084,25 @@ export async function listDeliveredNotes(ctx: CourseCtx, limit = 5): Promise<Del
 
 // ─── Instructor: draft a brief with AI ──────────────────────────────────────
 
+/** Models sometimes return a list where a block of lines was asked for; accept both. */
+const textOrLines = (schema: z.ZodString) =>
+  z.preprocess((v) => (Array.isArray(v) ? v.map((x) => String(x ?? '').trim()).filter(Boolean).join('\n') : typeof v === 'string' ? v : v == null ? '' : String(v)), schema);
+
 export const DraftBrief = z.object({
-  title: z.string().min(1).max(160),
-  learning_goal: z.string().min(1),
-  opening_question: z.string().min(1),
-  ta_brief: z.string().min(1),
-  misconceptions: z.string(),
-  success_criteria: z.string(),
-  practice_prompts: z.string().default(''),
+  title: z.preprocess((v) => String(v ?? '').trim().slice(0, 160), z.string().min(1)),
+  learning_goal: textOrLines(z.string().min(1)),
+  opening_question: textOrLines(z.string().min(1)),
+  ta_brief: textOrLines(z.string().min(1)),
+  misconceptions: textOrLines(z.string()),
+  success_criteria: textOrLines(z.string()),
+  practice_prompts: textOrLines(z.string()).default(''),
 });
 export type DraftBrief = z.infer<typeof DraftBrief>;
 
 function draftSystemFor(kind: TutorialKind): string {
   const spec = KINDS[kind];
   const practiceKey = kind === 'practice'
-    ? `,\n  "practice_prompts": three to five practice questions or scenarios the tutor may offer, one per line`
+    ? `,\n  "practice_prompts": three to five practice questions or scenarios the tutor may offer, one per line in one string`
     : '';
   return `You help an instructor draft a one-on-one AI ${spec.label.toLowerCase()} session for their course. The instructor gives you a topic (and sometimes rough notes); if course materials are provided, ground everything in them. Draft the brief the way the instructor would write notes for their best teaching assistant — first person, practical, specific.
 
@@ -1106,14 +1110,14 @@ ${spec.draftGuide}
 
 If a pitch (reading level and tone) is given, honour it exactly: the opening question, the probes, the misconception questions and the success criteria must all be phrased at that level. "Adult Basic Education" means high-school completion: short sentences, everyday examples, no unexplained jargon.
 
-Return ONLY a JSON object, no code fences, with exactly these keys:
+Return ONLY a JSON object, no code fences. Every value is a single string (never a JSON array); where several lines are asked for, separate them with newline characters inside the string. Exactly these keys:
 {
   "title": short title (under 60 characters),
   "learning_goal": one or two sentences,
   "opening_question": the first thing the tutor asks — open, concrete, not yes/no,
   "ta_brief": 150–300 words in the instructor's voice,
-  "misconceptions": 3–5 lines, each a misconception (or common error) and the question that exposes it,
-  "success_criteria": 2–4 lines${practiceKey}
+  "misconceptions": 3–5 lines in one string, each a misconception (or common error) and the question that exposes it,
+  "success_criteria": 2–4 lines in one string${practiceKey}
 }`;
 }
 
