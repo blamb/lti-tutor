@@ -18,6 +18,12 @@ export const env = {
   DATABASE_URL: required('DATABASE_URL'),
   LTI_COOKIE_SECRET: required('LTI_COOKIE_SECRET'),
   ANTHROPIC_API_KEY: optional('ANTHROPIC_API_KEY', ''),
+  // An Anthropic-compatible endpoint (e.g. a sovereign or institutional
+  // gateway). Empty = api.anthropic.com.
+  ANTHROPIC_BASE_URL: optional('ANTHROPIC_BASE_URL', ''),
+  // Transcripts (tutor_turn) older than this many days are deleted nightly;
+  // summaries, the learner model and reports stay. 0 = keep indefinitely.
+  DATA_RETENTION_DAYS: Math.max(0, parseInt(optional('DATA_RETENTION_DAYS', '0'), 10) || 0),
   NODE_ENV: optional('NODE_ENV', 'development'),
   TOOL_NAME: optional('TOOL_NAME', 'LTI Tutor'),
   // Out-of-band admin endpoints are disabled when empty.

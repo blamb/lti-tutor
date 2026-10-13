@@ -8,6 +8,7 @@ import { env } from './env.js';
 import { lti } from './lti.js';
 import { pool } from './db.js';
 import './routes.js'; // side-effect: registers /api/* routes on lti.app
+import { scheduleRetention } from './retention.js';
 
 async function main(): Promise<void> {
   try {
@@ -19,11 +20,13 @@ async function main(): Promise<void> {
   }
 
   await lti.deploy({ port: env.PORT });
+  scheduleRetention();
 
   console.log(
     `[env] ANTHROPIC_API_KEY=${env.ANTHROPIC_API_KEY ? 'set' : 'MISSING'}` +
+      `  ANTHROPIC_BASE_URL=${env.ANTHROPIC_BASE_URL || '(default)'}` +
       `  ADMIN_TOKEN=${env.ADMIN_TOKEN ? 'set' : 'MISSING'}  NODE_ENV=${env.NODE_ENV}` +
-      `  TUTOR_MODEL=${env.TUTOR_MODEL}  GEN_MODEL=${env.GEN_MODEL}`
+      `  TUTOR_MODEL=${env.TUTOR_MODEL}  GEN_MODEL=${env.GEN_MODEL}  DATA_RETENTION_DAYS=${env.DATA_RETENTION_DAYS}`
   );
   console.log(`\n${env.TOOL_NAME} is live`);
   console.log(`  Local:     http://localhost:${env.PORT}`);

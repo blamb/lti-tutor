@@ -6,6 +6,7 @@
  *   POST /api/fullscreen-init                   -> { url }   (full-screen handoff)
  *   GET  /api/course                            -> { settings (public part), delivery, modes }
  *   GET  /api/profile                           -> { profile }
+ *   DELETE /api/me/data                         -> { deleted: {...} }   (profile, learner model, transcripts, summaries, debriefs for this course)
  *   PUT  /api/profile                           ProfileInput -> { profile }
  *   GET  /api/tutorials                         -> { tutorials: [...with my latest run], has_profile }
  *   POST /api/tutorials/:id/start               { fresh? } -> { tutorial, session, turns }
@@ -43,7 +44,8 @@ import { lti, mintFullscreenNonce } from './lti.js';
 import { env } from './env.js';
 import { isTeacher } from './auth.js';
 import { tokenOf, studentFromToken, attr, gateTeacher } from './reqctx.js';
-import { courseCtxFromToken, CourseSettingsInput, upsertCourseSettings, courseCtxFromSettings, COURSE_LEVEL_LABELS, type CourseCtx } from './courses.js';
+import { courseCtxFromToken, CourseSettingsInput, upsertCourseSettings, courseCtxFromSettings, COURSE_LEVEL_LABELS, defaultAiDisclosure, type CourseCtx } from './courses.js';
+import { deleteMyData } from './retention.js';
 import { TRUFLEX_MODES, deliveryLabels } from './delivery.js';
 import { isTutorialKind, kindCatalog, titledForKind, KINDS } from './kinds.js';
 import { listLearnerModel, deleteLearnerEntry, courseConceptReport, courseConceptsByWeek } from './learner.js';
@@ -92,6 +94,7 @@ function fail(res: Response, e: unknown, where: string): void {
 function publicCourse(ctx: CourseCtx) {
   return {
     settings: { truflex: ctx.settings.truflex, course_level: ctx.settings.course_level, ai_disclosure: ctx.settings.ai_disclosure, course_start: ctx.settings.course_start },
+    disclosure: ctx.settings.ai_disclosure || defaultAiDisclosure(env.TOOL_NAME, ctx.delivery),
     delivery: ctx.delivery,
     labels: deliveryLabels(ctx.delivery),
     debrief_kind: debriefKindFor(ctx.delivery),
@@ -141,6 +144,16 @@ lti.app.put('/api/profile', async (req: Request, res: Response) => {
     res.json({ profile: await upsertProfile(student.id, ProfileInput.parse(req.body ?? {})) });
   } catch (e) {
     fail(res, e, 'PUT /api/profile');
+  }
+});
+
+lti.app.delete('/api/me/data', async (req: Request, res: Response) => {
+  try {
+    const { token, ctx } = await ctxOf(res);
+    const student = await studentFromToken(token);
+    res.json({ deleted: await deleteMyData(student.id, ctx) });
+  } catch (e) {
+    fail(res, e, 'DELETE /api/me/data');
   }
 });
 

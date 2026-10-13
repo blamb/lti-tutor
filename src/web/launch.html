@@ -162,7 +162,7 @@
   }
 </style>
 </head>
-<body data-role="{{ROLE}}" data-return-url="{{RETURN_URL}}" data-tutorial-id="{{TUTORIAL_ID}}" data-delivery="{{DELIVERY}}">
+<body data-role="{{ROLE}}" data-return-url="{{RETURN_URL}}" data-tutorial-id="{{TUTORIAL_ID}}" data-delivery="{{DELIVERY}}" data-disclosure="{{DISCLOSURE}}">
 <a class="skip-link" href="#main">Skip to content</a>
 <div class="wrap">
   <header>
@@ -174,6 +174,7 @@
       <button class="link-btn teacher-only" id="nav-teacher" type="button"><span aria-hidden="true">👩‍🏫</span> Instructor view</button>
       <button class="link-btn" id="nav-profile" type="button" title="Tell the tutor about yourself so it can connect the material to your goals"><span aria-hidden="true">👤</span> About you</button>
       <button class="link-btn" id="nav-learning" type="button" title="What you've shown you understand so far in this course"><span aria-hidden="true">📚</span> My learning</button>
+      <button class="link-btn" id="nav-about" type="button" title="What this tutor is, what it keeps, and how to delete your data"><span aria-hidden="true">ℹ</span> About this tutor</button>
       <details class="display-menu" id="display-menu">
         <summary class="link-btn" title="Text size and line spacing"><span aria-hidden="true">Aa</span><span class="visually-hidden">Text size and line spacing</span></summary>
         <div class="display-pop">
@@ -201,6 +202,14 @@
 
   <!-- ───── Home ───── -->
   <div class="view active" id="view-home">
+    <div class="card" id="disclosure-notice" hidden style="border-left:3px solid var(--accent)">
+      <h2 tabindex="-1" style="font-size:1rem">Before you start</h2>
+      <div class="md" id="disclosure-notice-body"></div>
+      <div class="form-row" style="margin-top:.75rem">
+        <button class="btn" id="disclosure-ok" type="button">Got it</button>
+        <span class="muted">You can read this again any time under <em>About this tutor</em>.</span>
+      </div>
+    </div>
     <div class="card">
       <h2 tabindex="-1">Tutorials</h2>
       <div class="muted" id="home-tutorials-blurb" style="margin:-.25rem 0 .6rem">
@@ -221,6 +230,23 @@
         A short written recap of a lecture or reading — the big ideas, plus one section that connects them to <em>your</em> goals, and three questions to test yourself.
       </div>
       <ul class="items" id="debriefs-list"></ul>
+    </div>
+  </div>
+
+  <!-- ───── About this tutor ───── -->
+  <div class="view card" id="view-about">
+    <div class="view-header">
+      <h2 tabindex="-1">About this tutor</h2>
+      <button class="back-btn" id="about-back-btn" type="button">← Back</button>
+    </div>
+    <div class="md" id="about-body" style="margin-top:.5rem"></div>
+    <div style="margin-top:1.25rem;padding-top:.75rem;border-top:1px solid var(--border)">
+      <h3 style="font-size:1rem;margin:0 0 .25rem">Delete my data for this course</h3>
+      <p class="muted" style="margin:0 0 .5rem">Removes your <em>About you</em> notes, your <em>My learning</em> list, and every session's text, summary and ratings for this course. Your instructor's report will no longer include your runs. Debriefs written for you are deleted too. This cannot be undone.</p>
+      <div class="form-row">
+        <button class="btn btn-ghost" id="delete-data-btn" type="button" style="color:var(--bad);border-color:var(--bad)">Delete everything the tutor keeps about me</button>
+        <span class="muted" id="delete-data-status" role="status"></span>
+      </div>
     </div>
   </div>
 
@@ -696,7 +722,7 @@
   }
 
   // ─── Views ───
-  const VIEWS = ['home', 'profile', 'learning', 'tutorial', 'debrief', 'teacher'];
+  const VIEWS = ['home', 'about', 'profile', 'learning', 'tutorial', 'debrief', 'teacher'];
   function showView(name) {
     if (name !== 'tutorial') stopTutorialVoice();
     VIEWS.forEach((v) => $('#view-' + v).classList.toggle('active', v === name));
@@ -840,6 +866,33 @@
       list.appendChild(li);
     }
   }
+
+  // ═══════════ About this tutor: the AI disclosure, shown on first launch and one click away ═══════════
+  const disclosureText = document.body.dataset.disclosure || '';
+  const DISCLOSURE_KEY = 'ltitutor.disclosureSeen';
+  function disclosureSeen() { try { return localStorage.getItem(DISCLOSURE_KEY) === hashText(disclosureText); } catch { return false; } }
+  function markDisclosureSeen() { try { localStorage.setItem(DISCLOSURE_KEY, hashText(disclosureText)); } catch { /* storage blocked: shown again next launch, which is the safe default */ } }
+  function hashText(t) { let h = 0; for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0; return String(h); }
+  function showDisclosureNotice() {
+    if (!disclosureText || disclosureSeen() || isTeacherRole) return;
+    const box = $('#disclosure-notice'); box.hidden = false;
+    setMd($('#disclosure-notice-body'), disclosureText);
+  }
+  $('#disclosure-ok').addEventListener('click', () => { markDisclosureSeen(); $('#disclosure-notice').hidden = true; announce('Notice closed.'); });
+  function openAbout() { setMd($('#about-body'), disclosureText || '(No disclosure text has been set for this course.)'); $('#delete-data-status').textContent = ''; showView('about'); }
+  $('#nav-about').addEventListener('click', openAbout);
+  $('#about-back-btn').addEventListener('click', () => { showView('home'); loadHome(); });
+  $('#delete-data-btn').addEventListener('click', async () => {
+    const btn = $('#delete-data-btn'); const st = $('#delete-data-status');
+    if (!confirm('Delete everything the tutor keeps about you in this course? Your sessions, summaries, ratings, My learning list and About you notes will be gone. This cannot be undone.')) return;
+    btn.disabled = true; st.textContent = 'Deleting…';
+    try {
+      const d = (await api('/api/me/data', { method: 'DELETE' })).deleted || {};
+      hasProfile = false;
+      st.textContent = `Done. Removed ${d.sessions || 0} session${d.sessions === 1 ? '' : 's'}, ${d.learner_model || 0} learning entr${d.learner_model === 1 ? 'y' : 'ies'}, ${d.debriefs || 0} debrief${d.debriefs === 1 ? '' : 's'}${d.profile ? ' and your About you notes' : ''}.`;
+      announce(st.textContent);
+    } catch (e) { st.textContent = friendlyError(e); } finally { btn.disabled = false; }
+  });
 
   // ═══════════ Profile ═══════════
   const profileForm = $('#profile-form');
@@ -1758,6 +1811,7 @@
 
   // ─── Launch ───
   applyDeliveryLabels();
+  showDisclosureNotice();
   (window.requestIdleCallback || ((fn) => setTimeout(fn, 50)))(loadMdLibs);
   const launchTutorialId = parseInt(document.body.dataset.tutorialId || '', 10);
   loadHome().then(() => {

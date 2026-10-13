@@ -100,6 +100,22 @@ export async function upsertCourseSettings(iss: string, contextId: string, input
   return rows[0]!;
 }
 
+/**
+ * What learners are told about the tutor, unless the course sets its own
+ * text (course_settings.ai_disclosure). Markdown; mode-aware wording.
+ */
+export function defaultAiDisclosure(toolName: string, d: Delivery): string {
+  const whoSees = d.hasCohort
+    ? 'Your instructor sees each session\'s summary with your name in their report, and course-wide patterns of what the class finds hard.'
+    : 'Your instructor sees each session\'s summary with your name in their report, and patterns across all learners of what is hard, which they use to revise the course.';
+  return [
+    `**${toolName} is an AI tutor.** It follows a brief your instructor wrote and asks questions rather than giving answers, so you do the thinking. It can be wrong: your course materials and your instructor are the authority, and nothing here is a grade.`,
+    `**What it keeps.** The text of each session, a short summary of each session, what you have shown you understand (see *My learning*), your ratings and comments, and anything you enter under *About you*. ${whoSees} What you write under *About you* and your *My learning* list are never shown to your instructor. You can delete all of it from this page at any time.`,
+    `**Voice.** If you use *Speak*, your browser sends your audio to its maker's speech service (Google for Chrome and Edge, Apple for Safari) to turn it into text; this tool only ever receives the text. Typing is always available and works everywhere, including with no microphone.`,
+    `**Where your words go.** To write its replies, the tool sends the session text and your *About you* notes to the AI service your institution has configured. The session text is kept only as long as your institution's retention setting allows.`,
+  ].join('\n\n');
+}
+
 export function courseCtxFromSettings(iss: string, contextId: string, title: string, settings: CourseSettings): CourseCtx {
   return { iss, contextId, title, settings, delivery: deliveryOf(settings.truflex) };
 }

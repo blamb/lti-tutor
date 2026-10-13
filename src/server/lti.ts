@@ -17,7 +17,7 @@ import { env, isProd } from './env.js';
 import { findOrCreateStudent } from './students.js';
 import { isTeacher } from './auth.js';
 import { listTutorials } from './tutorials.js';
-import { courseCtxFromToken } from './courses.js';
+import { courseCtxFromToken, defaultAiDisclosure } from './courses.js';
 import { deliveryLabels } from './delivery.js';
 import { KINDS } from './kinds.js';
 import { getCostSummary } from './costs.js';
@@ -159,6 +159,7 @@ lti.onConnect(async (token: IdToken, req, res) => {
     .replaceAll('{{DISPLAY_NAME}}', escapeHtml(student.display_name))
     .replaceAll('{{CONTEXT_TITLE}}', escapeHtml(ctx.title ?? ''))
     .replaceAll('{{DELIVERY}}', escapeHtml(JSON.stringify(ctx.delivery)))
+    .replaceAll('{{DISCLOSURE}}', escapeHtml(ctx.settings.ai_disclosure || defaultAiDisclosure(env.TOOL_NAME, ctx.delivery)))
     .replaceAll('{{ROLE}}', role);
   return res.send(html);
 });

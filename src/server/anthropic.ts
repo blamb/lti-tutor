@@ -15,7 +15,13 @@ export function getAnthropic(): Anthropic {
     throw new Error('ANTHROPIC_API_KEY is not set. Add it to .env to use the tutor.');
   }
   if (!client) {
-    client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, maxRetries: 5, timeout: 90_000 });
+    client = new Anthropic({
+      apiKey: env.ANTHROPIC_API_KEY,
+      // Sovereignty: point the same build at an Anthropic-compatible endpoint.
+      ...(env.ANTHROPIC_BASE_URL ? { baseURL: env.ANTHROPIC_BASE_URL } : {}),
+      maxRetries: 5,
+      timeout: 90_000,
+    });
   }
   return client;
 }

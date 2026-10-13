@@ -106,6 +106,15 @@ The page is built to need few or no accommodations (WCAG 2.1 AA, BCcampus Access
 
 ---
 
+## Sovereignty and disclosure
+
+- **Endpoint.** `ANTHROPIC_BASE_URL` points the same build at any Anthropic-compatible endpoint (an institutional or in-region gateway that speaks the Messages API); leave it blank for api.anthropic.com. Nothing else changes.
+- **AI disclosure.** Learners see, on their first launch, what the tutor is, what it keeps and who sees it, that voice is turned into text by the browser maker's speech service, and that typing always works. The text is the course's own (Course settings → AI disclosure) or a mode-aware default, and stays one click away under **About this tutor**. The notice is remembered per browser; where storage is blocked it simply shows again.
+- **Delete my data.** From the same page a learner can delete everything the tool holds about them in the course: their About you notes, My learning list, session transcripts, summaries, ratings and debriefs. Cost records keep their figures but lose the link to the learner.
+- **Retention.** `DATA_RETENTION_DAYS` deletes session transcripts (`tutor_turn`) older than that every night at 03:00 server time, keeping summaries, the learner model, NPS and the instructor's report; `0` keeps transcripts indefinitely.
+
+---
+
 ## The learner model
 
 After every completed session, one small model call maps the summary onto concept entries for that learner in that course: a short concept name, a status (`secure`, `developing`, `fragile`, `misconception`) and one sentence of evidence (`learner_model` table, `src/server/learner.ts`, recorded in `api_call` as `tutorial.learner_model`). The most recent 40 entries go into every tutorial's system prompt after the profile, inside the cached block, so the tutor knows what this learner has already shown; recall sessions are additionally told which concepts to prioritise (fragile or misconceived first, then longest unseen).
@@ -143,7 +152,7 @@ Per-course settings also hold a course level (ABE, undergraduate, graduate), a d
 - **LTI 1.3** via [`ltijs`](https://github.com/Cvmcosta/ltijs) (Express-based), Postgres-backed. Dynamic registration, deep linking, Assignment & Grade Services.
 - **Backend** TypeScript + Node 20+, Postgres for app data. Migrations in `src/server/migrations`.
 - **Frontend** one HTML file served by the launch handler; no build step. Markdown via marked + DOMPurify, served from the tool itself at `/vendor/…` and loaded lazily.
-- **AI** Anthropic Claude through the official SDK. Models per function from env. System prompt order is rules (one fixed string per delivery variant) → materials (cached) → brief + profile (cached) → progress note, so a turn mid-tutorial re-reads the materials from cache.
+- **AI** Anthropic Claude through the official SDK, at api.anthropic.com or any Anthropic-compatible endpoint (`ANTHROPIC_BASE_URL`). Models per function from env. System prompt order is rules (one fixed string per delivery variant) → materials (cached) → brief + profile (cached) → progress note, so a turn mid-tutorial re-reads the materials from cache.
 - **Cost tracking** every call writes model, tokens and USD to `api_call`; `/admin/costs?token=…` returns a JSON summary.
 
 ```
@@ -156,6 +165,7 @@ src/server/
   courses.ts      course_settings CRUD and the per-request CourseCtx
   learner.ts      the learner model: update after each session, prompt block, recall candidates, course report
   progress.ts     the home view's grouping, "suggested next" and nudges, per mode; unit tests alongside
+  retention.ts    nightly transcript pruning (DATA_RETENTION_DAYS) and the learner's delete-my-data action
   importers.ts    materials by URL (readable text, Pressbooks API) and by file (.txt .md .html .docx .pdf); unit tests alongside
   print.ts        paper versions of sessions, debrief templates, standalone HTML, the course pack zip
   llm.ts          shared model-call helpers (JSON calls with schema + retry)
@@ -203,7 +213,7 @@ Register the tool in Moodle: *Site administration → Plugins → External tool 
 
 ### Deploying
 
-Any Node host with Postgres works. A `railpack.json` is included for Railway. Set `LTI_TOOL_URL`, `DATABASE_URL`, `LTI_COOKIE_SECRET`, `ANTHROPIC_API_KEY`, `NODE_ENV=production` and optionally `ADMIN_TOKEN`, `TOOL_NAME`, `TUTOR_MODEL`, `GEN_MODEL`. `npm start` runs migrations then the server; `GET /healthz` is an unauthenticated liveness probe.
+Any Node host with Postgres works. A `railpack.json` is included for Railway. Set `LTI_TOOL_URL`, `DATABASE_URL`, `LTI_COOKIE_SECRET`, `ANTHROPIC_API_KEY`, `NODE_ENV=production` and optionally `ANTHROPIC_BASE_URL` (a sovereign or institutional Anthropic-compatible endpoint), `DATA_RETENTION_DAYS`, `ADMIN_TOKEN`, `TOOL_NAME`, `TUTOR_MODEL`, `GEN_MODEL`. `npm start` runs migrations then the server; `GET /healthz` is an unauthenticated liveness probe.
 
 ### Models and cost
 
