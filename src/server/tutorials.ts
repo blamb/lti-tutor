@@ -33,6 +33,7 @@ import { recordApiCall, type Attribution } from './costs.js';
 import type { Student } from './students.js';
 import { COURSE_LEVEL_LABELS, type CourseCtx } from './courses.js';
 import type { Delivery } from './delivery.js';
+import { KINDS, TUTORIAL_KINDS, stageFor, type TutorialKind } from './kinds.js';
 
 export type { CourseCtx } from './courses.js';
 
@@ -63,6 +64,12 @@ export interface Tutorial {
   success_criteria: string;
   /** Reading level and tone, e.g. "ABE reading level, short sentences". Empty = course default. */
   pitch: string;
+  /** Which shape of tutorial this is (kinds.ts). */
+  kind: TutorialKind;
+  /** practice: sample questions or scenarios the tutor may offer, one per line. */
+  practice_prompts: string;
+  /** recall: earlier tutorials in this course that this one revisits. */
+  recall_tutorial_ids: number[];
   material_ids: number[];
   target_minutes: number;
   gradebook: boolean;
@@ -82,15 +89,84 @@ export interface StudentProfile {
   updated_at: string;
 }
 
-export const TutorialSummary = z.object({
+// Every kind's summary shares these keys, so the report, the debriefs and
+// the learner model can treat runs uniformly; the extras per kind match the
+// `summaryExtras` text in kinds.ts.
+const SummaryBase = {
   mastery: z.enum(['solid', 'developing', 'needs_work']),
   understood: z.array(z.string()).max(6),
   sticking_points: z.array(z.string()).max(6),
-  teachback: z.string(),
   next_step: z.string(),
   student_note: z.string(),
+};
+export const ConceptSummary = z.object({ kind: z.literal('concept'), ...SummaryBase, teachback: z.string() });
+export const ReadinessSummary = z.object({
+  kind: z.literal('readiness'), ...SummaryBase,
+  prior_knowledge: z.enum(['none', 'some', 'solid']),
+  misconceptions_found: z.array(z.string()).max(6),
+  watch_for: z.array(z.string()).max(4),
 });
+export const PreparationCheckSummary = z.object({
+  kind: z.literal('preparation_check'), ...SummaryBase,
+  preparation_done: z.enum(['yes', 'partly', 'no']),
+  ideas_missed: z.array(z.string()).max(6),
+});
+export const PracticeSummary = z.object({
+  kind: z.literal('practice'), ...SummaryBase,
+  strengths: z.array(z.string()).max(5),
+  improve: z.array(z.string()).max(4),
+  revised: z.boolean(),
+});
+export const ReflectionSummary = z.object({
+  kind: z.literal('reflection'), ...SummaryBase,
+  strategy_in_own_words: z.string(),
+  suggested_action: z.string(),
+});
+export const RecallSummary = z.object({
+  kind: z.literal('recall'), ...SummaryBase,
+  retained: z.array(z.string()).max(6),
+  faded: z.array(z.string()).max(6),
+});
+export const TutorialSummary = z.discriminatedUnion('kind', [
+  ConceptSummary, ReadinessSummary, PreparationCheckSummary, PracticeSummary, ReflectionSummary, RecallSummary,
+]);
+/** Runs completed before kinds existed have no `kind`; treat them as concept. */
 export type TutorialSummary = z.infer<typeof TutorialSummary> & { turns?: number };
+
+export function summaryKindOf(s: Pick<TutorialSummary, 'kind'> | { kind?: string }): TutorialKind {
+  const k = (s as { kind?: string }).kind;
+  return (TUTORIAL_KINDS as readonly string[]).includes(k ?? '') ? (k as TutorialKind) : 'concept';
+}
+
+/** The kind-specific line of a summary, for the instructor's synthesis prompts. */
+export function summaryHighlight(s: TutorialSummary): string {
+  switch (summaryKindOf(s)) {
+    case 'readiness': {
+      const r = s as z.infer<typeof ReadinessSummary>;
+      return `Prior knowledge: ${r.prior_knowledge ?? '—'}; misconceptions voiced: ${(r.misconceptions_found ?? []).join('; ') || '—'}`;
+    }
+    case 'preparation_check': {
+      const r = s as z.infer<typeof PreparationCheckSummary>;
+      return `Preparation done: ${r.preparation_done ?? '—'}; ideas missed: ${(r.ideas_missed ?? []).join('; ') || '—'}`;
+    }
+    case 'practice': {
+      const r = s as z.infer<typeof PracticeSummary>;
+      return `Strengths: ${(r.strengths ?? []).join('; ') || '—'}; improve: ${(r.improve ?? []).join('; ') || '—'}; revised during session: ${r.revised ? 'yes' : 'no'}`;
+    }
+    case 'reflection': {
+      const r = s as z.infer<typeof ReflectionSummary>;
+      return `Strategy in their words: ${r.strategy_in_own_words ?? '—'}; next action: ${r.suggested_action ?? '—'}`;
+    }
+    case 'recall': {
+      const r = s as z.infer<typeof RecallSummary>;
+      return `Retained: ${(r.retained ?? []).join('; ') || '—'}; faded: ${(r.faded ?? []).join('; ') || '—'}`;
+    }
+    default: {
+      const r = s as z.infer<typeof ConceptSummary>;
+      return `Teach-back: ${r.teachback ?? '—'}`;
+    }
+  }
+}
 
 export interface TutorialSession {
   id: number;
@@ -137,6 +213,9 @@ export const TutorialInput = z.object({
   misconceptions: z.string().trim().max(4000).default(''),
   success_criteria: z.string().trim().max(4000).default(''),
   pitch: z.string().trim().max(500).default(''),
+  kind: z.enum(TUTORIAL_KINDS).default('concept'),
+  practice_prompts: z.string().trim().max(4000).default(''),
+  recall_tutorial_ids: z.array(z.number().int().positive()).max(20).default([]),
   material_ids: z.array(z.number().int().positive()).max(20).default([]),
   target_minutes: z.number().int().min(5).max(60).default(15),
   gradebook: z.boolean().default(false),
@@ -247,16 +326,30 @@ async function validMaterialIds(ids: number[], ctx: CourseCtx): Promise<number[]
   return found.map((m) => m.id);
 }
 
+/** Drop recall-source ids that aren't other tutorials in this course. */
+async function validRecallIds(ids: number[], ctx: CourseCtx, selfId: number | null): Promise<number[]> {
+  if (ids.length === 0) return [];
+  const rows = await query<{ id: number }>(
+    `select id from tutorial where id = any($1::bigint[]) and lti_iss = $2 and lti_context_id = $3`,
+    [ids, ctx.iss, ctx.contextId]
+  );
+  const ok = new Set(rows.map((r) => r.id));
+  return ids.filter((id) => ok.has(id) && id !== selfId);
+}
+
 export async function createTutorial(ctx: CourseCtx, input: TutorialInput, createdBy: number): Promise<Tutorial> {
   const materialIds = await validMaterialIds(input.material_ids, ctx);
+  const recallIds = await validRecallIds(input.recall_tutorial_ids, ctx, null);
   const rows = await query<Tutorial>(
     `insert into tutorial
        (lti_iss, lti_context_id, title, learning_goal, opening_question, ta_brief, misconceptions,
-        success_criteria, pitch, material_ids, target_minutes, gradebook, status, created_by)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::bigint[],$11,$12,$13,$14) returning *`,
+        success_criteria, pitch, kind, practice_prompts, recall_tutorial_ids, material_ids,
+        target_minutes, gradebook, status, created_by)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::bigint[],$13::bigint[],$14,$15,$16,$17) returning *`,
     [
       ctx.iss, ctx.contextId, input.title, input.learning_goal, input.opening_question,
-      input.ta_brief, input.misconceptions, input.success_criteria, input.pitch, materialIds,
+      input.ta_brief, input.misconceptions, input.success_criteria, input.pitch,
+      input.kind, input.practice_prompts, recallIds, materialIds,
       input.target_minutes, input.gradebook, input.status, createdBy,
     ]
   );
@@ -265,15 +358,17 @@ export async function createTutorial(ctx: CourseCtx, input: TutorialInput, creat
 
 export async function updateTutorial(id: number, ctx: CourseCtx, input: TutorialInput): Promise<Tutorial | null> {
   const materialIds = await validMaterialIds(input.material_ids, ctx);
+  const recallIds = await validRecallIds(input.recall_tutorial_ids, ctx, id);
   const rows = await query<Tutorial>(
     `update tutorial set
        title = $4, learning_goal = $5, opening_question = $6, ta_brief = $7, misconceptions = $8,
-       success_criteria = $9, pitch = $10, material_ids = $11::bigint[], target_minutes = $12, gradebook = $13,
-       status = $14, updated_at = now()
+       success_criteria = $9, pitch = $10, kind = $11, practice_prompts = $12, recall_tutorial_ids = $13::bigint[],
+       material_ids = $14::bigint[], target_minutes = $15, gradebook = $16, status = $17, updated_at = now()
      where id = $1 and lti_iss = $2 and lti_context_id = $3 returning *`,
     [
       id, ctx.iss, ctx.contextId, input.title, input.learning_goal, input.opening_question,
-      input.ta_brief, input.misconceptions, input.success_criteria, input.pitch, materialIds,
+      input.ta_brief, input.misconceptions, input.success_criteria, input.pitch,
+      input.kind, input.practice_prompts, recallIds, materialIds,
       input.target_minutes, input.gradebook, input.status,
     ]
   );
@@ -383,69 +478,51 @@ async function appendTurn(sessionId: number, role: 'user' | 'assistant', content
 // variant — never assembled per learner. buildTutorialRules() runs once per
 // (hasLiveSessions, hasCohort) pair and the result is memoised.
 
-function buildTutorialRules(d: Pick<Delivery, 'hasLiveSessions' | 'hasCohort'>): string {
-  const orient = d.hasLiveSessions
-    ? 'greet the student by first name in one short sentence, state the goal of this tutorial in one sentence, then ask the opening question. Nothing else.'
-    : 'greet the student by first name in one short sentence, state the goal of this tutorial in one sentence, then ask the opening question. Nothing else. Do not assume they have just attended a class or finished a reading — they may be arriving cold — so the opening question must stand on its own.';
-  const teachBackAudience = !d.hasCohort
-    ? 'as if to someone who has never studied this'
-    : d.hasLiveSessions
-      ? 'as if teaching a classmate who missed the lecture'
-      : 'as if teaching a classmate in the course who has not reached this topic yet';
-  const extraRules = [
-    d.hasLiveSessions
-      ? ''
-      : '\n8. The student has not sat through a lecture on this. Treat the tutorial as discovery: let them uncover the idea from the materials and their own reasoning rather than checking whether they absorbed a presentation. Never refer to a lecture, a class, a live session or a follow-up meeting.',
-    d.hasCohort
-      ? ''
-      : '\n9. The student is learning alone, on their own schedule, with no classmates. Never refer to other students, peers, the class, a cohort or group work, and never suggest discussing anything with classmates.',
-  ].join('');
+function buildTutorialRules(d: Delivery, kind: TutorialKind): string {
+  const spec = KINDS[kind];
+  const shared = [
+    'One question per turn. Never stack questions.',
+    'Don\'t hand over answers the student could be guided to. When they\'re wrong, ask the question that exposes the contradiction rather than saying "no".',
+    "Use the student's own words back to them when probing.",
+    'Vary technique: definition-probing, counter-example, cause-effect chain, zooming in and out between detail and big picture, analogy stress-test.',
+    "If the student raises something correct that's adjacent to the goal, credit it briefly before steering back.",
+    'Stay grounded in the course materials provided. If none are attached, draw on general knowledge of the subject described in the brief, and say so if asked where something comes from. If the student asks something outside the materials, say what you can and point them to the instructor.',
+    "Personalise lightly: about one example or analogy in ten should draw on the student's own context and interests. Never make the tutorial about them instead of the subject.",
+  ];
+  // Delivery-mode rules (hasLiveSessions / hasCohort), never the TRUFlex number.
+  if (!d.hasLiveSessions) {
+    shared.push('The student has not sat through a lecture on this. Treat the session as discovery: let them uncover the idea from the materials and their own reasoning rather than checking whether they absorbed a presentation. Never refer to a lecture, a class, a live session or a follow-up meeting.');
+  }
+  if (!d.hasCohort) {
+    shared.push('The student is learning alone, on their own schedule, with no classmates. Never refer to other students, peers, the class, a cohort or group work, and never suggest discussing anything with classmates.');
+  }
+  const rules = [...shared, ...spec.rules(d)].map((r, i) => `${i + 1}. ${r}`).join('\n');
+  const purpose = spec.purpose(d);
 
-  return `You are running a one-on-one tutorial for a student in the course named below. The instructor designed this tutorial and wrote you a brief describing how they would run it with their best teaching assistant. Follow that brief: it sets the goal, the opening question, the probes, and what "got it" looks like.
-
+  return `You are running a one-on-one ${spec.label.toLowerCase()} for a student in the course named below. The instructor designed it and wrote you a brief describing how they would run it with their best teaching assistant. Follow that brief: it sets the goal, the opening question, the probes, and what "got it" looks like.
+${purpose ? '\n' + purpose + '\n' : ''}
 You are a Socratic tutor, not a lecturer. Hard rules:
-1. One question per turn. Never stack questions.
-2. Don't hand over answers the student could be guided to. When they're wrong, ask the question that exposes the contradiction rather than saying "no".
-3. Use the student's own words back to them when probing.
-4. Vary technique: definition-probing, counter-example, cause-effect chain, zooming in and out between detail and big picture, analogy stress-test.
-5. If the student raises something correct that's adjacent to the goal, credit it briefly before steering back.
-6. Stay grounded in the course materials provided. If none are attached, draw on general knowledge of the subject described in the brief, and say so if asked where something comes from. If the student asks something outside the materials, say what you can and point them to the instructor.
-7. Personalise lightly: about one example or analogy in ten should draw on the student's own context and interests. Never make the tutorial about them instead of the subject.${extraRules}
+${rules}
 
-The tutorial runs in stages. A progress note at the end of this system prompt tells you which stage you're in; move earlier if the student clearly reaches the goal, never later.
-- ORIENT (first reply only): ${orient}
-- EXPLORE: work through the brief's probes. Build on what they say. Keep them doing the thinking.
-- TEACH-BACK: ask the student to explain the core idea back ${teachBackAudience}. Then play back your understanding of what they said in two or three sentences and ask whether you've got it right (Pask's conversation theory: understanding is confirmed when it survives being re-explained). Probe one gap if there is one.
-- WRAP-UP: in four or five sentences, summarise the path they walked and what they figured out, name the one thing to review, and tell them they can click "Finish tutorial" to get their summary. Then stop asking questions.
+The session runs in stages. A progress note at the end of this system prompt tells you which stage you're in; move earlier if the student clearly reaches the goal, never later.
+${spec.stageGuide(d).join('\n')}
 
-Style: warm, concrete, pitched at the level the brief implies (the brief may name a reading level and tone — follow it exactly). Many students talk to you by voice and hear your replies read aloud, so keep each reply short — usually under 80 words — in plain spoken sentences. No headings, bullet lists, tables or markdown formatting. No "great question!" filler.
+Style: warm, concrete, pitched at the level the brief implies (the brief may name a reading level and tone — follow it exactly). Many students talk to you by voice and hear your replies read aloud, so keep each reply short — usually under ${spec.replyWords} words — in plain spoken sentences. No headings, bullet lists, tables or markdown formatting. No "great question!" filler.
 
-A message beginning "${START_MARKER}" is not from the student; it is the system telling you the student has just opened the tutorial. Reply to it with the ORIENT stage.`;
+A message beginning "${START_MARKER}" is not from the student; it is the system telling you the student has just opened the session. Reply to it with the ${spec.stages[0]!.name} stage.`;
 }
 
 const rulesCache = new Map<string, string>();
 
-/** One fixed rules string per delivery variant, so the block stays cacheable. */
-export function tutorialRulesFor(d: Delivery): string {
-  const key = `${d.hasLiveSessions}|${d.hasCohort}`;
+/** One fixed rules string per (kind, delivery variant), so the block stays cacheable. */
+export function tutorialRulesFor(d: Delivery, kind: TutorialKind): string {
+  const key = `${kind}|${d.hasLiveSessions}|${d.hasCohort}`;
   let rules = rulesCache.get(key);
   if (!rules) {
-    rules = buildTutorialRules(d);
+    rules = buildTutorialRules(d, kind);
     rulesCache.set(key, rules);
   }
   return rules;
-}
-
-type Stage = 'ORIENT' | 'EXPLORE' | 'TEACH-BACK' | 'WRAP-UP';
-
-function stageFor(studentTurns: number, targetMinutes: number): { stage: Stage; target: number } {
-  // ~1.5 minutes per exchange by voice; clamped so a short tutorial still has
-  // room for a teach-back and a long one doesn't drag.
-  const target = Math.min(24, Math.max(6, Math.round(targetMinutes / 1.5)));
-  if (studentTurns === 0) return { stage: 'ORIENT', target };
-  if (studentTurns < Math.round(target * 0.6)) return { stage: 'EXPLORE', target };
-  if (studentTurns < target) return { stage: 'TEACH-BACK', target };
-  return { stage: 'WRAP-UP', target };
 }
 
 /** The tutorial's pitch, falling back to the course default. */
@@ -453,24 +530,44 @@ export function effectivePitch(t: Pick<Tutorial, 'pitch'>, ctx: CourseCtx): stri
   return t.pitch || ctx.settings.pitch_default || '';
 }
 
-function tutorialBrief(t: Tutorial, ctx: CourseCtx): string {
+function tutorialBrief(t: Tutorial, ctx: CourseCtx, recallSources: Tutorial[] = []): string {
+  const spec = KINDS[t.kind];
   const parts = [
-    `# TUTORIAL BRIEF (written by the instructor)`,
+    `# ${spec.label.toUpperCase()} BRIEF (written by the instructor)`,
     `Course: ${ctx.title || '(untitled course)'}`,
   ];
   if (ctx.settings.course_level) parts.push(`Course level: ${COURSE_LEVEL_LABELS[ctx.settings.course_level]}`);
   parts.push(
+    `Kind of session: ${spec.label} — ${spec.blurb}`,
     `Title: ${t.title}`,
     `Learning goal: ${t.learning_goal}`,
-    `Opening question (ask this, verbatim or lightly adapted, in the ORIENT stage): ${t.opening_question}`,
+    `Opening question (ask this, verbatim or lightly adapted, in the ${spec.stages[0]!.name} stage): ${t.opening_question}`,
   );
   const pitch = effectivePitch(t, ctx);
   if (pitch) parts.push(`Pitch — reading level and tone to use throughout: ${pitch}`);
   if (t.ta_brief) parts.push(`\n## How to run it — the instructor's notes to their TA\n${t.ta_brief}`);
   if (t.misconceptions) parts.push(`\n## Misconceptions to listen for\n${t.misconceptions}`);
   if (t.success_criteria) parts.push(`\n## What "got it" sounds like\n${t.success_criteria}`);
+  if (t.kind === 'practice' && t.practice_prompts) parts.push(`\n## Practice prompts the tutor may offer\n${t.practice_prompts}`);
+  if (t.kind === 'recall' && recallSources.length) {
+    parts.push('\n## Earlier learning this session revisits');
+    for (const r of recallSources) {
+      parts.push(`- ${r.title}: ${r.learning_goal}${r.success_criteria ? ` (what "got it" sounded like then: ${r.success_criteria.replace(/\s+/g, ' ').slice(0, 300)})` : ''}`);
+    }
+  }
   parts.push(`\nTarget length: about ${t.target_minutes} minutes.`);
   return parts.join('\n');
+}
+
+/** The brief with anything it needs loaded (recall sources). */
+export async function briefFor(t: Tutorial, ctx: CourseCtx): Promise<string> {
+  const sources = t.kind === 'recall' && t.recall_tutorial_ids.length
+    ? await query<Tutorial>(
+        `select * from tutorial where id = any($1::bigint[]) and lti_iss = $2 and lti_context_id = $3 order by created_at`,
+        [t.recall_tutorial_ids, ctx.iss, ctx.contextId]
+      )
+    : [];
+  return tutorialBrief(t, ctx, sources);
 }
 
 /**
@@ -487,14 +584,14 @@ export async function streamTutorialReply(params: {
   userMessage: string;
   onChunk: (text: string) => void;
   attribution?: Attribution;
-}): Promise<{ assistantText: string; stage: Stage; studentTurns: number }> {
+}): Promise<{ assistantText: string; stage: string; studentTurns: number }> {
   const { tutorial, ctx, tutorialSession, student, profile, userMessage, onChunk, attribution } = params;
   const sessionId = tutorialSession.session_id;
 
   await appendTurn(sessionId, 'user', userMessage);
   const turns = await getSessionTurns(sessionId);
   const studentTurns = turns.filter((t) => t.role === 'user' && !t.content.startsWith(START_MARKER)).length;
-  const { stage, target } = stageFor(studentTurns, tutorial.target_minutes);
+  const { stage, target } = stageFor(tutorial.kind, studentTurns, tutorial.target_minutes);
 
   // Merge consecutive same-role turns (the API requires alternation).
   const messages: Anthropic.MessageParam[] = [];
@@ -514,12 +611,12 @@ export async function streamTutorialReply(params: {
   }
 
   const materials = await getMaterials(tutorial.material_ids, ctx);
-  const system: Anthropic.TextBlockParam[] = [{ type: 'text', text: tutorialRulesFor(ctx.delivery) }];
+  const system: Anthropic.TextBlockParam[] = [{ type: 'text', text: tutorialRulesFor(ctx.delivery, tutorial.kind) }];
   const grounding = materialsBlock(materials);
   if (grounding) system.push({ type: 'text', text: grounding, cache_control: { type: 'ephemeral' } });
   system.push({
     type: 'text',
-    text: `${tutorialBrief(tutorial, ctx)}\n\n# STUDENT PROFILE\n${profileBlock(student, profile)}`,
+    text: `${await briefFor(tutorial, ctx)}\n\n# STUDENT PROFILE\n${profileBlock(student, profile)}`,
     cache_control: { type: 'ephemeral' },
   });
   system.push({
@@ -558,19 +655,22 @@ export async function streamTutorialReply(params: {
 
 // ─── Completion summary ─────────────────────────────────────────────────────
 
-const SUMMARY_SYSTEM = `You read the transcript of a one-on-one tutorial and write a short structured summary for two readers: the student (student_note) and the instructor (everything else). Judge against the tutorial brief's learning goal and success criteria.
+function summarySystemFor(kind: TutorialKind): string {
+  const spec = KINDS[kind];
+  return `You read the transcript of a one-on-one ${spec.label.toLowerCase()} (${spec.blurb}) and write a short structured summary for two readers: the student (student_note) and the instructor (everything else). Judge against the brief's learning goal and success criteria.
 
 Return ONLY a JSON object, no code fences, with exactly these keys:
 {
   "mastery": "solid" | "developing" | "needs_work",
-  "understood": [up to 6 short phrases naming what the student demonstrably understood],
-  "sticking_points": [up to 6 short phrases naming where they were confused, guessed, or needed heavy prompting; empty array if none],
-  "teachback": one sentence on how well they explained the core idea back in their own words, or "Teach-back not reached" if the tutorial ended before that stage,
+  "understood": [up to 6 short phrases naming what the student demonstrably understood or did well],
+  "sticking_points": [up to 6 short phrases naming where they were confused, guessed, needed heavy prompting, or fell short; empty array if none],
+${spec.summaryExtras}
   "next_step": one concrete thing to review or practise, framed as a concept,
-  "student_note": 2–4 warm, specific sentences addressed to the student by first name — what they figured out, and the one thing to revisit
+  "student_note": 2–4 warm, specific sentences addressed to the student by first name — what they figured out or did well, and the one thing to revisit
 }
 
-Be honest: "solid" means they could explain the idea unprompted and survived a counter-example. A short transcript with little from the student is "needs_work", not "developing".`;
+Be honest. ${spec.summaryGuidance}`;
+}
 
 function transcriptText(turns: Turn[], studentName: string): string {
   return turns
@@ -599,8 +699,11 @@ async function jsonCall<T>(params: {
   maxTokens: number;
   attribution: Attribution;
   endpoint: string;
+  /** Applied to the parsed JSON before schema validation. */
+  preprocess?: (raw: unknown) => unknown;
 }): Promise<T> {
   const client = getAnthropic();
+  const pre = params.preprocess ?? ((x: unknown) => x);
   const t0 = Date.now();
   const res = await client.messages.create({
     model: GEN_MODEL,
@@ -610,7 +713,7 @@ async function jsonCall<T>(params: {
   });
   void recordApiCall({ ...params.attribution, endpoint: params.endpoint, model: GEN_MODEL, usage: res.usage, durationMs: Date.now() - t0 });
   try {
-    return params.schema.parse(JSON.parse(stripFences(textOf(res))));
+    return params.schema.parse(pre(JSON.parse(stripFences(textOf(res)))));
   } catch {
     const t1 = Date.now();
     const retry = await client.messages.create({
@@ -624,7 +727,7 @@ async function jsonCall<T>(params: {
       ],
     });
     void recordApiCall({ ...params.attribution, endpoint: params.endpoint + '.retry', model: GEN_MODEL, usage: retry.usage, durationMs: Date.now() - t1 });
-    return params.schema.parse(JSON.parse(stripFences(textOf(retry))));
+    return params.schema.parse(pre(JSON.parse(stripFences(textOf(retry)))));
   }
 }
 
@@ -642,12 +745,14 @@ export async function completeTutorialSession(params: {
   const studentTurns = turns.filter((t) => t.role === 'user' && !t.content.startsWith(START_MARKER)).length;
   const parsed = await jsonCall({
     schema: TutorialSummary,
-    system: SUMMARY_SYSTEM,
+    system: summarySystemFor(tutorial.kind),
     userPrompt:
-      `${tutorialBrief(tutorial, ctx)}\n\n# TRANSCRIPT\n${transcriptText(turns, student.display_name) || '(the student did not say anything)'}\n\nWrite the JSON summary now.`,
+      `${await briefFor(tutorial, ctx)}\n\n# TRANSCRIPT\n${transcriptText(turns, student.display_name) || '(the student did not say anything)'}\n\nWrite the JSON summary now.`,
     maxTokens: 1024,
     attribution,
     endpoint: 'tutorial.summary',
+    // The model never sees `kind`; it is the tutorial's, not its guess.
+    preprocess: (raw) => (raw && typeof raw === 'object' ? { ...(raw as object), kind: tutorial.kind } : raw),
   });
   const summary: TutorialSummary = { ...parsed, turns: studentTurns };
 
@@ -830,7 +935,7 @@ export async function generateGroupDebrief(
         `${who} ${i + 1} (${s.mastery}, ${r.turns} turns)\n` +
         `  Understood: ${s.understood.join('; ') || '—'}\n` +
         `  Stuck on: ${s.sticking_points.join('; ') || '—'}\n` +
-        `  Teach-back: ${s.teachback}`
+        `  ${summaryHighlight(s)}`
       );
     })
     .join('\n\n');
@@ -839,7 +944,7 @@ export async function generateGroupDebrief(
     .map((r) => `- (${r.nps_score}/10) ${r.nps_comment}`)
     .join('\n');
 
-  let content = `${tutorialBrief(report.tutorial, ctx)}\n\n# RUNS (${completed.length} completed of ${report.rows.length} started)\n${summaries}`;
+  let content = `${await briefFor(report.tutorial, ctx)}\n\n# RUNS (${completed.length} completed of ${report.rows.length} started)\n${summaries}`;
   if (comments) content += `\n\n# ${who.toUpperCase()} FEEDBACK COMMENTS\n${comments}`;
   let system = GROUP_DEBRIEF_SYSTEM;
   let ask = 'Write the debrief brief now.';
@@ -877,33 +982,43 @@ export const DraftBrief = z.object({
   ta_brief: z.string().min(1),
   misconceptions: z.string(),
   success_criteria: z.string(),
+  practice_prompts: z.string().default(''),
 });
 export type DraftBrief = z.infer<typeof DraftBrief>;
 
-const DRAFT_SYSTEM = `You help an instructor draft a one-on-one AI tutorial. The instructor gives you a topic (and sometimes rough notes); if course materials are provided, ground everything in them. Draft the brief the way the instructor would write notes for their best teaching assistant — first person, practical, specific.
+function draftSystemFor(kind: TutorialKind): string {
+  const spec = KINDS[kind];
+  const practiceKey = kind === 'practice'
+    ? `,\n  "practice_prompts": three to five practice questions or scenarios the tutor may offer, one per line`
+    : '';
+  return `You help an instructor draft a one-on-one AI ${spec.label.toLowerCase()} session for their course. The instructor gives you a topic (and sometimes rough notes); if course materials are provided, ground everything in them. Draft the brief the way the instructor would write notes for their best teaching assistant — first person, practical, specific.
+
+${spec.draftGuide}
 
 If a pitch (reading level and tone) is given, honour it exactly: the opening question, the probes, the misconception questions and the success criteria must all be phrased at that level. "Adult Basic Education" means high-school completion: short sentences, everyday examples, no unexplained jargon.
 
 Return ONLY a JSON object, no code fences, with exactly these keys:
 {
-  "title": short tutorial title (under 60 characters),
-  "learning_goal": one or two sentences: what the student should be able to explain by the end,
-  "opening_question": the first question the tutor asks — open, concrete, answerable from the materials, not yes/no,
-  "ta_brief": 150–300 words in the instructor's voice: how to open, the 3–5 probes to work through in order (each with what a good answer contains), what to do when the student is stuck, and when to move to the teach-back,
-  "misconceptions": 3–5 lines, each a misconception students commonly hold on this topic and the question that exposes it,
-  "success_criteria": 2–4 lines describing what a student who "got it" can say or do
+  "title": short title (under 60 characters),
+  "learning_goal": one or two sentences,
+  "opening_question": the first thing the tutor asks — open, concrete, not yes/no,
+  "ta_brief": 150–300 words in the instructor's voice,
+  "misconceptions": 3–5 lines, each a misconception (or common error) and the question that exposes it,
+  "success_criteria": 2–4 lines${practiceKey}
 }`;
+}
 
 export async function draftTutorialBrief(params: {
   ctx: CourseCtx;
   materialIds: number[];
   topic: string;
+  kind: TutorialKind;
   /** Reading level and tone; defaults to the course's pitch_default. */
   pitch?: string;
   attribution: Attribution;
 }): Promise<DraftBrief> {
   const materials = await getMaterials(params.materialIds, params.ctx);
-  const system: Anthropic.TextBlockParam[] = [{ type: 'text', text: DRAFT_SYSTEM }];
+  const system: Anthropic.TextBlockParam[] = [{ type: 'text', text: draftSystemFor(params.kind) }];
   const grounding = materialsBlock(materials);
   if (grounding) system.push({ type: 'text', text: grounding, cache_control: { type: 'ephemeral' } });
   const pitch = (params.pitch ?? '').trim() || params.ctx.settings.pitch_default;
@@ -914,7 +1029,7 @@ export async function draftTutorialBrief(params: {
     userPrompt:
       `Course: ${params.ctx.title || '(untitled)'}${level}` +
       (pitch ? `\nPitch (reading level and tone): ${pitch}` : '') +
-      `\n\nTopic / rough notes from the instructor:\n${params.topic}\n\nDraft the tutorial brief JSON now.`,
+      `\n\nTopic / rough notes from the instructor:\n${params.topic}\n\nDraft the ${KINDS[params.kind].label.toLowerCase()} brief JSON now.`,
     maxTokens: 2048,
     attribution: params.attribution,
     endpoint: 'tutorial.draft',

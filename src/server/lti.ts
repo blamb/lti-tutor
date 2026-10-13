@@ -19,6 +19,7 @@ import { isTeacher } from './auth.js';
 import { listTutorials } from './tutorials.js';
 import { courseCtxFromToken } from './courses.js';
 import { deliveryLabels } from './delivery.js';
+import { KINDS } from './kinds.js';
 import { getCostSummary } from './costs.js';
 
 const { Provider: lti } = ltijs;
@@ -167,7 +168,7 @@ lti.onDeepLinking(async (token: IdToken, req, res) => {
       (t) =>
         `<label class="row"><input type="checkbox" name="tutorial" value="${t.id}">` +
         `<span><strong>${escapeHtml(t.title)}</strong>` +
-        `<span class="meta"> · ${t.target_minutes} min${t.status !== 'published' ? ' · <em>' + t.status + '</em>' : ''}${t.gradebook ? ' · gradebook column' : ''}</span>` +
+        `<span class="meta"> · ${escapeHtml(KINDS[t.kind].label)} · ${t.target_minutes} min${t.status !== 'published' ? ' · <em>' + t.status + '</em>' : ''}${t.gradebook ? ' · gradebook column' : ''}</span>` +
         `<div class="goal">${escapeHtml(t.learning_goal)}</div></span></label>`
     )
     .join('\n');
@@ -185,7 +186,7 @@ lti.onDeepLinking(async (token: IdToken, req, res) => {
   .empty { color: #666; border: 1px dashed #ccc; border-radius: 8px; padding: .75rem; }
 </style></head><body>
 <h1>Add ${escapeHtml(env.TOOL_NAME)} content to this course</h1>
-<p>Each selected tutorial becomes its own activity on the course page, ${placement}. Draft tutorials can be placed now and published later.</p>
+<p>Each selected item becomes its own activity on the course page, ${placement}. The activity's name shows its kind (readiness check, preparation check, tutorial, practice, reflection, recall). Draft items can be placed now and published later.</p>
 <form method="post" action="/api/deeplink?ltik=${encodeURIComponent(ltik)}">
   <label class="row"><input type="checkbox" name="home" value="1"><span><strong>${escapeHtml(env.TOOL_NAME)} home</strong><span class="meta"> · all tutorials, ${labels.debriefPlural}, profile</span></span></label>
   <h2 style="font-size:1rem;margin:1rem 0 .5rem">Tutorials</h2>

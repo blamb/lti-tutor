@@ -20,6 +20,7 @@ import type { IdToken } from 'ltijs';
 import { lti } from './lti.js';
 import { env } from './env.js';
 import type { Tutorial } from './tutorials.js';
+import { titledForKind } from './kinds.js';
 
 export interface GradeResult {
   posted: boolean;
@@ -47,7 +48,7 @@ export async function postCompletionGrade(
       } else {
         const created = await lti.Grade.createLineItem(token, {
           scoreMaximum: 1,
-          label: `Tutorial: ${tutorial.title}`,
+          label: titledForKind(tutorial.kind, tutorial.title),
           resourceId,
           tag: 'tutorial',
         });
@@ -63,7 +64,7 @@ export async function postCompletionGrade(
       scoreMaximum: 1,
       activityProgress: 'Completed',
       gradingProgress: 'FullyGraded',
-      comment: `Completed tutorial "${tutorial.title}" in ${env.TOOL_NAME}.`,
+      comment: `Completed "${titledForKind(tutorial.kind, tutorial.title)}" in ${env.TOOL_NAME}.`,
     });
     return { posted: true };
   } catch (e) {

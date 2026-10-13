@@ -36,6 +36,7 @@ import { isTeacher } from './auth.js';
 import { tokenOf, studentFromToken, attr, gateTeacher } from './reqctx.js';
 import { courseCtxFromToken, CourseSettingsInput, upsertCourseSettings, courseCtxFromSettings, COURSE_LEVEL_LABELS, type CourseCtx } from './courses.js';
 import { TRUFLEX_MODES, deliveryLabels } from './delivery.js';
+import { isTutorialKind, kindCatalog, titledForKind, KINDS } from './kinds.js';
 import {
   TutorialInput, ProfileInput, MaterialInput, START_MARKER,
   listMaterials, getMaterials, createMaterial, updateMaterial, deleteMaterial,
@@ -76,6 +77,7 @@ function publicCourse(ctx: CourseCtx) {
     delivery: ctx.delivery,
     labels: deliveryLabels(ctx.delivery),
     debrief_kind: debriefKindFor(ctx.delivery),
+    kinds: kindCatalog(),
   };
 }
 
@@ -136,7 +138,7 @@ lti.app.get('/api/tutorials', async (req: Request, res: Response) => {
       tutorials: tutorials.map((t) => {
         const s = latest.get(t.id);
         return {
-          id: t.id, title: t.title, learning_goal: t.learning_goal, target_minutes: t.target_minutes,
+          id: t.id, kind: t.kind, title: t.title, learning_goal: t.learning_goal, target_minutes: t.target_minutes,
           my_status: s?.status ?? null, my_mastery: s?.summary?.mastery ?? null, my_nps: s?.nps_score ?? null,
         };
       }),
@@ -163,8 +165,9 @@ lti.app.post('/api/tutorials/:id/start', async (req: Request, res: Response) => 
     const turns = await getSessionTurns(session.session_id);
     res.json({
       tutorial: {
-        id: tutorial.id, title: tutorial.title, learning_goal: tutorial.learning_goal,
+        id: tutorial.id, kind: tutorial.kind, title: tutorial.title, learning_goal: tutorial.learning_goal,
         target_minutes: tutorial.target_minutes, status: tutorial.status,
+        stages: KINDS[tutorial.kind].stages.map((s) => s.name),
       },
       session,
       turns: turns.filter((t) => !t.content.startsWith(START_MARKER)),
@@ -207,7 +210,7 @@ lti.app.post('/api/tutorials/session/:sid/turn', async (req: Request, res: Respo
     const begin = !!req.body?.begin;
     const message = begin
       ? `${START_MARKER}\nThe student has just opened this tutorial. Begin.`
-      : String(req.body?.message ?? '').trim().slice(0, 4000);
+      : String(req.body?.message ?? '').trim().slice(0, 12000); // practice drafts can be long
     if (!message) { send('error', { message: 'message is required' }); return res.end(); }
     if (begin && (await getSessionTurns(ts.session_id)).length > 0) {
       send('done', { already_started: true });
@@ -461,9 +464,10 @@ lti.app.post('/api/teacher/tutorials/draft', async (req: Request, res: Response)
     if (!topic) return res.status(400).json({ error: 'topic is required' });
     const materialIds = z.array(z.number().int().positive()).max(20).parse(req.body?.material_ids ?? []);
     const pitch = String(req.body?.pitch ?? '').trim().slice(0, 500);
+    const kind = isTutorialKind(req.body?.kind) ? req.body.kind : 'concept';
     const me = await studentFromToken(t.token);
     const draft = await draftTutorialBrief({
-      ctx: t.ctx, materialIds, topic, pitch,
+      ctx: t.ctx, materialIds, topic, pitch, kind,
       attribution: attr(t.token, me.id, null, 'tutorial.draft'),
     });
     res.json({ draft });
@@ -526,15 +530,16 @@ lti.app.post('/api/deeplink', express.urlencoded({ extended: false }), async (re
     for (const id of ids) {
       const t = await getTutorial(id, ctx);
       if (!t || t.status === 'archived') continue;
+      const titled = titledForKind(t.kind, t.title);
       const item: DeepLinkContentItem = {
         type: 'ltiResourceLink',
-        title: `Tutorial: ${t.title}`,
+        title: titled,
         text: t.learning_goal,
         url: env.LTI_TOOL_URL,
         custom: { tutorial_id: String(t.id) },
       };
       if (t.gradebook) {
-        item.lineItem = { scoreMaximum: 1, label: `Tutorial: ${t.title}`, resourceId: `tutorial-${t.id}`, tag: 'tutorial' };
+        item.lineItem = { scoreMaximum: 1, label: titled, resourceId: `tutorial-${t.id}`, tag: 'tutorial' };
       }
       items.push(item);
     }

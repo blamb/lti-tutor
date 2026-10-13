@@ -18,7 +18,7 @@ The Paski sequence as built. Lecture, then the tutorial, then a group debrief ru
 
 | Paski | LTI Tutor |
 |---|---|
-| Faculty co-design each tutorial "as they'd guide their best TA" | **Instructor view → Tutorials.** A brief: learning goal, opening question, TA notes (probes in order, what to do when stuck), misconceptions to listen for, success criteria, target length, and a **pitch** (reading level and tone). **Draft it with AI** writes a first pass grounded in your materials, at the pitch you set. |
+| Faculty co-design each tutorial "as they'd guide their best TA" | **Instructor view → Tutorials.** A brief: learning goal, opening question, TA notes (probes in order, what to do when stuck), misconceptions to listen for, success criteria, target length, and a **pitch** (reading level and tone). **Draft it with AI** writes a first pass grounded in your materials, at the pitch you set and shaped for the session's **kind** (see [Kinds of session](#kinds-of-session)). |
 | Grounded in course materials | **Course materials.** Paste lecture notes, transcripts or readings (up to ~200k characters each) and attach them to tutorials. They're prompt-cached, so repeated turns cost a fraction. |
 | Built into the core sequence | **Deep linking.** In Moodle, add an *External tool* activity, pick this tool, click **Select content**: each tutorial becomes its own activity you place right after its lecture. Launching it opens that tutorial directly. |
 | Voice, student decides when to speak | **Push-to-talk** via the browser's Web Speech API (Chrome, Edge, Safari), replies read aloud via speech synthesis. No extra service, no extra cost. In person (Flex 1 to 7) typing is the default and voice is opt-in, since the learner may be in a classroom; typing is always a full equivalent. |
@@ -41,17 +41,34 @@ Open Learning's continuous-entry courses: flexible start, up to 30 weeks, no coh
 
 | TRU engagement type | LTI Tutor |
 |---|---|
-| 1. Uncover prior knowledge and misconceptions before new learning | (Phase 2: readiness tutorials) |
-| 2. Prepare for learning: activate, connect, preview | (Phase 2: readiness tutorials) |
-| 3. Accountability for preparatory work | (Phase 2: preparation checks) |
-| 4. Engagement with an AI tutor to unpack individual learning | **Concept tutorials**, worded for a learner working alone: no lectures, no classmates; teach-back is "explain it as if to someone who has never studied this". |
-| 5. Feedback after engaging with new content, including telling the instructor how it landed | **Study debriefs** per material; NPS and comments after every tutorial. |
-| 6. Apply learning in a safe, unassessed practice setting | (Phase 2: practice tutorials) |
-| 7. Reflect on learning: metacognition, strategies | (Phase 2: reflection tutorials) |
-| 8. Revisit and recall learning from weeks or months earlier | (Phase 2 and 3: recall tutorials and the learner model) |
-| 9. Demonstrate learning and get feedback on drafts | (Phase 2: practice tutorials) |
+| 1. Uncover prior knowledge and misconceptions before new learning | **Readiness checks**: a 4–8 exchange diagnostic before a section. The tutor probes what they already know, notes misconceptions without correcting them, and ends with what to watch for. Summary records prior knowledge and the misconceptions voiced. |
+| 2. Prepare for learning: activate, connect, preview | **Readiness checks** (same session: activating what they can build on and previewing what is coming). |
+| 3. Accountability for preparatory work | **Preparation checks** after an assigned reading: recount the key ideas, connect one to something they know; a learner who has not done the reading is told so kindly and the summary records it. |
+| 4. Engagement with an AI tutor to unpack individual learning | **Tutorials** (the concept kind), worded for a learner working alone: no lectures, no classmates; teach-back is "explain it as if to someone who has never studied this". |
+| 5. Feedback after engaging with new content, including telling the instructor how it landed | **Study debriefs** per material; NPS and comments after every session. |
+| 6. Apply learning in a safe, unassessed practice setting | **Practice** sessions: the learner pastes or speaks a draft or attempt, gets feedback against the brief's criteria (two strengths, one thing to improve, as a question), revises, and is offered one more practice prompt. Never a grade. |
+| 7. Reflect on learning: metacognition, strategies | **Reflections**: a short conversation about what was hard, what strategy worked, and one concrete thing to do differently next. The summary keeps their strategy in their own words. |
+| 8. Revisit and recall learning from weeks or months earlier | **Recall** sessions: retrieval first (smallest cue if blank), then connection to the current unit. The brief points at earlier sessions; the summary records what was retained and what faded. (Phase 3 adds the learner model that chooses what to revisit.) |
+| 9. Demonstrate learning and get feedback on drafts | **Practice** sessions on components of larger assessments. |
 
 With no cohort there is nothing to debrief, so the report's synthesis becomes a **course revision brief**: sticking points and misconceptions ranked by frequency across every completed run, with suggestions for which material or part of the brief to revise.
+
+---
+
+## Kinds of session
+
+Every tutorial has a **kind**, chosen in the editor. The kind sets the stage template, the tutor's rules, the summary's extra fields and how "Draft it with AI" fills the brief; the editor's field labels change with it. All kinds are available in every delivery mode, and only the wording changes with the mode (a preparation check may say "this week's reading" where the course has fixed dates; a readiness check may say "before the next class" only where it has live sessions). Deep-linked activities and gradebook columns are titled with the kind, e.g. "Readiness check: Osmosis".
+
+| kind | engagement types | stages | length |
+|---|---|---|---|
+| Readiness check | 1, 2 | orient → probe → wrap-up | 4–8 exchanges |
+| Preparation check | 3 | orient → recall → connect → wrap-up | 4–8 exchanges |
+| Tutorial (concept) | 4, 5 | orient → explore → teach-back → wrap-up | 6–24 exchanges |
+| Practice | 6, 9 | share → feedback → revise → more practice → wrap-up | 6–24 exchanges |
+| Reflection | 7 | open → probe → plan → wrap-up | 4–8 exchanges |
+| Recall | 8 | retrieve → connect → wrap-up | 6–24 exchanges |
+
+Every summary carries `mastery`, `understood`, `sticking_points`, `next_step` and `student_note`, so the report and (from Phase 3) the learner model treat all kinds alike; each kind adds its own fields (readiness: prior knowledge and misconceptions found; practice: strengths, what to improve, whether they revised; recall: retained and faded; and so on). The definitions live in `src/server/kinds.ts`.
 
 ---
 
@@ -92,6 +109,7 @@ src/server/
   lti.ts          ltijs setup, launch, deep-linking picker, /healthz, /fullscreen, /admin/costs
   routes.ts       /api/* (student + instructor + deep-link response)
   delivery.ts     TRUFlex → { pacing, hasCohort, hasFixedDates, hasLiveSessions, inPerson }; unit tests alongside
+  kinds.ts        the six session kinds: stages, rules, summary fields, draft guidance; unit tests alongside
   courses.ts      course_settings CRUD and the per-request CourseCtx
   tutorials.ts    materials, briefs, profiles, the staged dialogue, summaries, debriefs, AI draft
   grades.ts       AGS completion passback
@@ -100,7 +118,7 @@ src/server/
   anthropic.ts    SDK client + model selection
   costs.ts        price table + api_call recording + summary
   db.ts, migrate.ts, students.ts
-  migrations/001_init.sql, 002_course_settings.sql
+  migrations/001_init.sql, 002_course_settings.sql, 003_tutorial_kinds.sql
 src/web/launch.html
 ```
 
@@ -131,7 +149,7 @@ Register the tool in Moodle: *Site administration → Plugins → External tool 
 
 1. Launch the tool from the course → **Instructor view → Course settings** → pick the TRUFlex mode and, optionally, the course level and a default pitch.
 2. **Course materials** → paste a lecture's notes, a transcript or a chapter.
-3. **Tutorials → New tutorial** → tick the material → type the topic → **Draft** → edit → set status **Published** → **Save**. **Try it as a student** previews it.
+3. **Tutorials → New tutorial** → choose the kind → tick the material → type the topic → **Draft** → edit → set status **Published** → **Save**. **Try it as a student** previews it.
 4. Optionally place it in the course: *Add an activity → External tool → (this tool) → Select content*. To seed a course's mode from a template, add the custom parameter `truflex=<1–10>` to the activity.
 5. After students run it: **Report** → generate the debrief brief, cohort note or revision brief, whichever the mode calls for.
 
