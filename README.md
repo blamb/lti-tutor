@@ -25,15 +25,15 @@ The Paski sequence as built. Lecture, then the tutorial, then a group debrief ru
 | Student profile personalises 5–10% | **About you** (optional, invisible to the instructor) feeds the tutorial prompt and the lecture debrief's "Consider this in your context, *name*" section. The **learner model** (what they have shown in earlier sessions) follows it into every prompt. |
 | Pask's conversation theory: understanding confirmed by teaching it back | Staged dialogue: **orient → explore → teach-back → wrap-up**. In teach-back the student explains the idea as if to a classmate who missed the lecture; the tutor plays it back and checks. |
 | Personalised lecture debriefs | **Lecture debriefs.** Per material, a short written recap: shared big ideas, common slips, a personal section, three self-test questions. Read-aloud button. |
-| Group debrief with faculty | Each run ends in a structured summary (mastery, understood, sticking points, teach-back quality). The instructor's **report** aggregates them; **Generate debrief brief** turns them into discussion prompts and a one-minute re-teach for the live follow-up. |
-| NPS | Students rate each tutorial 0–10 after finishing; the report shows NPS and comments. |
+| Group debrief with faculty | Each run ends in a structured summary (mastery, understood, sticking points, teach-back quality). The instructor's **report** aggregates them; **Generate debrief brief** turns them into discussion prompts and a one-minute re-teach for the live follow-up. After the live debrief, **Mark as delivered** gives learners a short recap note on their home view. |
+| NPS | Students rate each tutorial 0–10 after finishing, then say how well the course material prepared them (1–5); the report shows NPS, preparedness and comments, and exports as CSV with no names. |
 | Gradebook | Optional completion passback (1/1) via LTI Assignment & Grade Services. |
 
 Not replicated: a realtime voice model (browser speech APIs instead), faculty digital-twin videos, NotebookLM audio podcasts (debriefs are text with read-aloud).
 
 ### Paced courses (TRUFlex 10)
 
-A semester with start and end dates and a cohort of online learners, but no scheduled classes. Paced courses inherit the cohort features of scheduled courses (the instructor sees where the cohort got stuck, and can speak to the whole cohort) and the independent-learning wording of self-paced courses (no tutorial assumes the learner just sat through a lecture; debriefs are **study debriefs**). Because there is no live session, **Generate cohort note** replaces the live debrief brief: a note the instructor posts to the cohort (what the group found hard, one explanation worth reading, one thing to review) plus instructor-only observations.
+A semester with start and end dates and a cohort of online learners, but no scheduled classes. Paced courses inherit the cohort features of scheduled courses (the instructor sees where the cohort got stuck, and can speak to the whole cohort) and the independent-learning wording of self-paced courses (no tutorial assumes the learner just sat through a lecture; debriefs are **study debriefs**). Because there is no live session, **Generate cohort note** replaces the live debrief brief: a note the instructor posts to the cohort (what the group found hard, one explanation worth reading, one thing to review) plus instructor-only observations. **Post to the cohort** turns it into a short after-session note on every learner's home view, the only way the debrief reaches them. Sessions carry an optional week and due date; the home view groups them with "this week" first, and nudges are date-aware ("due Friday", "the cohort has moved on from week 5").
 
 ### Self-paced courses (TRUFlex 9)
 
@@ -45,13 +45,15 @@ Open Learning's continuous-entry courses: flexible start, up to 30 weeks, no coh
 | 2. Prepare for learning: activate, connect, preview | **Readiness checks** (same session: activating what they can build on and previewing what is coming). |
 | 3. Accountability for preparatory work | **Preparation checks** after an assigned reading: recount the key ideas, connect one to something they know; a learner who has not done the reading is told so kindly and the summary records it. |
 | 4. Engagement with an AI tutor to unpack individual learning | **Tutorials** (the concept kind), worded for a learner working alone: no lectures, no classmates; teach-back is "explain it as if to someone who has never studied this". |
-| 5. Feedback after engaging with new content, including telling the instructor how it landed | **Study debriefs** per material; NPS and comments after every session. |
+| 5. Feedback after engaging with new content, including telling the instructor how it landed | **Study debriefs** per material; after every session, NPS and "how well did the course material prepare you for this?" (1–5, with a comment), shown in the report beside NPS. |
 | 6. Apply learning in a safe, unassessed practice setting | **Practice** sessions: the learner pastes or speaks a draft or attempt, gets feedback against the brief's criteria (two strengths, one thing to improve, as a question), revises, and is offered one more practice prompt. Never a grade. |
 | 7. Reflect on learning: metacognition, strategies | **Reflections**: a short conversation about what was hard, what strategy worked, and one concrete thing to do differently next. The summary keeps their strategy in their own words. |
 | 8. Revisit and recall learning from weeks or months earlier | **Recall** sessions: retrieval first (smallest cue if blank), then connection to the current unit. The brief points at earlier sessions, and the **learner model** tells the tutor which of this learner's concepts are fragile, misconceived or longest unseen. The summary records what was retained and what faded. |
 | 9. Demonstrate learning and get feedback on drafts | **Practice** sessions on components of larger assessments. |
 
 With no cohort there is nothing to debrief, so the report's synthesis becomes a **course revision brief**: sticking points and misconceptions ranked by frequency across every completed run, with suggestions for which material or part of the brief to revise.
+
+Nothing is locked: a session can carry a **suggested after** hint, shown as "suggested next" once the earlier one is done, and Moodle's own restrict-access handles anything stronger. A **Suggested for you** list on the home view nudges, without dates: a readiness check not yet done, a recall session whose source concepts have gone three weeks without a look, a reflection not yet done after completed sessions.
 
 For learners with limited or no internet (the former print mode grew out of Flex 9), every session also exists as a **paper version** and every material as a printable debrief; the instructor's **Export course pack** bundles them for the print shop or an offline device. See [Offline and low-bandwidth](#offline-and-low-bandwidth).
 
@@ -128,9 +130,9 @@ The raw number is interpreted in exactly one place, `deliveryOf()` in `src/serve
 What each boolean switches today:
 
 - **hasLiveSessions** — tutor rules (no lecture or follow-up assumed, discovery framing), teach-back audience, lecture vs study debrief wording and labels, the home-page blurbs, deep-link descriptions.
-- **hasCohort** — teach-back audience (classmate vs "someone who has never studied this"), the no-peers rule, group debrief / cohort note vs course revision brief.
+- **hasCohort** — teach-back audience (classmate vs "someone who has never studied this"), the no-peers rule, group debrief / cohort note vs course revision brief, "mark as delivered" with the after-session note learners see, the "cohort has moved on" nudge.
 - **inPerson** — typing-first input with voice opt-in; the learner's own choice is remembered in the browser.
-- **hasFixedDates** — the course start date field and the concepts report by week (weekly grouping and due dates arrive in Phase 7).
+- **hasFixedDates** — the course start date, the concepts report by week, the session editor's week and due-date fields, the home view grouped by week with "this week" first, and date-aware nudges.
 
 Per-course settings also hold a course level (ABE, undergraduate, graduate), a default pitch and the AI disclosure text.
 
@@ -153,6 +155,7 @@ src/server/
   kinds.ts        the six session kinds: stages, rules, summary fields, draft guidance; unit tests alongside
   courses.ts      course_settings CRUD and the per-request CourseCtx
   learner.ts      the learner model: update after each session, prompt block, recall candidates, course report
+  progress.ts     the home view's grouping, "suggested next" and nudges, per mode; unit tests alongside
   importers.ts    materials by URL (readable text, Pressbooks API) and by file (.txt .md .html .docx .pdf); unit tests alongside
   print.ts        paper versions of sessions, debrief templates, standalone HTML, the course pack zip
   llm.ts          shared model-call helpers (JSON calls with schema + retry)
@@ -163,7 +166,7 @@ src/server/
   anthropic.ts    SDK client + model selection
   costs.ts        price table + api_call recording + summary
   db.ts, migrate.ts, students.ts
-  migrations/001_init.sql … 006_print.sql
+  migrations/001_init.sql … 007_progression.sql
 src/web/launch.html
 ```
 

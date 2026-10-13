@@ -12,6 +12,7 @@
  *   POST /api/tutorials/session/:sid/turn       { message } | { begin: true } -> SSE
  *   POST /api/tutorials/session/:sid/complete   -> { summary, grade }
  *   POST /api/tutorials/session/:sid/nps        { score, comment? }
+ *   POST /api/tutorials/session/:sid/prep       { score 1–5, comment? }   (how well the material prepared them)
  *   GET  /api/tutorials/:id/print               -> standalone HTML paper version (?format=md|json, ?download=1)
  *   GET  /api/materials/:id/debrief.html        -> the learner's own debrief as a standalone file (?download=1)
  *   GET  /api/materials                         -> { materials: [{ id, title, has_debrief }] }
@@ -25,7 +26,9 @@
  *   POST       /api/teacher/materials/upload     multipart 'file' -> { material, truncated, original_chars }
  *   GET/POST   /api/teacher/tutorials, PUT/DELETE /api/teacher/tutorials/:id
  *   POST       /api/teacher/tutorials/draft      { material_ids, topic, pitch? } -> { draft }
- *   GET        /api/teacher/tutorials/:id/report -> TutorialReport
+ *   GET        /api/teacher/tutorials/:id/report -> TutorialReport (+ stored debrief, delivery state)
+ *   GET        /api/teacher/tutorials/:id/report.csv -> one row per run, no names
+ *   POST/DELETE /api/teacher/tutorials/:id/debrief/deliver -> mark the synthesis delivered (+ after-session note) / undo
  *   POST       /api/teacher/tutorials/:id/debrief -> { kind, debrief }  (group debrief / cohort note / revision brief)
  *   GET        /api/teacher/course-pack.zip      -> zip of every published paper script + debrief template + index.txt
  *   POST       /api/deeplink                     (form) -> auto-submitting deep-link form
@@ -52,9 +55,11 @@ import {
   listTutorials, getTutorial, createTutorial, updateTutorial, deleteTutorial,
   getProfile, upsertProfile, latestSessionsForStudent, startTutorialSession,
   getTutorialSession, getSessionTurns, streamTutorialReply, completeTutorialSession,
-  recordNps, recordGradeResult, getTutorialReport, generateGroupDebrief, debriefKindFor,
-  draftTutorialBrief, getDebrief, generateDebrief,
+  recordNps, recordPrep, recordGradeResult, getTutorialReport, generateGroupDebrief, debriefKindFor,
+  draftTutorialBrief, getDebrief, generateDebrief, reportCsv,
+  getStoredDebrief, deliverDebrief, undeliverDebrief, listDeliveredNotes,
 } from './tutorials.js';
+import { buildHomeProgress } from './progress.js';
 import { postCompletionGrade, type GradeResult } from './grades.js';
 import { query } from './db.js';
 
@@ -147,16 +152,21 @@ lti.app.get('/api/tutorials', async (req: Request, res: Response) => {
     const student = await studentFromToken(token);
     const tutorials = await listTutorials(ctx, { publishedOnly: true });
     const latest = await latestSessionsForStudent(student.id);
+    const progress = await buildHomeProgress({ ctx, studentId: student.id, tutorials, latest });
     res.json({
       tutorials: tutorials.map((t) => {
         const s = latest.get(t.id);
         return {
           id: t.id, kind: t.kind, title: t.title, learning_goal: t.learning_goal, target_minutes: t.target_minutes,
+          week: t.week, due_at: t.due_at, suggested_after_tutorial_id: t.suggested_after_tutorial_id,
           my_status: s?.status ?? null, my_mastery: s?.summary?.mastery ?? null, my_nps: s?.nps_score ?? null,
+          my_completed_at: s?.status === 'completed' ? s.completed_at : null,
         };
       }),
       has_profile: !!(await getProfile(student.id)),
       delivery: ctx.delivery,
+      progress,
+      notes: ctx.delivery.hasCohort ? await listDeliveredNotes(ctx) : [],
     });
   } catch (e) {
     fail(res, e, 'GET /api/tutorials');
@@ -300,6 +310,19 @@ lti.app.delete('/api/learning/:id', async (req: Request, res: Response) => {
     res.json({ ok: true });
   } catch (e) {
     fail(res, e, 'DELETE /api/learning/:id');
+  }
+});
+
+lti.app.post('/api/tutorials/session/:sid/prep', async (req: Request, res: Response) => {
+  try {
+    const owned = await ownedSession(req, res);
+    if (!owned) return res.status(404).json({ error: 'session not found' });
+    const score = Number(req.body?.score);
+    if (!Number.isInteger(score) || score < 1 || score > 5) return res.status(400).json({ error: 'score must be 1–5' });
+    await recordPrep(owned.ts.id, score, String(req.body?.comment ?? '').trim().slice(0, 1000));
+    res.json({ ok: true });
+  } catch (e) {
+    fail(res, e, 'POST /api/tutorials/session/:sid/prep');
   }
 });
 
@@ -651,9 +674,62 @@ lti.app.get('/api/teacher/tutorials/:id/report', async (req: Request, res: Respo
     if (!id) return res.status(400).json({ error: 'bad tutorial id' });
     const tutorial = await getTutorial(id, t.ctx);
     if (!tutorial) return res.status(404).json({ error: 'tutorial not found' });
-    res.json({ ...(await getTutorialReport(tutorial)), debrief_kind: debriefKindFor(t.ctx.delivery) });
+    res.json({
+      ...(await getTutorialReport(tutorial)),
+      debrief_kind: debriefKindFor(t.ctx.delivery),
+      stored_debrief: await getStoredDebrief(tutorial.id),
+      can_deliver: t.ctx.delivery.hasCohort,
+    });
   } catch (e) {
     fail(res, e, 'GET /api/teacher/tutorials/:id/report');
+  }
+});
+
+lti.app.get('/api/teacher/tutorials/:id/report.csv', async (req: Request, res: Response) => {
+  try {
+    const t = await teacherCtx(res);
+    if (!t) return;
+    const id = idParam(req, 'id');
+    if (!id) return res.status(400).json({ error: 'bad tutorial id' });
+    const tutorial = await getTutorial(id, t.ctx);
+    if (!tutorial) return res.status(404).json({ error: 'tutorial not found' });
+    const report = await getTutorialReport(tutorial);
+    res.type('text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileSlug(KINDS[tutorial.kind].label + '-' + tutorial.title)}-report.csv"`);
+    res.send('\ufeff' + reportCsv(report));
+  } catch (e) {
+    fail(res, e, 'GET /api/teacher/tutorials/:id/report.csv');
+  }
+});
+
+lti.app.post('/api/teacher/tutorials/:id/debrief/deliver', async (req: Request, res: Response) => {
+  try {
+    const t = await teacherCtx(res);
+    if (!t) return;
+    if (!t.ctx.delivery.hasCohort) return res.status(400).json({ error: 'This course has no cohort to deliver to; the revision brief is for you.' });
+    const id = idParam(req, 'id');
+    if (!id) return res.status(400).json({ error: 'bad tutorial id' });
+    const tutorial = await getTutorial(id, t.ctx);
+    if (!tutorial) return res.status(404).json({ error: 'tutorial not found' });
+    const me = await studentFromToken(t.token);
+    res.json({ debrief: await deliverDebrief(tutorial, t.ctx, attr(t.token, me.id, null, 'tutorial.after_session_note')) });
+  } catch (e) {
+    fail(res, e, 'POST /api/teacher/tutorials/:id/debrief/deliver');
+  }
+});
+
+lti.app.delete('/api/teacher/tutorials/:id/debrief/deliver', async (req: Request, res: Response) => {
+  try {
+    const t = await teacherCtx(res);
+    if (!t) return;
+    const id = idParam(req, 'id');
+    if (!id) return res.status(400).json({ error: 'bad tutorial id' });
+    const tutorial = await getTutorial(id, t.ctx);
+    if (!tutorial) return res.status(404).json({ error: 'tutorial not found' });
+    await undeliverDebrief(tutorial.id);
+    res.json({ ok: true });
+  } catch (e) {
+    fail(res, e, 'DELETE /api/teacher/tutorials/:id/debrief/deliver');
   }
 });
 

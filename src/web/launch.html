@@ -207,7 +207,13 @@
         A short one-on-one conversation your instructor designed to follow a lecture. Talk or type.
         You get a summary at the end; your instructor sees where the class got stuck.
       </div>
-      <ul class="items" id="tutorials-list"><li class="static"><span class="t-goal">Loading…</span></li></ul>
+      <div id="home-nudges" hidden style="margin:-.25rem 0 .75rem"></div>
+      <div id="tutorials-list"><ul class="items"><li class="static"><span class="t-goal">Loading…</span></li></ul></div>
+    </div>
+    <div class="card" id="notes-card" hidden>
+      <h2 id="notes-heading">From your instructor</h2>
+      <div class="muted" id="notes-blurb" style="margin:-.25rem 0 .6rem">Short notes after sessions many of you have completed: what the group found hard, and one thing to review.</div>
+      <div id="notes-list"></div>
     </div>
     <div class="card" id="debriefs-card" style="display:none">
       <h2 id="debriefs-heading">Lecture debriefs</h2>
@@ -363,6 +369,12 @@
           <label>Course materials to ground it in <span class="hint">Lecture notes, transcripts or readings you've added under "Course materials". The tutor and the AI draft only see what's ticked.</span>
             <div class="check-list" id="tutorial-form-materials"></div></label>
           <label style="max-width:220px">Target length (minutes) <input type="number" name="target_minutes" min="5" max="60" value="15"></label>
+          <label>Suggested after <span class="hint">Shown to learners as "suggested next" once they finish that session. Never enforced; use Moodle's restrict access if you need to lock.</span>
+            <select name="suggested_after_tutorial_id" id="tutorial-after"><option value="">— none —</option></select></label>
+          <div class="form-row" id="tutorial-dates-row">
+            <label style="max-width:140px">Week <span class="hint">Groups the home view.</span><input type="number" name="week" min="1" max="60" placeholder="e.g. 3"></label>
+            <label style="max-width:260px">Due <span class="hint">Informational only; nothing is enforced.</span><input type="datetime-local" name="due_at"></label>
+          </div>
           <label>Pitch <span class="hint">Reading level and tone. Leave blank to use the course default from Course settings.</span><input type="text" name="pitch" maxlength="500" placeholder="e.g. Adult Basic Education reading level, short sentences, everyday examples — or: upper-year undergraduate"></label>
           <label><span data-kf="learning_goal">Learning goal</span> <span class="hint" data-kh="learning_goal">What the student should be able to explain by the end.</span><textarea name="learning_goal" required></textarea></label>
           <label><span data-kf="opening_question">Opening question</span> <span class="hint" data-kh="opening_question">The first thing the tutor asks. Open, concrete, answerable from the materials.</span><textarea name="opening_question" required></textarea></label>
@@ -391,15 +403,21 @@
           <h3 id="tutorial-report-title" tabindex="-1" style="margin:.25rem 0 .5rem;font-size:.95rem"></h3>
           <button class="back-btn" id="tutorial-report-back" type="button">← All tutorials</button>
         </div>
+        <div class="form-row" style="margin:.25rem 0 .5rem"><button class="link-btn" id="tutorial-report-csv" type="button" title="One row per run, no learner names"><span aria-hidden="true">⬇</span> Export CSV</button></div>
         <div class="tot-cards" id="tutorial-report-totals"></div>
         <h4 id="tutorial-debrief-heading" style="margin:1rem 0 .25rem;font-size:.9rem">Debrief brief for the live follow-up</h4>
         <div class="muted" id="tutorial-debrief-desc" style="margin-bottom:.4rem">Synthesises every completed run: what landed, where they stuck, misconceptions to address, discussion prompts, a one-minute re-teach. Takes 15–30 seconds.</div>
-        <div class="form-row"><button class="btn" id="tutorial-debrief-btn" type="button">Generate debrief brief</button></div>
+        <div class="form-row">
+          <button class="btn" id="tutorial-debrief-btn" type="button">Generate debrief brief</button>
+          <button class="btn btn-ghost" id="tutorial-deliver-btn" type="button" hidden title="Learners then see a short after-session note on their home view"><span aria-hidden="true">✓</span> Mark as delivered</button>
+          <span class="muted" id="tutorial-deliver-status" role="status"></span>
+        </div>
         <div id="tutorial-debrief-out" class="debrief-md"></div>
+        <div id="tutorial-note-out" hidden style="margin-top:.75rem;padding:.6rem .8rem;border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:0 6px 6px 0"></div>
         <h4 style="margin:1.25rem 0 .25rem;font-size:.9rem">Students</h4>
         <div class="scroll-x">
           <table class="tbl" id="tutorial-report-table">
-            <thead><tr><th scope="col">Student</th><th scope="col">Status</th><th scope="col">Mastery</th><th scope="col" class="num">Turns</th><th scope="col">Stuck on</th><th scope="col" class="num">Rating</th></tr></thead>
+            <thead><tr><th scope="col">Student</th><th scope="col">Status</th><th scope="col">Mastery</th><th scope="col" class="num">Turns</th><th scope="col">Stuck on</th><th scope="col" class="num">Rating</th><th scope="col" class="num">Prepared</th></tr></thead>
             <tbody id="tutorial-report-tbody"></tbody>
           </table>
         </div>
@@ -721,6 +739,7 @@
 
   // ═══════════ Home: tutorials + debriefs ═══════════
   let tutorialsCache = [];
+  let homeProgress = { groups: [], nudges: [], suggested_next: [], current_week: null };
   let hasProfile = false;
   let pendingTutorialId = null;
 
@@ -728,10 +747,13 @@
     try {
       const data = await api('/api/tutorials');
       tutorialsCache = data.tutorials || [];
+      homeProgress = data.progress || homeProgress;
       hasProfile = !!data.has_profile;
       renderTutorialsList();
+      renderNudges();
+      renderNotes(data.notes || []);
     } catch (e) {
-      $('#tutorials-list').innerHTML = `<li class="static"><span class="err">${escapeHtml(friendlyError(e))}</span></li>`;
+      $('#tutorials-list').innerHTML = `<ul class="items"><li class="static"><span class="err">${escapeHtml(friendlyError(e))}</span></li></ul>`;
     }
     try {
       const data = await api('/api/materials');
@@ -739,31 +761,69 @@
     } catch { /* optional */ }
   }
 
+  function tutorialItem(t) {
+    const li = document.createElement('li');
+    let chip = '';
+    if (t.my_status === 'completed') chip = `<span class="chip done">✓ done${t.my_mastery ? ' · ' + masteryLabel(t.kind, t.my_mastery).toLowerCase() : ''}</span>`;
+    else if (t.my_status === 'in_progress') chip = '<span class="chip live">in progress</span>';
+    else if (homeProgress.suggested_next.includes(t.id)) chip = '<span class="chip live">suggested next</span>';
+    const kindChip = t.kind && t.kind !== 'concept' ? `<span class="chip">${escapeHtml(kindUI(t.kind).label)}</span> ` : '';
+    const due = delivery.hasFixedDates && t.due_at && t.my_status !== 'completed' ? `<div>due ${new Date(t.due_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</div>` : '';
+    li.innerHTML =
+      `<button type="button" class="item-open"><span class="t-title">${kindChip}${escapeHtml(t.title)}</span><span class="t-goal">${escapeHtml(t.learning_goal)}</span></button>` +
+      `<div class="t-meta"><div>~${t.target_minutes} min</div>${due}<div style="margin-top:.2rem">${chip}</div><div style="margin-top:.2rem"><button class="link-btn paper-btn" type="button" title="A printable version to work through on paper, offline" aria-label="Paper version of ${escapeHtml(t.title)}"><span aria-hidden="true">📄</span> Paper</button></div></div>`;
+    li.querySelector('.item-open').addEventListener('click', () => openTutorial(t.id));
+    li.querySelector('.paper-btn').addEventListener('click', async (ev) => {
+      const b = ev.currentTarget; b.disabled = true; b.textContent = 'Preparing…';
+      try { await openFile(`/api/tutorials/${t.id}/print`); } catch (e) { alert(friendlyError(e)); }
+      finally { b.disabled = false; b.innerHTML = '<span aria-hidden="true">📄</span> Paper'; }
+    });
+    return li;
+  }
   function renderTutorialsList() {
-    const list = $('#tutorials-list');
-    list.innerHTML = '';
+    const box = $('#tutorials-list');
+    box.innerHTML = '';
     if (!tutorialsCache.length) {
-      list.innerHTML = `<li class="static"><span class="t-goal">${isTeacherRole
-        ? 'No published tutorials yet. Create one in Instructor view; students see it here once it\'s published.'
-        : 'No tutorials yet — your instructor hasn\'t published any.'}</span></li>`;
+      box.innerHTML = `<ul class="items"><li class="static"><span class="t-goal">${isTeacherRole
+        ? 'No published sessions yet. Create one in Instructor view; learners see it here once it\'s published.'
+        : 'No sessions yet — your instructor hasn\'t published any.'}</span></li></ul>`;
       return;
     }
-    for (const t of tutorialsCache) {
+    const byId = new Map(tutorialsCache.map((t) => [t.id, t]));
+    const groups = homeProgress.groups && homeProgress.groups.length ? homeProgress.groups : [{ key: 'all', label: '', tutorial_ids: tutorialsCache.map((t) => t.id) }];
+    for (const g of groups) {
+      const items = g.tutorial_ids.map((id) => byId.get(id)).filter(Boolean);
+      if (!items.length) continue;
+      if (g.label) { const h = document.createElement('h3'); h.style.cssText = 'font-size:.9rem;margin:.75rem 0 .35rem'; h.textContent = g.label; box.appendChild(h); }
+      const ul = document.createElement('ul'); ul.className = 'items';
+      for (const t of items) ul.appendChild(tutorialItem(t));
+      box.appendChild(ul);
+    }
+  }
+  function renderNudges() {
+    const box = $('#home-nudges'); const nudges = homeProgress.nudges || [];
+    if (!nudges.length) { box.hidden = true; box.innerHTML = ''; return; }
+    box.hidden = false;
+    box.innerHTML = '<h3 style="font-size:.9rem;margin:0 0 .3rem">Suggested for you</h3><ul class="items" style="margin-bottom:.5rem"></ul>';
+    const ul = box.querySelector('ul');
+    for (const n of nudges) {
       const li = document.createElement('li');
-      let chip = '';
-      if (t.my_status === 'completed') chip = `<span class="chip done">✓ done${t.my_mastery ? ' · ' + t.my_mastery.replace('_', ' ') : ''}</span>`;
-      else if (t.my_status === 'in_progress') chip = '<span class="chip live">in progress</span>';
-      const kindChip = t.kind && t.kind !== 'concept' ? `<span class="chip">${escapeHtml(kindUI(t.kind).label)}</span> ` : '';
-      li.innerHTML =
-        `<button type="button" class="item-open"><span class="t-title">${kindChip}${escapeHtml(t.title)}</span><span class="t-goal">${escapeHtml(t.learning_goal)}</span></button>` +
-        `<div class="t-meta"><div>~${t.target_minutes} min</div><div style="margin-top:.2rem">${chip}</div><div style="margin-top:.2rem"><button class="link-btn paper-btn" type="button" title="A printable version to work through on paper, offline" aria-label="Paper version of ${escapeHtml(t.title)}"><span aria-hidden="true">📄</span> Paper</button></div></div>`;
-      li.querySelector('.item-open').addEventListener('click', () => openTutorial(t.id));
-      li.querySelector('.paper-btn').addEventListener('click', async (ev) => {
-        const b = ev.currentTarget; b.disabled = true; b.textContent = 'Preparing…';
-        try { await openFile(`/api/tutorials/${t.id}/print`); } catch (e) { alert(friendlyError(e)); }
-        finally { b.disabled = false; b.innerHTML = '<span aria-hidden="true">📄</span> Paper'; }
-      });
-      list.appendChild(li);
+      li.innerHTML = `<button type="button" class="item-open"><span class="t-goal" style="color:var(--fg)">${escapeHtml(n.text)}</span></button>`;
+      li.querySelector('.item-open').addEventListener('click', () => openTutorial(n.tutorial_id));
+      ul.appendChild(li);
+    }
+  }
+  function renderNotes(notes) {
+    const card = $('#notes-card'); const list = $('#notes-list');
+    if (!delivery.hasCohort || !notes.length) { card.hidden = true; list.innerHTML = ''; return; }
+    card.hidden = false; list.innerHTML = '';
+    $('#notes-blurb').textContent = delivery.hasLiveSessions
+      ? 'A short recap after each debrief in class: what the group found hard, and one thing to review.'
+      : 'Short notes after sessions many of you have completed: what the group found hard, and one thing to review.';
+    for (const n of notes) {
+      const div = document.createElement('div'); div.style.cssText = 'padding:.6rem .8rem;border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:0 6px 6px 0;margin-bottom:.5rem';
+      div.innerHTML = `<div class="muted" style="margin-bottom:.2rem">${escapeHtml(kindUI(n.kind).label)}: ${escapeHtml(n.title)} · ${new Date(n.delivered_at).toLocaleDateString()}</div><div class="md"></div>`;
+      setMd(div.querySelector('.md'), n.note); list.appendChild(div);
     }
   }
 
@@ -1081,7 +1141,34 @@
       sendBtn.disabled = true;
       try {
         await api(`/api/tutorials/session/${tut.sessionId}/nps`, { body: { score: picked, comment: wrap.querySelector('textarea').value.trim() } });
-        tut.npsDone = true; wrap.innerHTML = '<div style="color:var(--good)">Thanks — your feedback is recorded.</div>';
+        tut.npsDone = true; wrap.innerHTML = '<div style="color:var(--good)" role="status">Thanks — your feedback is recorded.</div>';
+        wrap.appendChild(buildPrepStrip());
+      } catch (e) { status.textContent = friendlyError(e); sendBtn.disabled = false; }
+    });
+    return wrap;
+  }
+  // Engagement type 5: the learner tells the instructor how well the material prepared them.
+  function buildPrepStrip() {
+    const wrap = document.createElement('div'); wrap.style.marginTop = '.75rem';
+    wrap.innerHTML =
+      '<div id="prep-q"><strong>One more, optional: how well did the course material prepare you for this?</strong> <span class="muted">1 = not at all, 5 = completely</span></div>' +
+      '<div class="scale" role="group" aria-labelledby="prep-q" style="display:flex;gap:.3rem;flex-wrap:wrap;margin:.4rem 0"></div>' +
+      '<textarea aria-label="What was missing or what helped (optional)" placeholder="What was missing, or what helped? (optional)" style="width:100%;min-height:48px;padding:.5rem .7rem;border:1px solid var(--border);border-radius:6px;font:inherit;background:var(--card);color:var(--fg)"></textarea>' +
+      '<div class="form-row" style="margin-top:.4rem"><button class="btn btn-ghost" type="button">Send</button><span class="muted" role="status"></span></div>';
+    const scale = wrap.querySelector('.scale'); let picked = null;
+    for (let i = 1; i <= 5; i++) {
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = String(i); b.setAttribute('aria-pressed', 'false'); b.setAttribute('aria-label', `${i} out of 5`);
+      b.style.cssText = 'width:2.6rem;height:2.6rem;border-radius:6px;border:1px solid var(--border);background:var(--card);color:var(--fg);font:inherit;cursor:pointer';
+      b.addEventListener('click', () => { picked = i; scale.querySelectorAll('button').forEach((x) => { const on = x === b; x.setAttribute('aria-pressed', on ? 'true' : 'false'); x.style.background = on ? 'var(--accent)' : 'var(--card)'; x.style.color = on ? 'var(--accent-fg)' : 'var(--fg)'; }); });
+      scale.appendChild(b);
+    }
+    const sendBtn = wrap.querySelector('.form-row button'); const status = wrap.querySelector('.form-row span');
+    sendBtn.addEventListener('click', async () => {
+      if (picked === null) { status.textContent = 'Pick a number first.'; return; }
+      sendBtn.disabled = true;
+      try {
+        await api(`/api/tutorials/session/${tut.sessionId}/prep`, { body: { score: picked, comment: wrap.querySelector('textarea').value.trim() } });
+        wrap.innerHTML = '<div style="color:var(--good)" role="status">Thanks — that goes to your instructor with the others, without your name.</div>';
       } catch (e) { status.textContent = friendlyError(e); sendBtn.disabled = false; }
     });
     return wrap;
@@ -1492,12 +1579,23 @@
     }
   }
   function selectedRecallIds() { return $$('#tutorial-form-recall input:checked').map((i) => parseInt(i.value, 10)); }
+  function renderAfterOptions(selected, selfId) {
+    const sel = $('#tutorial-after'); sel.innerHTML = '<option value="">— none —</option>';
+    for (const x of tm.list.filter((x) => x.id !== selfId && x.status !== 'archived')) {
+      const o = document.createElement('option'); o.value = String(x.id); o.textContent = `${kindUI(x.kind).label}: ${x.title}`; sel.appendChild(o);
+    }
+    sel.value = selected ? String(selected) : '';
+  }
+  function toLocalInput(iso) { const d = new Date(iso); if (!Number.isFinite(d.getTime())) return ''; const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; }
   $('#tutorial-kind').addEventListener('change', () => applyKindUI($('#tutorial-kind').value));
   function fillTutorialForm(t) {
     const f = tutorialForm.elements;
     f.kind.value = t.kind || 'concept'; applyKindUI(f.kind.value);
     f.practice_prompts.value = t.practice_prompts || '';
     renderRecallChecks(t.recall_tutorial_ids || [], t.id || null);
+    renderAfterOptions(t.suggested_after_tutorial_id || null, t.id || null);
+    f.week.value = t.week || ''; f.due_at.value = t.due_at ? toLocalInput(t.due_at) : '';
+    $('#tutorial-dates-row').hidden = !delivery.hasFixedDates;
     f.title.value = t.title || ''; f.target_minutes.value = t.target_minutes || 15;
     f.learning_goal.value = t.learning_goal || ''; f.opening_question.value = t.opening_question || '';
     f.ta_brief.value = t.ta_brief || ''; f.misconceptions.value = t.misconceptions || ''; f.success_criteria.value = t.success_criteria || '';
@@ -1512,6 +1610,9 @@
       learning_goal: f.learning_goal.value.trim(), opening_question: f.opening_question.value.trim(),
       ta_brief: f.ta_brief.value.trim(), misconceptions: f.misconceptions.value.trim(), success_criteria: f.success_criteria.value.trim(),
       pitch: f.pitch.value.trim(), kind: f.kind.value, practice_prompts: f.practice_prompts.value.trim(), recall_tutorial_ids: selectedRecallIds(),
+      suggested_after_tutorial_id: f.suggested_after_tutorial_id.value ? parseInt(f.suggested_after_tutorial_id.value, 10) : null,
+      week: delivery.hasFixedDates && f.week.value ? parseInt(f.week.value, 10) : null,
+      due_at: delivery.hasFixedDates && f.due_at.value ? new Date(f.due_at.value).toISOString() : null,
       material_ids: selectedMaterialIds(), gradebook: f.gradebook.checked, status: f.status.value,
     };
   }
@@ -1526,7 +1627,7 @@
   async function saveTutorial(payload, opts = {}) {
     const id = payload.id || (tm.editing && tm.editing.id);
     const body = {};
-    for (const k of ['title', 'kind', 'target_minutes', 'learning_goal', 'opening_question', 'ta_brief', 'misconceptions', 'success_criteria', 'pitch', 'practice_prompts', 'recall_tutorial_ids', 'material_ids', 'gradebook', 'status']) body[k] = payload[k];
+    for (const k of ['title', 'kind', 'target_minutes', 'learning_goal', 'opening_question', 'ta_brief', 'misconceptions', 'success_criteria', 'pitch', 'practice_prompts', 'recall_tutorial_ids', 'suggested_after_tutorial_id', 'week', 'due_at', 'material_ids', 'gradebook', 'status']) body[k] = payload[k] === undefined ? null : payload[k];
     const data = await api(id ? `/api/teacher/tutorials/${id}` : '/api/teacher/tutorials', { method: id ? 'PUT' : 'POST', body });
     if (!opts.quiet) tm.editing = data.tutorial;
     await loadTeacherTutorials();
@@ -1594,10 +1695,12 @@
       ['Avg student turns', tot.avg_turns === null ? '—' : tot.avg_turns],
       [`${masteryLabel(r.tutorial.kind, 'solid')} / ${masteryLabel(r.tutorial.kind, 'developing')} / ${masteryLabel(r.tutorial.kind, 'needs_work')}`, `${tot.mastery.solid} / ${tot.mastery.developing} / ${tot.mastery.needs_work}`],
       ['NPS', tot.nps.score === null ? '—' : (tot.nps.score > 0 ? '+' : '') + tot.nps.score + ` <span class="lbl">(${tot.nps.responses} responses)</span>`],
+      ['Prepared by the material (1–5)', tot.prep && tot.prep.average !== null ? tot.prep.average + ` <span class="lbl">(${tot.prep.responses} responses)</span>` : '—'],
     ];
+    renderStoredDebrief(r);
     $('#tutorial-report-totals').innerHTML = cards.map(([l, v]) => `<div class="card-tot"><div class="num">${v}</div><div class="lbl">${l}</div></div>`).join('');
     const tbody = $('#tutorial-report-tbody'); tbody.innerHTML = '';
-    if (!r.rows.length) { tbody.innerHTML = '<tr><td colspan="6" class="muted">No one has started this yet.</td></tr>'; return; }
+    if (!r.rows.length) { tbody.innerHTML = '<tr><td colspan="7" class="muted">No one has started this yet.</td></tr>'; return; }
     for (const row of r.rows) {
       const s = row.summary; const tr = document.createElement('tr');
       tr.innerHTML =
@@ -1608,19 +1711,49 @@
         `<td>${s ? `<span class="chip ${s.mastery}">${masteryLabel(r.tutorial.kind, s.mastery)}</span>` : '—'}</td>` +
         `<td class="num">${row.turns}</td>` +
         `<td>${s && s.sticking_points.length ? escapeHtml(s.sticking_points.join('; ')) : '<span class="muted">—</span>'}</td>` +
-        `<td class="num">${row.nps_score === null ? '—' : row.nps_score + '/10'}${row.nps_comment ? ` <span title="${escapeHtml(row.nps_comment)}">💬</span>` : ''}</td>`;
+        `<td class="num">${row.nps_score === null ? '—' : row.nps_score + '/10'}${row.nps_comment ? ` <span title="${escapeHtml(row.nps_comment)}" aria-label="Comment: ${escapeHtml(row.nps_comment)}">💬</span>` : ''}</td>` +
+        `<td class="num">${row.prep_score === null || row.prep_score === undefined ? '—' : row.prep_score + '/5'}${row.prep_comment ? ` <span title="${escapeHtml(row.prep_comment)}" aria-label="Comment: ${escapeHtml(row.prep_comment)}">💬</span>` : ''}</td>`;
       tbody.appendChild(tr);
+    }
+  }
+  function renderStoredDebrief(r) {
+    const out = $('#tutorial-debrief-out'); const noteOut = $('#tutorial-note-out'); const deliver = $('#tutorial-deliver-btn'); const st = $('#tutorial-deliver-status');
+    const d = r.stored_debrief; out.innerHTML = ''; noteOut.hidden = true; noteOut.innerHTML = ''; st.textContent = '';
+    deliver.hidden = !(r.can_deliver && d);
+    if (!d) return;
+    const block = document.createElement('div'); block.className = 'debrief-output'; setMd(block, d.markdown); out.appendChild(block);
+    const when = document.createElement('div'); when.className = 'muted'; when.textContent = 'Written ' + fmtTime(d.generated_at); out.prepend(when);
+    if (d.delivered_at) {
+      deliver.innerHTML = '<span aria-hidden="true">↶</span> Undo delivered';
+      st.textContent = 'Delivered ' + fmtTime(d.delivered_at) + '. Learners see the note below on their home view.';
+      if (d.after_session_note) { noteOut.hidden = false; noteOut.innerHTML = '<div class="muted" style="margin-bottom:.2rem">After-session note learners see</div><div class="md"></div>'; setMd(noteOut.querySelector('.md'), d.after_session_note); }
+    } else {
+      deliver.innerHTML = '<span aria-hidden="true">✓</span> ' + (delivery.hasLiveSessions ? 'Mark as delivered in class' : 'Post to the cohort');
+      st.textContent = delivery.hasLiveSessions ? 'After the live debrief, mark it delivered: learners get a short recap note.' : 'Posting writes a short after-session note that learners see on their home view.';
     }
   }
   $('#tutorial-debrief-btn').addEventListener('click', async () => {
     const btn = $('#tutorial-debrief-btn'); const out = $('#tutorial-debrief-out');
     btn.disabled = true; const orig = btn.textContent; btn.textContent = 'Writing…';
-    out.innerHTML = '<div class="empty-state">Reading the students\' tutorial summaries…</div>';
+    out.innerHTML = '<div class="empty-state">Reading the learners\' session summaries…</div>';
     try {
-      const data = await api(`/api/teacher/tutorials/${tm.reportId}/debrief`, { method: 'POST' });
-      out.innerHTML = ''; const block = document.createElement('div'); block.className = 'debrief-output'; setMd(block, data.debrief); out.appendChild(block);
+      await api(`/api/teacher/tutorials/${tm.reportId}/debrief`, { method: 'POST' });
+      renderStoredDebrief(await api(`/api/teacher/tutorials/${tm.reportId}/report`));
     } catch (e) { out.innerHTML = `<div class="err">${escapeHtml(friendlyError(e))}</div>`; }
     finally { btn.disabled = false; btn.textContent = orig; }
+  });
+  $('#tutorial-deliver-btn').addEventListener('click', async () => {
+    const btn = $('#tutorial-deliver-btn'); const st = $('#tutorial-deliver-status');
+    const r = await api(`/api/teacher/tutorials/${tm.reportId}/report`).catch(() => null);
+    const delivered = r && r.stored_debrief && r.stored_debrief.delivered_at;
+    btn.disabled = true; st.textContent = delivered ? 'Undoing…' : 'Writing the note for learners…';
+    try {
+      await api(`/api/teacher/tutorials/${tm.reportId}/debrief/deliver`, { method: delivered ? 'DELETE' : 'POST' });
+      renderStoredDebrief(await api(`/api/teacher/tutorials/${tm.reportId}/report`));
+    } catch (e) { st.textContent = friendlyError(e); } finally { btn.disabled = false; }
+  });
+  $('#tutorial-report-csv').addEventListener('click', async () => {
+    try { await saveFile(`/api/teacher/tutorials/${tm.reportId}/report.csv`, 'report.csv'); } catch (e) { $('#tutorial-report-err').textContent = friendlyError(e); }
   });
 
   // ─── Launch ───

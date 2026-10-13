@@ -9,7 +9,7 @@
     "dev": "tsx watch src/server/index.ts",
     "build": "rm -rf dist && tsc -p tsconfig.build.json && cp -r src/server/migrations dist/server/migrations && cp -r src/web dist/web",
     "start": "node dist/server/migrate.js && node dist/server/index.js",
-    "test": "tsx --test \"src/**/*.test.ts\"",
+    "test": "LTI_TOOL_URL=http://localhost:3000 LTI_COOKIE_SECRET=test DATABASE_URL=postgres://localhost:5432/unused tsx --test \"src/**/*.test.ts\"",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

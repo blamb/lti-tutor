@@ -78,6 +78,11 @@ export interface Tutorial {
   practice_prompts: string;
   /** recall: earlier tutorials in this course that this one revisits. */
   recall_tutorial_ids: number[];
+  /** Ordering hint for the learner's home view; never enforced. */
+  suggested_after_tutorial_id: number | null;
+  /** Informational, where the course has fixed dates. */
+  week: number | null;
+  due_at: string | null;
   material_ids: number[];
   target_minutes: number;
   gradebook: boolean;
@@ -187,6 +192,9 @@ export interface TutorialSession {
   summary: TutorialSummary | null;
   nps_score: number | null;
   nps_comment: string | null;
+  /** "How well did the course material prepare you for this?" 1–5. */
+  prep_score: number | null;
+  prep_comment: string | null;
   grade_posted_at: string | null;
   grade_error: string | null;
 }
@@ -226,6 +234,9 @@ export const TutorialInput = z.object({
   kind: z.enum(TUTORIAL_KINDS).default('concept'),
   practice_prompts: z.string().trim().max(4000).default(''),
   recall_tutorial_ids: z.array(z.number().int().positive()).max(20).default([]),
+  suggested_after_tutorial_id: z.number().int().positive().nullable().default(null),
+  week: z.number().int().min(1).max(60).nullable().default(null),
+  due_at: z.string().nullable().default(null).refine((v) => v === null || Number.isFinite(Date.parse(v)), 'due_at must be a date'),
   material_ids: z.array(z.number().int().positive()).max(20).default([]),
   target_minutes: z.number().int().min(5).max(60).default(15),
   gradebook: z.boolean().default(false),
@@ -348,20 +359,26 @@ async function validRecallIds(ids: number[], ctx: CourseCtx, selfId: number | nu
   return ids.filter((id) => ok.has(id) && id !== selfId);
 }
 
+async function validSuggestedAfter(id: number | null, ctx: CourseCtx, selfId: number | null): Promise<number | null> {
+  if (id === null) return null;
+  return (await validRecallIds([id], ctx, selfId))[0] ?? null;
+}
+
 export async function createTutorial(ctx: CourseCtx, input: TutorialInput, createdBy: number): Promise<Tutorial> {
   const materialIds = await validMaterialIds(input.material_ids, ctx);
   const recallIds = await validRecallIds(input.recall_tutorial_ids, ctx, null);
+  const after = await validSuggestedAfter(input.suggested_after_tutorial_id, ctx, null);
   const rows = await query<Tutorial>(
     `insert into tutorial
        (lti_iss, lti_context_id, title, learning_goal, opening_question, ta_brief, misconceptions,
         success_criteria, pitch, kind, practice_prompts, recall_tutorial_ids, material_ids,
-        target_minutes, gradebook, status, created_by)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::bigint[],$13::bigint[],$14,$15,$16,$17) returning *`,
+        target_minutes, gradebook, status, created_by, suggested_after_tutorial_id, week, due_at)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::bigint[],$13::bigint[],$14,$15,$16,$17,$18,$19,$20::timestamptz) returning *`,
     [
       ctx.iss, ctx.contextId, input.title, input.learning_goal, input.opening_question,
       input.ta_brief, input.misconceptions, input.success_criteria, input.pitch,
       input.kind, input.practice_prompts, recallIds, materialIds,
-      input.target_minutes, input.gradebook, input.status, createdBy,
+      input.target_minutes, input.gradebook, input.status, createdBy, after, input.week, input.due_at,
     ]
   );
   return rows[0]!;
@@ -370,17 +387,19 @@ export async function createTutorial(ctx: CourseCtx, input: TutorialInput, creat
 export async function updateTutorial(id: number, ctx: CourseCtx, input: TutorialInput): Promise<Tutorial | null> {
   const materialIds = await validMaterialIds(input.material_ids, ctx);
   const recallIds = await validRecallIds(input.recall_tutorial_ids, ctx, id);
+  const after = await validSuggestedAfter(input.suggested_after_tutorial_id, ctx, id);
   const rows = await query<Tutorial>(
     `update tutorial set
        title = $4, learning_goal = $5, opening_question = $6, ta_brief = $7, misconceptions = $8,
        success_criteria = $9, pitch = $10, kind = $11, practice_prompts = $12, recall_tutorial_ids = $13::bigint[],
-       material_ids = $14::bigint[], target_minutes = $15, gradebook = $16, status = $17, updated_at = now()
+       material_ids = $14::bigint[], target_minutes = $15, gradebook = $16, status = $17,
+       suggested_after_tutorial_id = $18, week = $19, due_at = $20::timestamptz, updated_at = now()
      where id = $1 and lti_iss = $2 and lti_context_id = $3 returning *`,
     [
       id, ctx.iss, ctx.contextId, input.title, input.learning_goal, input.opening_question,
       input.ta_brief, input.misconceptions, input.success_criteria, input.pitch,
       input.kind, input.practice_prompts, recallIds, materialIds,
-      input.target_minutes, input.gradebook, input.status,
+      input.target_minutes, input.gradebook, input.status, after, input.week, input.due_at,
     ]
   );
   return rows[0] ?? null;
@@ -745,6 +764,13 @@ export async function recordNps(tutorialSessionId: number, score: number, commen
   ]);
 }
 
+/** Engagement type 5: the learner tells the instructor how well the material prepared them. */
+export async function recordPrep(tutorialSessionId: number, score: number, comment: string): Promise<void> {
+  await query(`update tutorial_session set prep_score = $2, prep_comment = $3 where id = $1`, [
+    tutorialSessionId, score, comment || null,
+  ]);
+}
+
 export async function recordGradeResult(tutorialSessionId: number, result: { posted: boolean; error?: string }): Promise<void> {
   await query(
     `update tutorial_session
@@ -767,6 +793,8 @@ export interface TutorialReportRow {
   summary: TutorialSummary | null;
   nps_score: number | null;
   nps_comment: string | null;
+  prep_score: number | null;
+  prep_comment: string | null;
   grade_posted_at: string | null;
   grade_error: string | null;
 }
@@ -780,6 +808,8 @@ export interface TutorialReport {
     avg_turns: number | null;
     mastery: { solid: number; developing: number; needs_work: number };
     nps: { responses: number; score: number | null };
+    /** Preparedness 1–5, averaged. */
+    prep: { responses: number; average: number | null };
   };
 }
 
@@ -788,7 +818,7 @@ export async function getTutorialReport(tutorial: Tutorial): Promise<TutorialRep
   const rows = await query<TutorialReportRow>(
     `select ts.id as session_id, ts.student_id, st.display_name, ts.status,
             ts.started_at::text, ts.completed_at::text, ts.summary,
-            ts.nps_score, ts.nps_comment, ts.grade_posted_at::text, ts.grade_error,
+            ts.nps_score, ts.nps_comment, ts.prep_score, ts.prep_comment, ts.grade_posted_at::text, ts.grade_error,
             (select count(*)::int from tutor_turn tt
               where tt.session_id = ts.session_id and tt.role = 'user' and tt.content not like $2) as turns
      from (
@@ -807,6 +837,8 @@ export async function getTutorialReport(tutorial: Tutorial): Promise<TutorialRep
   const detractors = npsRows.filter((r) => (r.nps_score ?? 0) <= 6).length;
   const nps = npsRows.length ? Math.round(((promoters - detractors) / npsRows.length) * 100) : null;
   const avgTurns = rows.length ? Math.round((rows.reduce((s, r) => s + r.turns, 0) / rows.length) * 10) / 10 : null;
+  const prepRows = rows.filter((r) => r.prep_score !== null);
+  const prepAvg = prepRows.length ? Math.round((prepRows.reduce((s, r) => s + (r.prep_score ?? 0), 0) / prepRows.length) * 10) / 10 : null;
   return {
     tutorial,
     rows,
@@ -816,8 +848,28 @@ export async function getTutorialReport(tutorial: Tutorial): Promise<TutorialRep
       avg_turns: avgTurns,
       mastery,
       nps: { responses: npsRows.length, score: nps },
+      prep: { responses: prepRows.length, average: prepAvg },
     },
   };
+}
+
+/** One row per run, no learner names. */
+export function reportCsv(report: TutorialReport): string {
+  const q = (v: unknown): string => {
+    const s = v === null || v === undefined ? '' : Array.isArray(v) ? v.join('; ') : String(v);
+    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const header = ['run', 'kind', 'status', 'started_at', 'completed_at', 'turns', 'mastery', 'understood', 'sticking_points', 'next_step', 'nps_score', 'nps_comment', 'preparedness_1_to_5', 'preparedness_comment', 'grade_posted'];
+  const lines = [header.join(',')];
+  report.rows.forEach((r, i) => {
+    const s = r.summary;
+    lines.push([
+      i + 1, report.tutorial.kind, r.status, r.started_at, r.completed_at ?? '', r.turns,
+      s?.mastery ?? '', s?.understood ?? [], s?.sticking_points ?? [], s?.next_step ?? '',
+      r.nps_score ?? '', r.nps_comment ?? '', r.prep_score ?? '', r.prep_comment ?? '', r.grade_posted_at ? 'yes' : 'no',
+    ].map(q).join(','));
+  });
+  return lines.join('\r\n') + '\r\n';
 }
 
 /**
@@ -942,7 +994,92 @@ export async function generateGroupDebrief(
     messages: [{ role: 'user', content: `${content}\n\n${ask}` }],
   });
   void recordApiCall({ ...attribution, endpoint: `tutorial.${kind}`, model: GEN_MODEL, usage: res.usage, durationMs: Date.now() - t0 });
-  return { kind, markdown: textOf(res) };
+  const markdown = textOf(res);
+  await query(
+    `insert into tutorial_debrief (tutorial_id, kind, markdown) values ($1, $2, $3)
+     on conflict (tutorial_id) do update set kind = excluded.kind, markdown = excluded.markdown, generated_at = now(),
+       delivered_at = null, after_session_note = null, note_generated_at = null`,
+    [report.tutorial.id, kind, markdown]
+  );
+  return { kind, markdown };
+}
+
+export interface StoredDebrief {
+  tutorial_id: number;
+  kind: DebriefKind;
+  markdown: string;
+  generated_at: string;
+  delivered_at: string | null;
+  after_session_note: string | null;
+  note_generated_at: string | null;
+}
+
+export async function getStoredDebrief(tutorialId: number): Promise<StoredDebrief | null> {
+  const rows = await query<StoredDebrief>(
+    `select tutorial_id, kind, markdown, generated_at::text, delivered_at::text, after_session_note, note_generated_at::text
+     from tutorial_debrief where tutorial_id = $1`,
+    [tutorialId]
+  );
+  return rows[0] ?? null;
+}
+
+const AFTER_SESSION_NOTE_SYSTEM = `You write a short note to learners from their instructor, after a one-on-one AI session that many of them completed. You are given the instructor's synthesis (a debrief brief or a cohort note). Write at most 120 words, in the instructor's voice, addressed to the learners, in plain language, with exactly two short sections:
+**What the group found hard** — one or two sentences naming the ideas, no names.
+**One thing to review** — one concrete thing, and where to look if the synthesis says.
+No greeting, no sign-off, no headings other than the two bold labels, no markdown lists.`;
+
+/**
+ * Where there is a cohort, the instructor marks the synthesis as delivered
+ * and learners get a short after-session note on their home view. In a
+ * paced course this note is the only way the debrief reaches them, so it
+ * must stand alone; in a scheduled course it recaps what was said live.
+ */
+export async function deliverDebrief(tutorial: Tutorial, ctx: CourseCtx, attribution: Attribution): Promise<StoredDebrief> {
+  const stored = await getStoredDebrief(tutorial.id);
+  if (!stored) throw new Error('Generate the debrief first.');
+  const framing = ctx.delivery.hasLiveSessions
+    ? 'The instructor has just delivered this debrief live, in class. The note recaps what was said for anyone who missed it or wants to remember it.'
+    : 'There is no live session: this note is the only way the debrief reaches learners, so it must read on its own.';
+  const client = getAnthropic();
+  const t0 = Date.now();
+  const res = await client.messages.create({
+    model: GEN_MODEL,
+    max_tokens: 400,
+    system: `${AFTER_SESSION_NOTE_SYSTEM}\n\n${framing}`,
+    messages: [{ role: 'user', content: `# SESSION\n${KINDS[tutorial.kind].label}: ${tutorial.title}\n\n# INSTRUCTOR'S SYNTHESIS\n${stored.markdown}\n\nWrite the note now.` }],
+  });
+  void recordApiCall({ ...attribution, endpoint: 'tutorial.after_session_note', model: GEN_MODEL, usage: res.usage, durationMs: Date.now() - t0 });
+  const rows = await query<StoredDebrief>(
+    `update tutorial_debrief set delivered_at = now(), after_session_note = $2, note_generated_at = now()
+     where tutorial_id = $1
+     returning tutorial_id, kind, markdown, generated_at::text, delivered_at::text, after_session_note, note_generated_at::text`,
+    [tutorial.id, textOf(res)]
+  );
+  return rows[0]!;
+}
+
+export async function undeliverDebrief(tutorialId: number): Promise<void> {
+  await query(`update tutorial_debrief set delivered_at = null where tutorial_id = $1`, [tutorialId]);
+}
+
+export interface DeliveredNote {
+  tutorial_id: number;
+  title: string;
+  kind: TutorialKind;
+  note: string;
+  delivered_at: string;
+}
+
+/** Notes learners see on their home view (newest first). */
+export async function listDeliveredNotes(ctx: CourseCtx, limit = 5): Promise<DeliveredNote[]> {
+  return query<DeliveredNote>(
+    `select d.tutorial_id, t.title, t.kind, d.after_session_note as note, d.delivered_at::text
+     from tutorial_debrief d join tutorial t on t.id = d.tutorial_id
+     where t.lti_iss = $1 and t.lti_context_id = $2 and t.status = 'published'
+       and d.delivered_at is not null and d.after_session_note is not null
+     order by d.delivered_at desc limit $3`,
+    [ctx.iss, ctx.contextId, limit]
+  );
 }
 
 // ─── Instructor: draft a brief with AI ──────────────────────────────────────
