@@ -86,6 +86,7 @@
   .mic-btn { padding: .45rem 1rem; border-radius: 999px; border: 1px solid var(--accent); background: #fff; color: var(--accent); font: inherit; font-weight: 500; cursor: pointer; }
   .mic-btn.listening { background: var(--bad); border-color: var(--bad); color: #fff; animation: pulse 1.2s infinite; }
   .mic-btn:disabled { opacity: .5; cursor: not-allowed; }
+  .mic-btn.opt-in { border-color: var(--border); color: var(--muted); }
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(176,48,48,.45); } 70% { box-shadow: 0 0 0 10px rgba(176,48,48,0); } 100% { box-shadow: 0 0 0 0 rgba(176,48,48,0); } }
   .tut-summary { background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.25rem; margin-top: .75rem; }
   .tut-summary h3 { margin: 0 0 .5rem; font-size: 1rem; }
@@ -113,7 +114,7 @@
   .teacher-tabs .ttab.active { background: var(--card); border-color: var(--border); color: var(--fg); margin-bottom: -1px; padding-bottom: calc(.4rem + 1px); }
 </style>
 </head>
-<body data-role="{{ROLE}}" data-return-url="{{RETURN_URL}}" data-tutorial-id="{{TUTORIAL_ID}}">
+<body data-role="{{ROLE}}" data-return-url="{{RETURN_URL}}" data-tutorial-id="{{TUTORIAL_ID}}" data-delivery="{{DELIVERY}}">
 <div class="wrap">
   <header>
     <div>
@@ -132,15 +133,15 @@
   <div class="view active" id="view-home">
     <div class="card">
       <h2>Tutorials</h2>
-      <div class="muted" style="margin:-.25rem 0 .6rem">
+      <div class="muted" id="home-tutorials-blurb" style="margin:-.25rem 0 .6rem">
         A short one-on-one conversation your instructor designed to follow a lecture. Talk or type.
         You get a summary at the end; your instructor sees where the class got stuck.
       </div>
       <ul class="items" id="tutorials-list"><li class="static"><span class="t-goal">Loading…</span></li></ul>
     </div>
     <div class="card" id="debriefs-card" style="display:none">
-      <h2>Lecture debriefs</h2>
-      <div class="muted" style="margin:-.25rem 0 .6rem">
+      <h2 id="debriefs-heading">Lecture debriefs</h2>
+      <div class="muted" id="debriefs-blurb" style="margin:-.25rem 0 .6rem">
         A short written recap of a lecture or reading — the big ideas, plus one section that connects them to <em>your</em> goals, and three questions to test yourself.
       </div>
       <ul class="items" id="debriefs-list"></ul>
@@ -197,6 +198,7 @@
         <label style="display:flex;align-items:center;gap:.35rem;cursor:pointer"><input type="checkbox" id="tutorial-tts"> Read replies aloud</label>
         <span id="tutorial-voice-hint"></span>
       </div>
+      <div class="muted" id="tutorial-mode-hint" hidden></div>
       <div class="err" id="tutorial-err"></div>
     </div>
     <div class="tut-panel" data-state="done" hidden><div id="tutorial-summary"></div></div>
@@ -220,6 +222,7 @@
     <div class="teacher-tabs">
       <div class="ttab active" data-ttab="tutorials">Tutorials</div>
       <div class="ttab" data-ttab="materials">Course materials</div>
+      <div class="ttab" data-ttab="course">Course settings</div>
     </div>
 
     <div class="tpane" data-tpane="tutorials">
@@ -261,6 +264,7 @@
           <label>Course materials to ground it in <span class="hint">Lecture notes, transcripts or readings you've added under "Course materials". The tutor and the AI draft only see what's ticked.</span>
             <div class="check-list" id="tutorial-form-materials"></div></label>
           <label style="max-width:220px">Target length (minutes) <input type="number" name="target_minutes" min="5" max="60" value="15"></label>
+          <label>Pitch <span class="hint">Reading level and tone. Leave blank to use the course default from Course settings.</span><input type="text" name="pitch" maxlength="500" placeholder="e.g. Adult Basic Education reading level, short sentences, everyday examples — or: upper-year undergraduate"></label>
           <label>Learning goal <span class="hint">What the student should be able to explain by the end.</span><textarea name="learning_goal" required></textarea></label>
           <label>Opening question <span class="hint">The first thing the tutor asks. Open, concrete, answerable from the materials.</span><textarea name="opening_question" required></textarea></label>
           <label>How to run it — your notes to the TA <span class="hint">How to open, the probes to work through in order and what a good answer contains, what to do when they're stuck, when to move to the teach-back.</span><textarea name="ta_brief" class="tall"></textarea></label>
@@ -285,8 +289,8 @@
           <button class="back-btn" id="tutorial-report-back" type="button">← All tutorials</button>
         </div>
         <div class="tot-cards" id="tutorial-report-totals"></div>
-        <h4 style="margin:1rem 0 .25rem;font-size:.9rem">Debrief brief for the live follow-up</h4>
-        <div class="muted" style="margin-bottom:.4rem">Synthesises every completed run: what landed, where they stuck, misconceptions to address, discussion prompts, a one-minute re-teach. Takes 15–30 seconds.</div>
+        <h4 id="tutorial-debrief-heading" style="margin:1rem 0 .25rem;font-size:.9rem">Debrief brief for the live follow-up</h4>
+        <div class="muted" id="tutorial-debrief-desc" style="margin-bottom:.4rem">Synthesises every completed run: what landed, where they stuck, misconceptions to address, discussion prompts, a one-minute re-teach. Takes 15–30 seconds.</div>
         <div class="form-row"><button class="btn" id="tutorial-debrief-btn" type="button">Generate debrief brief</button></div>
         <div id="tutorial-debrief-out" class="debrief-md"></div>
         <h4 style="margin:1.25rem 0 .25rem;font-size:.9rem">Students</h4>
@@ -327,6 +331,36 @@
         </form>
       </div>
     </div>
+
+    <div class="tpane" data-tpane="course" hidden>
+      <div data-pane="list">
+        <p class="muted" style="margin:.25rem 0 .75rem">
+          Tell the tutor how this course is delivered. The tool follows TRU's
+          <a href="https://www.tru.ca/current/enrolment-services/course-registration/flex.html" target="_blank" rel="noopener">TRUFlex</a> modes:
+          scheduled courses (Flex 1–8) keep the lecture → tutorial → group debrief sequence; paced online courses (Flex 10) get a cohort note
+          instead of a live debrief; self-paced courses (Flex 9) get study debriefs, a course revision brief, and nothing that assumes
+          classmates, dates or live sessions.
+        </p>
+        <form class="form-grid" id="course-form" autocomplete="off" style="max-width:640px">
+          <label>Delivery mode (TRUFlex)
+            <select name="truflex" id="course-truflex"></select>
+            <span class="hint" id="course-truflex-desc"></span>
+          </label>
+          <label>Course level <span class="hint">Sets the reading level the tutor and the AI draft aim for.</span>
+            <select name="course_level"><option value="">Not set</option><option value="abe">Adult Basic Education (high-school completion)</option><option value="undergraduate">Undergraduate</option><option value="graduate">Graduate / MBA</option></select>
+          </label>
+          <label>Default pitch <span class="hint">Reading level and tone for tutorials that don't set their own, e.g. "Adult Basic Education reading level, short sentences, everyday examples" or "upper-year undergraduate".</span>
+            <input type="text" name="pitch_default" maxlength="500"></label>
+          <label>AI disclosure shown to learners <span class="hint">Leave blank for the tool's default text (what the tutor is, what it stores, that voice may use the browser vendor's speech service, that typing always works).</span>
+            <textarea name="ai_disclosure" maxlength="4000"></textarea></label>
+          <div class="form-row">
+            <button class="btn" type="submit" id="course-save">Save</button>
+            <span id="course-status" class="muted"></span>
+          </div>
+          <div class="err" id="course-err"></div>
+        </form>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -340,6 +374,34 @@
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
   const isTeacherRole = document.body.dataset.role === 'teacher';
+
+  // ─── Delivery mode (course_settings → deliveryOf() → injected at launch) ───
+  // Everything mode-dependent in this page keys on these booleans.
+  let delivery = { truflex: 3, pacing: 'scheduled', hasCohort: true, hasFixedDates: true, hasLiveSessions: true, inPerson: true };
+  try { const d = JSON.parse(document.body.dataset.delivery || ''); if (d && d.pacing) delivery = d; } catch { /* keep the scheduled default */ }
+  function debriefKindOf(d) { if (!d.hasCohort) return 'revision_brief'; return d.hasLiveSessions ? 'group_debrief' : 'cohort_note'; }
+  const DEBRIEF_KIND_UI = {
+    group_debrief: { heading: 'Debrief brief for the live follow-up', desc: 'Synthesises every completed run: what landed, where they stuck, misconceptions to address, discussion prompts, a one-minute re-teach. Takes 15–30 seconds.', button: 'Generate debrief brief' },
+    cohort_note: { heading: 'Cohort note', desc: 'No live session follows this tutorial, so the debrief reaches learners in writing. This drafts a note you can post to the cohort — what the group found hard, one explanation worth reading, one thing to review — plus instructor-only observations. Takes 15–30 seconds.', button: 'Generate cohort note' },
+    revision_brief: { heading: 'Course revision brief', desc: 'Learners work alone, so there is no group to debrief. This ranks the sticking points and misconceptions across every completed run and suggests which material or part of the brief to revise. Takes 15–30 seconds.', button: 'Generate revision brief' },
+  };
+  function applyDeliveryLabels() {
+    const live = delivery.hasLiveSessions, cohort = delivery.hasCohort;
+    $('#home-tutorials-blurb').innerHTML = live
+      ? 'A short one-on-one conversation your instructor designed to follow a lecture. Talk or type. You get a summary at the end; your instructor sees where the class got stuck.'
+      : cohort
+        ? 'A short one-on-one conversation your instructor designed to go with the course materials. Talk or type. You get a summary at the end; your instructor sees where the cohort got stuck.'
+        : 'A short one-on-one conversation your instructor designed to go with the course materials. Talk or type, whenever suits you. You get a summary at the end; your instructor sees what learners find hard, never who said what.';
+    $('#debriefs-heading').textContent = live ? 'Lecture debriefs' : 'Study debriefs';
+    $('#debriefs-blurb').innerHTML = live
+      ? 'A short written recap of a lecture or reading — the big ideas, plus one section that connects them to <em>your</em> goals, and three questions to test yourself.'
+      : 'A short written recap of a reading or chapter — the big ideas, plus one section that connects them to <em>your</em> goals, and three questions to test yourself.';
+    const ui = DEBRIEF_KIND_UI[debriefKindOf(delivery)];
+    $('#tutorial-debrief-heading').textContent = ui.heading;
+    $('#tutorial-debrief-desc').textContent = ui.desc;
+    $('#tutorial-debrief-btn').textContent = ui.button;
+    applyInputMode(inputMode());
+  }
 
   // ─── LTI iframe auto-resize ───
   function postFrameResize() {
@@ -626,6 +688,7 @@
     const msg = tutInput.value.trim();
     if (!msg) return;
     if (listening) stopListening(false);
+    else { rememberInputMode('type'); applyInputMode('type'); }
     stopSpeaking(); tutInput.value = '';
     await tutorialStream({ message: msg });
   });
@@ -712,6 +775,28 @@
   else if (inIframe) voiceHint.textContent = 'If the microphone is blocked inside the LMS, use ⛶ Full screen.';
   micBtn.addEventListener('click', () => (listening ? stopListening(true) : startListening()));
 
+  // ─── Input mode: typing-first where learners may be in a classroom (inPerson), voice-forward elsewhere ───
+  // The learner's own choice, once made, wins and is remembered on this device.
+  const INPUT_MODE_KEY = 'ltitutor.inputMode';
+  function storedInputMode() { try { const v = localStorage.getItem(INPUT_MODE_KEY); return v === 'voice' || v === 'type' ? v : null; } catch { return null; } }
+  function rememberInputMode(mode) { try { localStorage.setItem(INPUT_MODE_KEY, mode); } catch { /* storage blocked: the default applies next time */ } }
+  function inputMode() { return storedInputMode() || (delivery.inPerson ? 'type' : 'voice'); }
+  function applyInputMode(mode) {
+    const hint = $('#tutorial-mode-hint');
+    if (mode === 'type') {
+      tutInput.placeholder = 'Type your answer…';
+      micBtn.classList.add('opt-in');
+      if (!storedInputMode() && delivery.inPerson && !micBtn.disabled) {
+        hint.hidden = false;
+        hint.textContent = 'You may be in a classroom, so typing is the default here. Press Speak if you\'d rather talk — the tutor is the same either way.';
+      } else hint.hidden = true;
+    } else {
+      tutInput.placeholder = 'Type, or press Speak and talk…';
+      micBtn.classList.remove('opt-in');
+      hint.hidden = true;
+    }
+  }
+
   function startListening() {
     if (!SR || tut.busy || listening) return;
     stopSpeaking();
@@ -746,6 +831,7 @@
     try { rec.start(); } catch (e) { tutErr.textContent = 'Could not start voice input: ' + (e.message || e); return; }
     listening = true; micBtn.classList.add('listening'); micBtn.textContent = '⏹ Done speaking';
     if (!ttsTouched) ttsBox.checked = true;
+    rememberInputMode('voice'); applyInputMode('voice');
   }
   function stopListening(send) {
     const was = listening; listening = false;
@@ -834,7 +920,47 @@
   }
 
   async function loadTeacher() {
-    await Promise.all([loadTeacherMaterials(), loadTeacherTutorials()]);
+    await Promise.all([loadTeacherMaterials(), loadTeacherTutorials(), loadCourseSettings()]);
+  }
+
+  // ─── Course settings (delivery mode) ───
+  const courseForm = $('#course-form');
+  let courseModes = [];
+  function renderTruflexDesc() {
+    const n = parseInt(courseForm.elements.truflex.value, 10);
+    const m = courseModes.find((x) => x.truflex === n);
+    $('#course-truflex-desc').textContent = m ? m.description : '';
+  }
+  async function loadCourseSettings() {
+    if (!isTeacherRole) return;
+    const err = $('#course-err'); err.textContent = ''; $('#course-status').textContent = '';
+    try {
+      const d = await api('/api/teacher/course');
+      courseModes = d.modes || [];
+      const sel = courseForm.elements.truflex; sel.innerHTML = '';
+      for (const m of courseModes) { const o = document.createElement('option'); o.value = String(m.truflex); o.textContent = `Flex ${m.truflex} — ${m.name}`; sel.appendChild(o); }
+      sel.value = String(d.settings.truflex);
+      courseForm.elements.course_level.value = d.settings.course_level || '';
+      courseForm.elements.pitch_default.value = d.settings.pitch_default || '';
+      courseForm.elements.ai_disclosure.value = d.settings.ai_disclosure || '';
+      renderTruflexDesc();
+    } catch (e) { err.textContent = friendlyError(e); }
+  }
+  if (isTeacherRole) {
+    courseForm.elements.truflex.addEventListener('change', renderTruflexDesc);
+    courseForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const err = $('#course-err'); err.textContent = ''; $('#course-save').disabled = true;
+      const f = courseForm.elements;
+      try {
+        const d = await api('/api/teacher/course', { method: 'PUT', body: {
+          truflex: parseInt(f.truflex.value, 10), course_level: f.course_level.value || null,
+          pitch_default: f.pitch_default.value.trim(), ai_disclosure: f.ai_disclosure.value.trim(),
+        } });
+        delivery = d.delivery; applyDeliveryLabels();
+        $('#course-status').textContent = 'Saved. Tutorials, debriefs and reports now follow this mode.';
+      } catch (ex) { err.textContent = friendlyError(ex); } finally { $('#course-save').disabled = false; }
+    });
   }
 
   // ─── Materials ───
@@ -930,6 +1056,7 @@
     f.title.value = t.title || ''; f.target_minutes.value = t.target_minutes || 15;
     f.learning_goal.value = t.learning_goal || ''; f.opening_question.value = t.opening_question || '';
     f.ta_brief.value = t.ta_brief || ''; f.misconceptions.value = t.misconceptions || ''; f.success_criteria.value = t.success_criteria || '';
+    f.pitch.value = t.pitch || '';
     f.gradebook.checked = !!t.gradebook; f.status.value = t.status || 'draft';
     renderMaterialChecks(t.material_ids || []);
   }
@@ -939,6 +1066,7 @@
       title: f.title.value.trim(), target_minutes: parseInt(f.target_minutes.value, 10) || 15,
       learning_goal: f.learning_goal.value.trim(), opening_question: f.opening_question.value.trim(),
       ta_brief: f.ta_brief.value.trim(), misconceptions: f.misconceptions.value.trim(), success_criteria: f.success_criteria.value.trim(),
+      pitch: f.pitch.value.trim(),
       material_ids: selectedMaterialIds(), gradebook: f.gradebook.checked, status: f.status.value,
     };
   }
@@ -953,7 +1081,7 @@
   async function saveTutorial(payload, opts = {}) {
     const id = payload.id || (tm.editing && tm.editing.id);
     const body = {};
-    for (const k of ['title', 'target_minutes', 'learning_goal', 'opening_question', 'ta_brief', 'misconceptions', 'success_criteria', 'material_ids', 'gradebook', 'status']) body[k] = payload[k];
+    for (const k of ['title', 'target_minutes', 'learning_goal', 'opening_question', 'ta_brief', 'misconceptions', 'success_criteria', 'pitch', 'material_ids', 'gradebook', 'status']) body[k] = payload[k];
     const data = await api(id ? `/api/teacher/tutorials/${id}` : '/api/teacher/tutorials', { method: id ? 'PUT' : 'POST', body });
     if (!opts.quiet) tm.editing = data.tutorial;
     await loadTeacherTutorials();
@@ -985,7 +1113,7 @@
     if (!topic) { err.textContent = 'Describe the topic first.'; return; }
     btn.disabled = true; btn.textContent = 'Drafting…';
     try {
-      const { draft } = await api('/api/teacher/tutorials/draft', { body: { topic, material_ids: selectedMaterialIds() } });
+      const { draft } = await api('/api/teacher/tutorials/draft', { body: { topic, material_ids: selectedMaterialIds(), pitch: tutorialForm.elements.pitch.value.trim() } });
       fillTutorialForm({ ...readTutorialForm(), ...draft });
     } catch (ex) { err.textContent = friendlyError(ex); } finally { btn.disabled = false; btn.textContent = 'Draft'; }
   });
@@ -1036,6 +1164,7 @@
   });
 
   // ─── Launch ───
+  applyDeliveryLabels();
   const launchTutorialId = parseInt(document.body.dataset.tutorialId || '', 10);
   loadHome().then(() => {
     if (Number.isInteger(launchTutorialId) && launchTutorialId > 0) openTutorial(launchTutorialId);

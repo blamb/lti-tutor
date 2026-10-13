@@ -4,6 +4,7 @@
  *
  * Student
  *   POST /api/fullscreen-init                   -> { url }   (full-screen handoff)
+ *   GET  /api/course                            -> { settings (public part), delivery, modes }
  *   GET  /api/profile                           -> { profile }
  *   PUT  /api/profile                           ProfileInput -> { profile }
  *   GET  /api/tutorials                         -> { tutorials: [...with my latest run], has_profile }
@@ -16,11 +17,12 @@
  *   POST /api/materials/:id/debrief             -> { debrief }   (generates)
  *
  * Instructor
+ *   GET/PUT    /api/teacher/course               course settings (TRUFlex mode, level, pitch, disclosure)
  *   GET/POST   /api/teacher/materials, PUT/DELETE /api/teacher/materials/:id
  *   GET/POST   /api/teacher/tutorials, PUT/DELETE /api/teacher/tutorials/:id
- *   POST       /api/teacher/tutorials/draft      { material_ids, topic } -> { draft }
+ *   POST       /api/teacher/tutorials/draft      { material_ids, topic, pitch? } -> { draft }
  *   GET        /api/teacher/tutorials/:id/report -> TutorialReport
- *   POST       /api/teacher/tutorials/:id/debrief -> { debrief }
+ *   POST       /api/teacher/tutorials/:id/debrief -> { kind, debrief }  (group debrief / cohort note / revision brief)
  *   POST       /api/deeplink                     (form) -> auto-submitting deep-link form
  */
 
@@ -31,28 +33,26 @@ import { z } from 'zod';
 import { lti, mintFullscreenNonce } from './lti.js';
 import { env } from './env.js';
 import { isTeacher } from './auth.js';
-import { tokenOf, contextIdOf, studentFromToken, attr, gateTeacher } from './reqctx.js';
+import { tokenOf, studentFromToken, attr, gateTeacher } from './reqctx.js';
+import { courseCtxFromToken, CourseSettingsInput, upsertCourseSettings, courseCtxFromSettings, COURSE_LEVEL_LABELS, type CourseCtx } from './courses.js';
+import { TRUFLEX_MODES, deliveryLabels } from './delivery.js';
 import {
   TutorialInput, ProfileInput, MaterialInput, START_MARKER,
   listMaterials, getMaterials, createMaterial, updateMaterial, deleteMaterial,
   listTutorials, getTutorial, createTutorial, updateTutorial, deleteTutorial,
   getProfile, upsertProfile, latestSessionsForStudent, startTutorialSession,
   getTutorialSession, getSessionTurns, streamTutorialReply, completeTutorialSession,
-  recordNps, recordGradeResult, getTutorialReport, generateGroupDebrief,
+  recordNps, recordGradeResult, getTutorialReport, generateGroupDebrief, debriefKindFor,
   draftTutorialBrief, getDebrief, generateDebrief,
-  type CourseCtx,
 } from './tutorials.js';
 import { postCompletionGrade, type GradeResult } from './grades.js';
 import { query } from './db.js';
 
 lti.app.use('/api', express.json({ limit: '2mb' }));
 
-function ctxOf(res: Response): { token: IdToken; ctx: CourseCtx } {
+async function ctxOf(res: Response): Promise<{ token: IdToken; ctx: CourseCtx }> {
   const token = tokenOf(res);
-  return {
-    token,
-    ctx: { iss: token.iss, contextId: contextIdOf(token), title: token.platformContext.context?.title || '' },
-  };
+  return { token, ctx: await courseCtxFromToken(token) };
 }
 
 function idParam(req: Request, name: string): number | null {
@@ -69,6 +69,16 @@ function fail(res: Response, e: unknown, where: string): void {
   res.status(500).json({ error: (e as Error).message });
 }
 
+/** The parts of the course settings every launcher may see. */
+function publicCourse(ctx: CourseCtx) {
+  return {
+    settings: { truflex: ctx.settings.truflex, course_level: ctx.settings.course_level, ai_disclosure: ctx.settings.ai_disclosure },
+    delivery: ctx.delivery,
+    labels: deliveryLabels(ctx.delivery),
+    debrief_kind: debriefKindFor(ctx.delivery),
+  };
+}
+
 // ─── Full-screen handoff ────────────────────────────────────────────────────
 
 lti.app.post('/api/fullscreen-init', (req: Request, res: Response) => {
@@ -80,6 +90,17 @@ lti.app.post('/api/fullscreen-init', (req: Request, res: Response) => {
     res.json({ url: `/fullscreen?n=${encodeURIComponent(mintFullscreenNonce(cookieHeader, ltik))}` });
   } catch (e) {
     fail(res, e, 'POST /api/fullscreen-init');
+  }
+});
+
+// ─── Course (delivery mode) ─────────────────────────────────────────────────
+
+lti.app.get('/api/course', async (req: Request, res: Response) => {
+  try {
+    const { ctx } = await ctxOf(res);
+    res.json({ ...publicCourse(ctx), modes: TRUFLEX_MODES });
+  } catch (e) {
+    fail(res, e, 'GET /api/course');
   }
 });
 
@@ -107,7 +128,7 @@ lti.app.put('/api/profile', async (req: Request, res: Response) => {
 
 lti.app.get('/api/tutorials', async (req: Request, res: Response) => {
   try {
-    const { token, ctx } = ctxOf(res);
+    const { token, ctx } = await ctxOf(res);
     const student = await studentFromToken(token);
     const tutorials = await listTutorials(ctx, { publishedOnly: true });
     const latest = await latestSessionsForStudent(student.id);
@@ -120,6 +141,7 @@ lti.app.get('/api/tutorials', async (req: Request, res: Response) => {
         };
       }),
       has_profile: !!(await getProfile(student.id)),
+      delivery: ctx.delivery,
     });
   } catch (e) {
     fail(res, e, 'GET /api/tutorials');
@@ -128,7 +150,7 @@ lti.app.get('/api/tutorials', async (req: Request, res: Response) => {
 
 lti.app.post('/api/tutorials/:id/start', async (req: Request, res: Response) => {
   try {
-    const { token, ctx } = ctxOf(res);
+    const { token, ctx } = await ctxOf(res);
     const id = idParam(req, 'id');
     if (!id) return res.status(400).json({ error: 'bad tutorial id' });
     const tutorial = await getTutorial(id, ctx);
@@ -154,7 +176,7 @@ lti.app.post('/api/tutorials/:id/start', async (req: Request, res: Response) => 
 
 /** Load a tutorial session the current user owns, with its tutorial. */
 async function ownedSession(req: Request, res: Response) {
-  const { token, ctx } = ctxOf(res);
+  const { token, ctx } = await ctxOf(res);
   const student = await studentFromToken(token);
   const sid = idParam(req, 'sid');
   if (!sid) return null;
@@ -240,11 +262,11 @@ lti.app.post('/api/tutorials/session/:sid/nps', async (req: Request, res: Respon
   }
 });
 
-// ─── Student: lecture debriefs ──────────────────────────────────────────────
+// ─── Student: lecture / study debriefs ──────────────────────────────────────
 
 lti.app.get('/api/materials', async (req: Request, res: Response) => {
   try {
-    const { token, ctx } = ctxOf(res);
+    const { token, ctx } = await ctxOf(res);
     const student = await studentFromToken(token);
     const materials = await listMaterials(ctx);
     const done = await query<{ material_id: number }>(`select material_id from debrief where student_id = $1`, [student.id]);
@@ -257,7 +279,7 @@ lti.app.get('/api/materials', async (req: Request, res: Response) => {
 
 lti.app.get('/api/materials/:id/debrief', async (req: Request, res: Response) => {
   try {
-    const { token, ctx } = ctxOf(res);
+    const { token, ctx } = await ctxOf(res);
     const id = idParam(req, 'id');
     if (!id) return res.status(400).json({ error: 'bad material id' });
     const [material] = await getMaterials([id], ctx);
@@ -271,16 +293,16 @@ lti.app.get('/api/materials/:id/debrief', async (req: Request, res: Response) =>
 
 lti.app.post('/api/materials/:id/debrief', async (req: Request, res: Response) => {
   try {
-    const { token, ctx } = ctxOf(res);
+    const { token, ctx } = await ctxOf(res);
     const id = idParam(req, 'id');
     if (!id) return res.status(400).json({ error: 'bad material id' });
     const [material] = await getMaterials([id], ctx);
     if (!material) return res.status(404).json({ error: 'material not found' });
     const student = await studentFromToken(token);
     const debrief = await generateDebrief({
-      student, material,
+      student, material, ctx,
       profile: await getProfile(student.id),
-      attribution: attr(token, student.id, null, 'tutorial.lecture_debrief'),
+      attribution: attr(token, student.id, null, 'tutorial.debrief'),
     });
     res.json({ material: { id: material.id, title: material.title }, debrief });
   } catch (e) {
@@ -288,17 +310,41 @@ lti.app.post('/api/materials/:id/debrief', async (req: Request, res: Response) =
   }
 });
 
-// ─── Instructor: materials ──────────────────────────────────────────────────
+// ─── Instructor: course settings ────────────────────────────────────────────
 
-function teacherCtx(res: Response): { token: IdToken; ctx: CourseCtx } | null {
+async function teacherCtx(res: Response): Promise<{ token: IdToken; ctx: CourseCtx } | null> {
   const token = gateTeacher(res);
   if (!token) return null;
-  return { token, ctx: { iss: token.iss, contextId: contextIdOf(token), title: token.platformContext.context?.title || '' } };
+  return { token, ctx: await courseCtxFromToken(token) };
 }
+
+lti.app.get('/api/teacher/course', async (req: Request, res: Response) => {
+  try {
+    const t = await teacherCtx(res);
+    if (!t) return;
+    res.json({ ...publicCourse(t.ctx), settings: t.ctx.settings, modes: TRUFLEX_MODES, levels: COURSE_LEVEL_LABELS });
+  } catch (e) {
+    fail(res, e, 'GET /api/teacher/course');
+  }
+});
+
+lti.app.put('/api/teacher/course', async (req: Request, res: Response) => {
+  try {
+    const t = await teacherCtx(res);
+    if (!t) return;
+    const settings = await upsertCourseSettings(t.ctx.iss, t.ctx.contextId, CourseSettingsInput.parse(req.body ?? {}));
+    const ctx = courseCtxFromSettings(t.ctx.iss, t.ctx.contextId, t.ctx.title ?? '', settings);
+    res.json({ ...publicCourse(ctx), settings, modes: TRUFLEX_MODES, levels: COURSE_LEVEL_LABELS });
+  } catch (e) {
+    fail(res, e, 'PUT /api/teacher/course');
+  }
+});
+
+// ─── Instructor: materials ──────────────────────────────────────────────────
 
 lti.app.get('/api/teacher/materials', async (req: Request, res: Response) => {
   try {
-    const t = teacherCtx(res);
+    const t = await teacherCtx(res);
     if (!t) return;
     const materials = await listMaterials(t.ctx);
     res.json({ materials: materials.map((m) => ({ ...m, chars: m.body.length })) });
@@ -309,7 +355,7 @@ lti.app.get('/api/teacher/materials', async (req: Request, res: Response) => {
 
 lti.app.post('/api/teacher/materials', async (req: Request, res: Response) => {
   try {
-    const t = teacherCtx(res);
+    const t = await teacherCtx(res);
     if (!t) return;
     const me = await studentFromToken(t.token);
     res.json({ material: await createMaterial(t.ctx, MaterialInput.parse(req.body ?? {}), me.id) });
@@ -320,7 +366,7 @@ lti.app.post('/api/teacher/materials', async (req: Request, res: Response) => {
 
 lti.app.put('/api/teacher/materials/:id', async (req: Request, res: Response) => {
   try {
-    const t = teacherCtx(res);
+    const t = await teacherCtx(res);
     if (!t) return;
     const id = idParam(req, 'id');
     if (!id) return res.status(400).json({ error: 'bad material id' });
@@ -334,7 +380,7 @@ lti.app.put('/api/teacher/materials/:id', async (req: Request, res: Response) =>
 
 lti.app.delete('/api/teacher/materials/:id', async (req: Request, res: Response) => {
   try {
-    const t = teacherCtx(res);
+    const t = await teacherCtx(res);
     if (!t) return;
     const id = idParam(req, 'id');
     if (!id) return res.status(400).json({ error: 'bad material id' });
@@ -349,7 +395,7 @@ lti.app.delete('/api/teacher/materials/:id', async (req: Request, res: Response)
 
 lti.app.get('/api/teacher/tutorials', async (req: Request, res: Response) => {
   try {
-    const t = teacherCtx(res);
+    const t = await teacherCtx(res);
     if (!t) return;
     const tutorials = await listTutorials(t.ctx, { publishedOnly: false });
     const counts = await query<{ tutorial_id: number; started: number; completed: number }>(
@@ -371,7 +417,7 @@ lti.app.get('/api/teacher/tutorials', async (req: Request, res: Response) => {
 
 lti.app.post('/api/teacher/tutorials', async (req: Request, res: Response) => {
   try {
-    const t = teacherCtx(res);
+    const t = await teacherCtx(res);
     if (!t) return;
     const me = await studentFromToken(t.token);
     res.json({ tutorial: await createTutorial(t.ctx, TutorialInput.parse(req.body ?? {}), me.id) });
@@ -382,7 +428,7 @@ lti.app.post('/api/teacher/tutorials', async (req: Request, res: Response) => {
 
 lti.app.put('/api/teacher/tutorials/:id', async (req: Request, res: Response) => {
   try {
-    const t = teacherCtx(res);
+    const t = await teacherCtx(res);
     if (!t) return;
     const id = idParam(req, 'id');
     if (!id) return res.status(400).json({ error: 'bad tutorial id' });
@@ -396,7 +442,7 @@ lti.app.put('/api/teacher/tutorials/:id', async (req: Request, res: Response) =>
 
 lti.app.delete('/api/teacher/tutorials/:id', async (req: Request, res: Response) => {
   try {
-    const t = teacherCtx(res);
+    const t = await teacherCtx(res);
     if (!t) return;
     const id = idParam(req, 'id');
     if (!id) return res.status(400).json({ error: 'bad tutorial id' });
@@ -409,14 +455,15 @@ lti.app.delete('/api/teacher/tutorials/:id', async (req: Request, res: Response)
 
 lti.app.post('/api/teacher/tutorials/draft', async (req: Request, res: Response) => {
   try {
-    const t = teacherCtx(res);
+    const t = await teacherCtx(res);
     if (!t) return;
     const topic = String(req.body?.topic ?? '').trim().slice(0, 2000);
     if (!topic) return res.status(400).json({ error: 'topic is required' });
     const materialIds = z.array(z.number().int().positive()).max(20).parse(req.body?.material_ids ?? []);
+    const pitch = String(req.body?.pitch ?? '').trim().slice(0, 500);
     const me = await studentFromToken(t.token);
     const draft = await draftTutorialBrief({
-      ctx: t.ctx, materialIds, topic,
+      ctx: t.ctx, materialIds, topic, pitch,
       attribution: attr(t.token, me.id, null, 'tutorial.draft'),
     });
     res.json({ draft });
@@ -427,13 +474,13 @@ lti.app.post('/api/teacher/tutorials/draft', async (req: Request, res: Response)
 
 lti.app.get('/api/teacher/tutorials/:id/report', async (req: Request, res: Response) => {
   try {
-    const t = teacherCtx(res);
+    const t = await teacherCtx(res);
     if (!t) return;
     const id = idParam(req, 'id');
     if (!id) return res.status(400).json({ error: 'bad tutorial id' });
     const tutorial = await getTutorial(id, t.ctx);
     if (!tutorial) return res.status(404).json({ error: 'tutorial not found' });
-    res.json(await getTutorialReport(tutorial));
+    res.json({ ...(await getTutorialReport(tutorial)), debrief_kind: debriefKindFor(t.ctx.delivery) });
   } catch (e) {
     fail(res, e, 'GET /api/teacher/tutorials/:id/report');
   }
@@ -441,7 +488,7 @@ lti.app.get('/api/teacher/tutorials/:id/report', async (req: Request, res: Respo
 
 lti.app.post('/api/teacher/tutorials/:id/debrief', async (req: Request, res: Response) => {
   try {
-    const t = teacherCtx(res);
+    const t = await teacherCtx(res);
     if (!t) return;
     const id = idParam(req, 'id');
     if (!id) return res.status(400).json({ error: 'bad tutorial id' });
@@ -449,8 +496,8 @@ lti.app.post('/api/teacher/tutorials/:id/debrief', async (req: Request, res: Res
     if (!tutorial) return res.status(404).json({ error: 'tutorial not found' });
     const me = await studentFromToken(t.token);
     const report = await getTutorialReport(tutorial);
-    const debrief = await generateGroupDebrief(report, t.ctx, attr(t.token, me.id, null, 'tutorial.debrief'));
-    res.json({ debrief, completed: report.totals.completed, started: report.totals.started });
+    const out = await generateGroupDebrief(report, t.ctx, attr(t.token, me.id, null, 'tutorial.debrief'));
+    res.json({ kind: out.kind, debrief: out.markdown, completed: report.totals.completed, started: report.totals.started });
   } catch (e) {
     fail(res, e, 'POST /api/teacher/tutorials/:id/debrief');
   }
@@ -465,7 +512,8 @@ lti.app.post('/api/deeplink', express.urlencoded({ extended: false }), async (re
     const token = tokenOf(res);
     if (!isTeacher(token)) return res.status(403).type('text').send('Instructors only.');
     if (!token.platformContext.deepLinkingSettings) return res.status(400).type('text').send('Not a deep-linking launch.');
-    const ctx = { iss: token.iss, contextId: contextIdOf(token) };
+    const ctx = await courseCtxFromToken(token);
+    const labels = deliveryLabels(ctx.delivery);
     const raw = req.body?.tutorial;
     const ids = (Array.isArray(raw) ? raw : raw ? [raw] : [])
       .map((v: unknown) => parseInt(String(v), 10))
@@ -473,7 +521,7 @@ lti.app.post('/api/deeplink', express.urlencoded({ extended: false }), async (re
 
     const items: DeepLinkContentItem[] = [];
     if (req.body?.home === '1') {
-      items.push({ type: 'ltiResourceLink', title: env.TOOL_NAME, text: 'Tutorials, lecture debriefs and your profile.', url: env.LTI_TOOL_URL });
+      items.push({ type: 'ltiResourceLink', title: env.TOOL_NAME, text: `Tutorials, ${labels.debriefPlural} and your profile.`, url: env.LTI_TOOL_URL });
     }
     for (const id of ids) {
       const t = await getTutorial(id, ctx);

@@ -7,8 +7,9 @@
   "scripts": {
     "db:migrate": "tsx src/server/migrate.ts",
     "dev": "tsx watch src/server/index.ts",
-    "build": "rm -rf dist && tsc -p . && cp -r src/server/migrations dist/server/migrations && cp -r src/web dist/web",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && cp -r src/server/migrations dist/server/migrations && cp -r src/web dist/web",
     "start": "node dist/server/migrate.js && node dist/server/index.js",
+    "test": "tsx --test \"src/**/*.test.ts\"",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

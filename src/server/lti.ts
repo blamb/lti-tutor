@@ -17,6 +17,8 @@ import { env, isProd } from './env.js';
 import { findOrCreateStudent } from './students.js';
 import { isTeacher } from './auth.js';
 import { listTutorials } from './tutorials.js';
+import { courseCtxFromToken } from './courses.js';
+import { deliveryLabels } from './delivery.js';
 import { getCostSummary } from './costs.js';
 
 const { Provider: lti } = ltijs;
@@ -113,17 +115,11 @@ lti.setup(
   }
 );
 
-function courseCtxOf(token: IdToken) {
-  return {
-    iss: token.iss,
-    contextId: token.platformContext.context?.id ?? token.platformContext.contextId,
-    title: token.platformContext.context?.title || '',
-  };
-}
-
 /** Successful launch: ltijs validated the JWT and set the session cookie. */
 lti.onConnect(async (token: IdToken, req, res) => {
-  const ctx = courseCtxOf(token);
+  // Loads the course's delivery mode; a custom `truflex` launch parameter
+  // seeds it on the course's first launch (courses.ts).
+  const ctx = await courseCtxFromToken(token);
   const student = await findOrCreateStudent({
     sub: token.user,
     iss: token.iss,
@@ -143,12 +139,13 @@ lti.onConnect(async (token: IdToken, req, res) => {
   const tutorialId = /^\d+$/.test(rawTutorialId) ? rawTutorialId : '';
 
   const html = loadLaunchHtml()
-    .replace('{{TUTORIAL_ID}}', tutorialId)
-    .replace('{{TOOL_NAME}}', escapeHtml(env.TOOL_NAME))
-    .replace('{{RETURN_URL}}', escapeHtml(returnUrl))
-    .replace('{{DISPLAY_NAME}}', escapeHtml(student.display_name))
-    .replace('{{CONTEXT_TITLE}}', escapeHtml(ctx.title))
-    .replace('{{ROLE}}', role);
+    .replaceAll('{{TUTORIAL_ID}}', tutorialId)
+    .replaceAll('{{TOOL_NAME}}', escapeHtml(env.TOOL_NAME))
+    .replaceAll('{{RETURN_URL}}', escapeHtml(returnUrl))
+    .replaceAll('{{DISPLAY_NAME}}', escapeHtml(student.display_name))
+    .replaceAll('{{CONTEXT_TITLE}}', escapeHtml(ctx.title ?? ''))
+    .replaceAll('{{DELIVERY}}', escapeHtml(JSON.stringify(ctx.delivery)))
+    .replaceAll('{{ROLE}}', role);
   return res.send(html);
 });
 
@@ -162,7 +159,9 @@ lti.onDeepLinking(async (token: IdToken, req, res) => {
     return res.status(403).type('html').send('<p>Only instructors can select content.</p>');
   }
   const ltik = String((res.locals as { ltik?: string }).ltik ?? '');
-  const tutorials = await listTutorials(courseCtxOf(token), { publishedOnly: false });
+  const ctx = await courseCtxFromToken(token);
+  const labels = deliveryLabels(ctx.delivery);
+  const tutorials = await listTutorials(ctx, { publishedOnly: false });
   const rows = tutorials
     .map(
       (t) =>
@@ -172,6 +171,9 @@ lti.onDeepLinking(async (token: IdToken, req, res) => {
         `<div class="goal">${escapeHtml(t.learning_goal)}</div></span></label>`
     )
     .join('\n');
+  const placement = ctx.delivery.hasLiveSessions
+    ? 'so you can place it right after the lecture it follows'
+    : 'so you can place it right after the material it goes with';
   res.type('html').send(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Select content — ${escapeHtml(env.TOOL_NAME)}</title>
 <style>
@@ -183,9 +185,9 @@ lti.onDeepLinking(async (token: IdToken, req, res) => {
   .empty { color: #666; border: 1px dashed #ccc; border-radius: 8px; padding: .75rem; }
 </style></head><body>
 <h1>Add ${escapeHtml(env.TOOL_NAME)} content to this course</h1>
-<p>Each selected tutorial becomes its own activity on the course page, so you can place it right after the lecture it follows. Draft tutorials can be placed now and published later.</p>
+<p>Each selected tutorial becomes its own activity on the course page, ${placement}. Draft tutorials can be placed now and published later.</p>
 <form method="post" action="/api/deeplink?ltik=${encodeURIComponent(ltik)}">
-  <label class="row"><input type="checkbox" name="home" value="1"><span><strong>${escapeHtml(env.TOOL_NAME)} home</strong><span class="meta"> · all tutorials, lecture debriefs, profile</span></span></label>
+  <label class="row"><input type="checkbox" name="home" value="1"><span><strong>${escapeHtml(env.TOOL_NAME)} home</strong><span class="meta"> · all tutorials, ${labels.debriefPlural}, profile</span></span></label>
   <h2 style="font-size:1rem;margin:1rem 0 .5rem">Tutorials</h2>
   ${rows || '<div class="empty">No tutorials yet. Open the tool from the course, go to Instructor view, and create one first.</div>'}
   <button class="btn" type="submit">Add selected to course</button>

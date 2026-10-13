@@ -1,11 +1,16 @@
 /**
- * Paski-style tutorials.
+ * Paski-style tutorials, adapted to the course's delivery mode.
  *
  * The pattern (Next Gen Learning's "Paski"): the instructor co-designs each
  * one-on-one tutorial to mirror how they'd guide it with their best teaching
  * assistant; the tutorial sits in the core learning sequence (lecture →
  * tutorial → group debrief) rather than on the periphery; the tutor knows the
  * student's goals and context; and every run feeds a debrief back to faculty.
+ *
+ * That sequence assumes a scheduled course. TRU also runs paced and
+ * self-paced online courses (see delivery.ts), so every piece of wording
+ * that assumes a lecture, a live follow-up or classmates is switched on the
+ * course's delivery booleans: `hasLiveSessions` and `hasCohort`.
  *
  * This module owns:
  *   - course materials (instructor-pasted lecture notes, transcripts, readings)
@@ -14,9 +19,10 @@
  *   - the tutorial conversation: a staged Socratic dialogue (orient → explore →
  *     teach-back → wrap-up), grounded in the attached materials, streamed
  *   - completion: an LLM-written structured summary per run
- *   - the instructor's report and group-debrief synthesis
+ *   - the instructor's report and its synthesis: a group-debrief brief
+ *     (scheduled), a cohort note (paced) or a course revision brief (self-paced)
  *   - "draft with AI": a first-pass brief the instructor edits
- *   - personalised lecture debriefs for students, one per material
+ *   - personalised lecture / study debriefs for students, one per material
  */
 
 import type Anthropic from '@anthropic-ai/sdk';
@@ -25,15 +31,12 @@ import { query } from './db.js';
 import { getAnthropic, GEN_MODEL, TUTOR_MODEL } from './anthropic.js';
 import { recordApiCall, type Attribution } from './costs.js';
 import type { Student } from './students.js';
+import { COURSE_LEVEL_LABELS, type CourseCtx } from './courses.js';
+import type { Delivery } from './delivery.js';
+
+export type { CourseCtx } from './courses.js';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
-
-export interface CourseCtx {
-  iss: string;
-  contextId: string;
-  /** Course title from the LTI launch, for prompts. */
-  title?: string;
-}
 
 export interface Material {
   id: number;
@@ -58,6 +61,8 @@ export interface Tutorial {
   ta_brief: string;
   misconceptions: string;
   success_criteria: string;
+  /** Reading level and tone, e.g. "ABE reading level, short sentences". Empty = course default. */
+  pitch: string;
   material_ids: number[];
   target_minutes: number;
   gradebook: boolean;
@@ -131,6 +136,7 @@ export const TutorialInput = z.object({
   ta_brief: z.string().trim().max(8000).default(''),
   misconceptions: z.string().trim().max(4000).default(''),
   success_criteria: z.string().trim().max(4000).default(''),
+  pitch: z.string().trim().max(500).default(''),
   material_ids: z.array(z.number().int().positive()).max(20).default([]),
   target_minutes: z.number().int().min(5).max(60).default(15),
   gradebook: z.boolean().default(false),
@@ -246,11 +252,11 @@ export async function createTutorial(ctx: CourseCtx, input: TutorialInput, creat
   const rows = await query<Tutorial>(
     `insert into tutorial
        (lti_iss, lti_context_id, title, learning_goal, opening_question, ta_brief, misconceptions,
-        success_criteria, material_ids, target_minutes, gradebook, status, created_by)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9::bigint[],$10,$11,$12,$13) returning *`,
+        success_criteria, pitch, material_ids, target_minutes, gradebook, status, created_by)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::bigint[],$11,$12,$13,$14) returning *`,
     [
       ctx.iss, ctx.contextId, input.title, input.learning_goal, input.opening_question,
-      input.ta_brief, input.misconceptions, input.success_criteria, materialIds,
+      input.ta_brief, input.misconceptions, input.success_criteria, input.pitch, materialIds,
       input.target_minutes, input.gradebook, input.status, createdBy,
     ]
   );
@@ -262,12 +268,12 @@ export async function updateTutorial(id: number, ctx: CourseCtx, input: Tutorial
   const rows = await query<Tutorial>(
     `update tutorial set
        title = $4, learning_goal = $5, opening_question = $6, ta_brief = $7, misconceptions = $8,
-       success_criteria = $9, material_ids = $10::bigint[], target_minutes = $11, gradebook = $12,
-       status = $13, updated_at = now()
+       success_criteria = $9, pitch = $10, material_ids = $11::bigint[], target_minutes = $12, gradebook = $13,
+       status = $14, updated_at = now()
      where id = $1 and lti_iss = $2 and lti_context_id = $3 returning *`,
     [
       id, ctx.iss, ctx.contextId, input.title, input.learning_goal, input.opening_question,
-      input.ta_brief, input.misconceptions, input.success_criteria, materialIds,
+      input.ta_brief, input.misconceptions, input.success_criteria, input.pitch, materialIds,
       input.target_minutes, input.gradebook, input.status,
     ]
   );
@@ -371,8 +377,31 @@ async function appendTurn(sessionId: number, role: 'user' | 'assistant', content
 }
 
 // ─── The tutorial conversation ──────────────────────────────────────────────
+//
+// The rules block is the first (uncached) system block, and prompt caching
+// works on exact prefixes, so it must be one fixed string per delivery
+// variant — never assembled per learner. buildTutorialRules() runs once per
+// (hasLiveSessions, hasCohort) pair and the result is memoised.
 
-const TUTORIAL_RULES = `You are running a one-on-one tutorial for a student in the course named below. The instructor designed this tutorial and wrote you a brief describing how they would run it with their best teaching assistant. Follow that brief: it sets the goal, the opening question, the probes, and what "got it" looks like.
+function buildTutorialRules(d: Pick<Delivery, 'hasLiveSessions' | 'hasCohort'>): string {
+  const orient = d.hasLiveSessions
+    ? 'greet the student by first name in one short sentence, state the goal of this tutorial in one sentence, then ask the opening question. Nothing else.'
+    : 'greet the student by first name in one short sentence, state the goal of this tutorial in one sentence, then ask the opening question. Nothing else. Do not assume they have just attended a class or finished a reading — they may be arriving cold — so the opening question must stand on its own.';
+  const teachBackAudience = !d.hasCohort
+    ? 'as if to someone who has never studied this'
+    : d.hasLiveSessions
+      ? 'as if teaching a classmate who missed the lecture'
+      : 'as if teaching a classmate in the course who has not reached this topic yet';
+  const extraRules = [
+    d.hasLiveSessions
+      ? ''
+      : '\n8. The student has not sat through a lecture on this. Treat the tutorial as discovery: let them uncover the idea from the materials and their own reasoning rather than checking whether they absorbed a presentation. Never refer to a lecture, a class, a live session or a follow-up meeting.',
+    d.hasCohort
+      ? ''
+      : '\n9. The student is learning alone, on their own schedule, with no classmates. Never refer to other students, peers, the class, a cohort or group work, and never suggest discussing anything with classmates.',
+  ].join('');
+
+  return `You are running a one-on-one tutorial for a student in the course named below. The instructor designed this tutorial and wrote you a brief describing how they would run it with their best teaching assistant. Follow that brief: it sets the goal, the opening question, the probes, and what "got it" looks like.
 
 You are a Socratic tutor, not a lecturer. Hard rules:
 1. One question per turn. Never stack questions.
@@ -381,17 +410,31 @@ You are a Socratic tutor, not a lecturer. Hard rules:
 4. Vary technique: definition-probing, counter-example, cause-effect chain, zooming in and out between detail and big picture, analogy stress-test.
 5. If the student raises something correct that's adjacent to the goal, credit it briefly before steering back.
 6. Stay grounded in the course materials provided. If none are attached, draw on general knowledge of the subject described in the brief, and say so if asked where something comes from. If the student asks something outside the materials, say what you can and point them to the instructor.
-7. Personalise lightly: about one example or analogy in ten should draw on the student's own context and interests. Never make the tutorial about them instead of the subject.
+7. Personalise lightly: about one example or analogy in ten should draw on the student's own context and interests. Never make the tutorial about them instead of the subject.${extraRules}
 
 The tutorial runs in stages. A progress note at the end of this system prompt tells you which stage you're in; move earlier if the student clearly reaches the goal, never later.
-- ORIENT (first reply only): greet the student by first name in one short sentence, state the goal of this tutorial in one sentence, then ask the opening question. Nothing else.
+- ORIENT (first reply only): ${orient}
 - EXPLORE: work through the brief's probes. Build on what they say. Keep them doing the thinking.
-- TEACH-BACK: ask the student to explain the core idea back as if teaching a classmate who missed the lecture. Then play back your understanding of what they said in two or three sentences and ask whether you've got it right (Pask's conversation theory: understanding is confirmed when it survives being re-explained). Probe one gap if there is one.
+- TEACH-BACK: ask the student to explain the core idea back ${teachBackAudience}. Then play back your understanding of what they said in two or three sentences and ask whether you've got it right (Pask's conversation theory: understanding is confirmed when it survives being re-explained). Probe one gap if there is one.
 - WRAP-UP: in four or five sentences, summarise the path they walked and what they figured out, name the one thing to review, and tell them they can click "Finish tutorial" to get their summary. Then stop asking questions.
 
-Style: warm, concrete, pitched at the level the brief implies. Many students talk to you by voice and hear your replies read aloud, so keep each reply short — usually under 80 words — in plain spoken sentences. No headings, bullet lists, tables or markdown formatting. No "great question!" filler.
+Style: warm, concrete, pitched at the level the brief implies (the brief may name a reading level and tone — follow it exactly). Many students talk to you by voice and hear your replies read aloud, so keep each reply short — usually under 80 words — in plain spoken sentences. No headings, bullet lists, tables or markdown formatting. No "great question!" filler.
 
 A message beginning "${START_MARKER}" is not from the student; it is the system telling you the student has just opened the tutorial. Reply to it with the ORIENT stage.`;
+}
+
+const rulesCache = new Map<string, string>();
+
+/** One fixed rules string per delivery variant, so the block stays cacheable. */
+export function tutorialRulesFor(d: Delivery): string {
+  const key = `${d.hasLiveSessions}|${d.hasCohort}`;
+  let rules = rulesCache.get(key);
+  if (!rules) {
+    rules = buildTutorialRules(d);
+    rulesCache.set(key, rules);
+  }
+  return rules;
+}
 
 type Stage = 'ORIENT' | 'EXPLORE' | 'TEACH-BACK' | 'WRAP-UP';
 
@@ -405,14 +448,24 @@ function stageFor(studentTurns: number, targetMinutes: number): { stage: Stage; 
   return { stage: 'WRAP-UP', target };
 }
 
+/** The tutorial's pitch, falling back to the course default. */
+export function effectivePitch(t: Pick<Tutorial, 'pitch'>, ctx: CourseCtx): string {
+  return t.pitch || ctx.settings.pitch_default || '';
+}
+
 function tutorialBrief(t: Tutorial, ctx: CourseCtx): string {
   const parts = [
     `# TUTORIAL BRIEF (written by the instructor)`,
     `Course: ${ctx.title || '(untitled course)'}`,
+  ];
+  if (ctx.settings.course_level) parts.push(`Course level: ${COURSE_LEVEL_LABELS[ctx.settings.course_level]}`);
+  parts.push(
     `Title: ${t.title}`,
     `Learning goal: ${t.learning_goal}`,
     `Opening question (ask this, verbatim or lightly adapted, in the ORIENT stage): ${t.opening_question}`,
-  ];
+  );
+  const pitch = effectivePitch(t, ctx);
+  if (pitch) parts.push(`Pitch — reading level and tone to use throughout: ${pitch}`);
   if (t.ta_brief) parts.push(`\n## How to run it — the instructor's notes to their TA\n${t.ta_brief}`);
   if (t.misconceptions) parts.push(`\n## Misconceptions to listen for\n${t.misconceptions}`);
   if (t.success_criteria) parts.push(`\n## What "got it" sounds like\n${t.success_criteria}`);
@@ -461,7 +514,7 @@ export async function streamTutorialReply(params: {
   }
 
   const materials = await getMaterials(tutorial.material_ids, ctx);
-  const system: Anthropic.TextBlockParam[] = [{ type: 'text', text: TUTORIAL_RULES }];
+  const system: Anthropic.TextBlockParam[] = [{ type: 'text', text: tutorialRulesFor(ctx.delivery) }];
   const grounding = materialsBlock(materials);
   if (grounding) system.push({ type: 'text', text: grounding, cache_control: { type: 'ephemeral' } });
   system.push({
@@ -624,7 +677,7 @@ export async function recordGradeResult(tutorialSessionId: number, result: { pos
   );
 }
 
-// ─── Instructor: report + group debrief ─────────────────────────────────────
+// ─── Instructor: report + its synthesis ─────────────────────────────────────
 
 export interface TutorialReportRow {
   session_id: number;
@@ -690,7 +743,20 @@ export async function getTutorialReport(tutorial: Tutorial): Promise<TutorialRep
   };
 }
 
-const DEBRIEF_SYSTEM = `You prepare an instructor for the live group debrief that follows a one-on-one AI tutorial. You are given the tutorial brief and the per-student summaries (anonymised) from every completed run, plus any student feedback comments.
+/**
+ * What the report's synthesis is for, by delivery mode:
+ *   group_debrief   a cohort and a live follow-up: brief the instructor for the room
+ *   cohort_note     a cohort but no live session: a note to post to the cohort
+ *   revision_brief  no cohort: learners work alone, so the only lever is revising the course
+ */
+export type DebriefKind = 'group_debrief' | 'cohort_note' | 'revision_brief';
+
+export function debriefKindFor(d: Delivery): DebriefKind {
+  if (!d.hasCohort) return 'revision_brief';
+  return d.hasLiveSessions ? 'group_debrief' : 'cohort_note';
+}
+
+const GROUP_DEBRIEF_SYSTEM = `You prepare an instructor for the live group debrief that follows a one-on-one AI tutorial. You are given the tutorial brief and the per-student summaries (anonymised) from every completed run, plus any student feedback comments.
 
 Write a debrief brief in markdown, at most 400 words, with exactly these sections:
 ## What landed
@@ -703,16 +769,65 @@ Write a debrief brief in markdown, at most 400 words, with exactly these section
 
 Be specific and concrete — name the ideas, quote the shape of the confusions. Count how many students hit each issue when that helps ("4 of 11…"). Don't name students. Don't pad with generic teaching advice.`;
 
-export async function generateGroupDebrief(report: TutorialReport, ctx: CourseCtx, attribution: Attribution): Promise<string> {
+const COHORT_NOTE_SYSTEM = `You help an instructor of a paced online course. Learners work independently on a shared semester schedule; there is no live session, so the instructor's debrief of this one-on-one AI tutorial reaches the cohort as a written note. You are given the tutorial brief and the per-learner summaries (anonymised) from every completed run, plus any learner feedback comments.
+
+Write markdown, at most 450 words, with exactly these sections:
+## Cohort note
+(Written in the instructor's voice, addressed to the whole cohort, ready to post as-is. It must read on its own — nobody will hear it explained live.)
+### What the group found hard
+### One explanation worth reading
+(the single explanation most worth giving, written out in full)
+### One thing to review
+## Instructor-only observations
+(what landed, counts of who hit which issue, misconceptions heard, anything to change in the brief — not for learners)
+
+Be specific and concrete — name the ideas, quote the shape of the confusions. Count how many learners hit each issue when that helps ("4 of 11…"). Don't name learners. Never refer to a lecture, a class or a live session.`;
+
+const REVISION_BRIEF_SYSTEM = `You help an instructor of a self-paced online course revise it. Learners enrol continuously and work alone; there is no cohort and no live session, so nothing from this one-on-one AI tutorial can be "debriefed" to a group. The only lever is revising the materials and the tutorial brief. You are given the brief, the titles of the materials it is grounded in, the per-learner summaries (anonymised) from every completed run, and a pre-counted list of sticking points.
+
+Write markdown, at most 400 words, with exactly these sections:
+## Sticking points, ranked
+(most frequent first, with counts, merging near-duplicates)
+## Misconceptions heard
+## What to revise
+(for each of the top two or three problems: which material or which part of the brief — opening question, probes, misconceptions list, success criteria — and a concrete suggested change)
+## What is working
+(what most learners got, so it isn't broken by the revision)
+
+Be specific and concrete. Don't name learners. Never suggest group activities, peer discussion, live sessions or anything with a date.`;
+
+/** Count near-identical sticking points across runs (case- and punctuation-insensitive). */
+function rankedStickingPoints(rows: TutorialReportRow[]): Array<{ text: string; count: number }> {
+  const counts = new Map<string, { text: string; count: number }>();
+  for (const r of rows) {
+    for (const sp of r.summary?.sticking_points ?? []) {
+      const key = sp.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+      if (!key) continue;
+      const entry = counts.get(key) ?? { text: sp, count: 0 };
+      entry.count += 1;
+      counts.set(key, entry);
+    }
+  }
+  return [...counts.values()].sort((a, b) => b.count - a.count);
+}
+
+export async function generateGroupDebrief(
+  report: TutorialReport,
+  ctx: CourseCtx,
+  attribution: Attribution
+): Promise<{ kind: DebriefKind; markdown: string }> {
+  const kind = debriefKindFor(ctx.delivery);
   const completed = report.rows.filter((r) => r.summary);
   if (completed.length === 0) {
-    return "No completed runs yet — the debrief is generated from students' tutorial summaries once they finish.";
+    const what = kind === 'group_debrief' ? 'debrief brief' : kind === 'cohort_note' ? 'cohort note' : 'revision brief';
+    return { kind, markdown: `No completed runs yet — the ${what} is generated from learners' tutorial summaries once they finish.` };
   }
+  const who = ctx.delivery.hasLiveSessions ? 'Student' : 'Learner';
   const summaries = completed
     .map((r, i) => {
       const s = r.summary!;
       return (
-        `Student ${i + 1} (${s.mastery}, ${r.turns} turns)\n` +
+        `${who} ${i + 1} (${s.mastery}, ${r.turns} turns)\n` +
         `  Understood: ${s.understood.join('; ') || '—'}\n` +
         `  Stuck on: ${s.sticking_points.join('; ') || '—'}\n` +
         `  Teach-back: ${s.teachback}`
@@ -724,24 +839,33 @@ export async function generateGroupDebrief(report: TutorialReport, ctx: CourseCt
     .map((r) => `- (${r.nps_score}/10) ${r.nps_comment}`)
     .join('\n');
 
+  let content = `${tutorialBrief(report.tutorial, ctx)}\n\n# RUNS (${completed.length} completed of ${report.rows.length} started)\n${summaries}`;
+  if (comments) content += `\n\n# ${who.toUpperCase()} FEEDBACK COMMENTS\n${comments}`;
+  let system = GROUP_DEBRIEF_SYSTEM;
+  let ask = 'Write the debrief brief now.';
+  if (kind === 'cohort_note') {
+    system = COHORT_NOTE_SYSTEM;
+    ask = 'Write the cohort note and the instructor-only observations now.';
+  } else if (kind === 'revision_brief') {
+    system = REVISION_BRIEF_SYSTEM;
+    const materials = await getMaterials(report.tutorial.material_ids, ctx);
+    const ranked = rankedStickingPoints(completed);
+    content +=
+      `\n\n# MATERIALS THE TUTORIAL IS GROUNDED IN\n${materials.map((m) => `- ${m.title}`).join('\n') || '(none attached)'}` +
+      `\n\n# STICKING POINTS, PRE-COUNTED\n${ranked.map((r) => `- ${r.count}× ${r.text}`).join('\n') || '(none recorded)'}`;
+    ask = 'Write the course revision brief now.';
+  }
+
   const client = getAnthropic();
   const t0 = Date.now();
   const res = await client.messages.create({
     model: GEN_MODEL,
     max_tokens: 1500,
-    system: DEBRIEF_SYSTEM,
-    messages: [
-      {
-        role: 'user',
-        content:
-          `${tutorialBrief(report.tutorial, ctx)}\n\n# RUNS (${completed.length} completed of ${report.rows.length} started)\n${summaries}` +
-          (comments ? `\n\n# STUDENT FEEDBACK COMMENTS\n${comments}` : '') +
-          `\n\nWrite the debrief brief now.`,
-      },
-    ],
+    system,
+    messages: [{ role: 'user', content: `${content}\n\n${ask}` }],
   });
-  void recordApiCall({ ...attribution, endpoint: 'tutorial.debrief', model: GEN_MODEL, usage: res.usage, durationMs: Date.now() - t0 });
-  return textOf(res);
+  void recordApiCall({ ...attribution, endpoint: `tutorial.${kind}`, model: GEN_MODEL, usage: res.usage, durationMs: Date.now() - t0 });
+  return { kind, markdown: textOf(res) };
 }
 
 // ─── Instructor: draft a brief with AI ──────────────────────────────────────
@@ -756,7 +880,9 @@ export const DraftBrief = z.object({
 });
 export type DraftBrief = z.infer<typeof DraftBrief>;
 
-const DRAFT_SYSTEM = `You help a university instructor draft a one-on-one AI tutorial. The instructor gives you a topic (and sometimes rough notes); if course materials are provided, ground everything in them. Draft the brief the way the instructor would write notes for their best teaching assistant — first person, practical, specific.
+const DRAFT_SYSTEM = `You help an instructor draft a one-on-one AI tutorial. The instructor gives you a topic (and sometimes rough notes); if course materials are provided, ground everything in them. Draft the brief the way the instructor would write notes for their best teaching assistant — first person, practical, specific.
+
+If a pitch (reading level and tone) is given, honour it exactly: the opening question, the probes, the misconception questions and the success criteria must all be phrased at that level. "Adult Basic Education" means high-school completion: short sentences, everyday examples, no unexplained jargon.
 
 Return ONLY a JSON object, no code fences, with exactly these keys:
 {
@@ -772,27 +898,36 @@ export async function draftTutorialBrief(params: {
   ctx: CourseCtx;
   materialIds: number[];
   topic: string;
+  /** Reading level and tone; defaults to the course's pitch_default. */
+  pitch?: string;
   attribution: Attribution;
 }): Promise<DraftBrief> {
   const materials = await getMaterials(params.materialIds, params.ctx);
   const system: Anthropic.TextBlockParam[] = [{ type: 'text', text: DRAFT_SYSTEM }];
   const grounding = materialsBlock(materials);
   if (grounding) system.push({ type: 'text', text: grounding, cache_control: { type: 'ephemeral' } });
+  const pitch = (params.pitch ?? '').trim() || params.ctx.settings.pitch_default;
+  const level = params.ctx.settings.course_level ? `\nCourse level: ${COURSE_LEVEL_LABELS[params.ctx.settings.course_level]}` : '';
   return jsonCall({
     schema: DraftBrief,
     system,
-    userPrompt: `Course: ${params.ctx.title || '(untitled)'}\n\nTopic / rough notes from the instructor:\n${params.topic}\n\nDraft the tutorial brief JSON now.`,
+    userPrompt:
+      `Course: ${params.ctx.title || '(untitled)'}${level}` +
+      (pitch ? `\nPitch (reading level and tone): ${pitch}` : '') +
+      `\n\nTopic / rough notes from the instructor:\n${params.topic}\n\nDraft the tutorial brief JSON now.`,
     maxTokens: 2048,
     attribution: params.attribution,
     endpoint: 'tutorial.draft',
   });
 }
 
-// ─── Student: personalised lecture debrief ──────────────────────────────────
+// ─── Student: personalised lecture / study debrief ──────────────────────────
 //
 // Paski's "personalised lecture debrief": keep the core shared, personalise
 // the 5–10% that connects it to the student's own goals and context. Here: a
 // short written debrief of one course material, with one personal section.
+// Where the course has no live sessions it is a "study debrief": same shape,
+// but nothing presumes a lecture happened.
 
 const LECTURE_DEBRIEF_SYSTEM = `You write a short post-lecture debrief of one piece of course material (lecture notes, a transcript, or a reading) for one student. Most of it is the same for every student: the core ideas, in plain English, as a knowledgeable friend would recap them the morning after. One section is personal: it connects the material to this student's stated program, goals and interests.
 
@@ -808,6 +943,20 @@ Three questions, no answers.
 
 Ground everything in the provided material.`;
 
+const STUDY_DEBRIEF_SYSTEM = `You write a short study debrief of one piece of course material (a reading, a chapter of an open textbook, notes or a transcript) for one learner who is working through the course independently, with no lectures. Most of it is the same for every learner: the core ideas, in plain English, as a knowledgeable friend would recap them after you had both read it. One section is personal: it connects the material to this learner's stated program, goals and interests.
+
+Format (markdown, at most 450 words total):
+## The big ideas
+3–5 short paragraphs or a tight list: the ideas that matter, stated so they could be explained to someone who has never studied this.
+## Where people usually slip
+2–3 sentences on the common confusions.
+## Consider this in your context, {FIRST_NAME}
+2–3 sentences tying one or two of the ideas to the learner's program, goal or interests. Specific, not flattering. If their profile is empty, tie it to everyday life instead.
+## Three questions to test yourself
+Three questions, no answers.
+
+Ground everything in the provided material. Never refer to a lecture, a class, classmates or a schedule.`;
+
 export async function getDebrief(studentId: number, materialId: number): Promise<{ markdown: string; generated_at: string } | null> {
   const rows = await query<{ markdown: string; generated_at: string }>(
     `select markdown, generated_at::text from debrief where student_id = $1 and material_id = $2`,
@@ -820,17 +969,19 @@ export async function generateDebrief(params: {
   student: Student;
   profile: StudentProfile | null;
   material: Material;
+  ctx: CourseCtx;
   attribution: Attribution;
 }): Promise<{ markdown: string; generated_at: string }> {
-  const { student, profile, material } = params;
+  const { student, profile, material, ctx } = params;
   const firstName = student.display_name.split(/\s+/)[0] || 'there';
+  const live = ctx.delivery.hasLiveSessions;
   const client = getAnthropic();
   const t0 = Date.now();
   const res = await client.messages.create({
     model: GEN_MODEL,
     max_tokens: 1500,
     system: [
-      { type: 'text', text: LECTURE_DEBRIEF_SYSTEM.replace('{FIRST_NAME}', firstName) },
+      { type: 'text', text: (live ? LECTURE_DEBRIEF_SYSTEM : STUDY_DEBRIEF_SYSTEM).replace('{FIRST_NAME}', firstName) },
       { type: 'text', text: materialsBlock([material])!, cache_control: { type: 'ephemeral' } },
     ],
     messages: [
@@ -840,7 +991,11 @@ export async function generateDebrief(params: {
       },
     ],
   });
-  void recordApiCall({ ...params.attribution, endpoint: 'tutorial.lecture_debrief', model: GEN_MODEL, usage: res.usage, durationMs: Date.now() - t0 });
+  void recordApiCall({
+    ...params.attribution,
+    endpoint: live ? 'tutorial.lecture_debrief' : 'tutorial.study_debrief',
+    model: GEN_MODEL, usage: res.usage, durationMs: Date.now() - t0,
+  });
   const markdown = textOf(res);
   const rows = await query<{ markdown: string; generated_at: string }>(
     `insert into debrief (student_id, material_id, markdown) values ($1, $2, $3)
