@@ -96,18 +96,6 @@ Defaults are `claude-haiku-4-5` for both functions, the cheapest option that wor
 - **Materials are text.** Paste from slides, notes or a transcript. File upload and URL import are the obvious next step.
 - **One deployment, many courses.** Everything is scoped by platform issuer + course id. Instructors only see their own course's materials, tutorials and reports.
 
-## Moving this folder into its own repository
-
-The folder is self-contained. From the repository that holds it:
-
-```bash
-git subtree split --prefix=lti-tutor -b lti-tutor-standalone
-mkdir ../lti-tutor && cd ../lti-tutor && git init
-git pull ../<this-repo> lti-tutor-standalone
-```
-
-Then add your remote and push.
-
 ## License
 
 To be decided.
