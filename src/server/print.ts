@@ -205,9 +205,30 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+/**
+ * Re-level markdown headings so the top level is `base` and no heading is
+ * more than one level deeper than the one before it (a proper outline).
+ */
+export function normalizeMarkdownHeadings(markdown: string, base = 2): string {
+  const lines = markdown.split('\n');
+  const levels = lines.map((l) => /^(#{1,6})\s/.exec(l)?.[1]?.length ?? 0).filter((n) => n > 0);
+  if (levels.length === 0) return markdown;
+  const top = Math.min(...levels);
+  let prev = base - 1;
+  return lines.map((l) => {
+    const m = /^(#{1,6})\s+(.*)$/.exec(l);
+    if (!m) return l;
+    let level = m[1]!.length - top + base;
+    if (level > prev + 1) level = prev + 1;
+    level = Math.min(6, Math.max(base, level));
+    prev = level;
+    return `${'#'.repeat(level)} ${m[2]}`;
+  }).join('\n');
+}
+
 /** Model markdown → HTML with no raw HTML passthrough and [write] markers as ruled lines. */
 export function markdownToPrintHtml(markdown: string): string {
-  const safe = markdown.replace(/</g, '&lt;');
+  const safe = normalizeMarkdownHeadings(markdown, 1).replace(/</g, '&lt;');
   const html = marked.parse(safe, { gfm: true, breaks: false, async: false }) as string;
   const lines = '<div class="write" aria-label="Space to write">' + '<div></div>'.repeat(6) + '</div>';
   return html.replace(/<p>\s*\[write\]\s*<\/p>/g, lines).replace(/\[write\]/g, '');

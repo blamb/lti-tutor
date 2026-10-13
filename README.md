@@ -98,6 +98,12 @@ Nothing conversational works without a connection. What the tool can do is turn 
 
 ---
 
+## Accessibility
+
+The page is built to need few or no accommodations (WCAG 2.1 AA, BCcampus Accessibility Toolkit): one polite live region announces each complete tutor reply and every status change; the Speak button reports its state; recognised speech stays in the message box, editable, until the learner sends it; every control is keyboard-reachable with a visible focus ring, there is a skip link, and focus moves to the heading of each view as it opens; all colours are tokens with a dark theme and every text/background pair is at least 4.5:1; animation stops under `prefers-reduced-motion`; an "Aa" control sets text size and line spacing and remembers the choice; headings form a proper outline, including the model's markdown, which is re-levelled after rendering. The audit, with what was checked, fixed and remains, is in [docs/ACCESSIBILITY.md](docs/ACCESSIBILITY.md).
+
+---
+
 ## The learner model
 
 After every completed session, one small model call maps the summary onto concept entries for that learner in that course: a short concept name, a status (`secure`, `developing`, `fragile`, `misconception`) and one sentence of evidence (`learner_model` table, `src/server/learner.ts`, recorded in `api_call` as `tutorial.learner_model`). The most recent 40 entries go into every tutorial's system prompt after the profile, inside the cached block, so the tutor knows what this learner has already shown; recall sessions are additionally told which concepts to prioritise (fragile or misconceived first, then longest unseen).
