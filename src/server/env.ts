@@ -21,6 +21,10 @@ export const env = {
   // An Anthropic-compatible endpoint (e.g. a sovereign or institutional
   // gateway). Empty = api.anthropic.com.
   ANTHROPIC_BASE_URL: optional('ANTHROPIC_BASE_URL', ''),
+  // LMS hostnames (comma-separated, optional :port) the server must reach
+  // over plain HTTP because they share a private network where TLS ends at a
+  // load balancer the container cannot reach. See outbound.ts.
+  PLATFORM_HTTP_HOSTS: optional('PLATFORM_HTTP_HOSTS', ''),
   // Transcripts (tutor_turn) older than this many days are deleted nightly;
   // summaries, the learner model and reports stay. 0 = keep indefinitely.
   DATA_RETENTION_DAYS: Math.max(0, parseInt(optional('DATA_RETENTION_DAYS', '0'), 10) || 0),

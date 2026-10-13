@@ -4,6 +4,7 @@
  * (and before `npm start` in production).
  */
 
+import './outbound.js'; // first: routes listed platform hosts over internal HTTP before any client loads
 import { env } from './env.js';
 import { lti } from './lti.js';
 import { pool } from './db.js';
