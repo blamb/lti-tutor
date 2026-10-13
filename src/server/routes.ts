@@ -19,6 +19,8 @@
  * Instructor
  *   GET/PUT    /api/teacher/course               course settings (TRUFlex mode, level, pitch, disclosure)
  *   GET/POST   /api/teacher/materials, PUT/DELETE /api/teacher/materials/:id
+ *   POST       /api/teacher/materials/import-url { url, whole_book? } -> { materials, truncated, pressbooks, book? }
+ *   POST       /api/teacher/materials/upload     multipart 'file' -> { material, truncated, original_chars }
  *   GET/POST   /api/teacher/tutorials, PUT/DELETE /api/teacher/tutorials/:id
  *   POST       /api/teacher/tutorials/draft      { material_ids, topic, pitch? } -> { draft }
  *   GET        /api/teacher/tutorials/:id/report -> TutorialReport
@@ -28,6 +30,7 @@
 
 import express from 'express';
 import type { Request, Response } from 'express';
+import multer from 'multer';
 import type { DeepLinkContentItem, IdToken } from 'ltijs';
 import { z } from 'zod';
 import { lti, mintFullscreenNonce } from './lti.js';
@@ -38,6 +41,7 @@ import { courseCtxFromToken, CourseSettingsInput, upsertCourseSettings, courseCt
 import { TRUFLEX_MODES, deliveryLabels } from './delivery.js';
 import { isTutorialKind, kindCatalog, titledForKind, KINDS } from './kinds.js';
 import { listLearnerModel, deleteLearnerEntry, courseConceptReport, courseConceptsByWeek } from './learner.js';
+import { importFromUrl, extractFromFile, fitMaterial, ImportError, MAX_BOOK_CHAPTERS } from './importers.js';
 import {
   TutorialInput, ProfileInput, MaterialInput, START_MARKER,
   listMaterials, getMaterials, createMaterial, updateMaterial, deleteMaterial,
@@ -63,6 +67,10 @@ function idParam(req: Request, name: string): number | null {
 }
 
 function fail(res: Response, e: unknown, where: string): void {
+  if (e instanceof ImportError) {
+    res.status(e.status).json({ error: e.message });
+    return;
+  }
   if (e instanceof z.ZodError) {
     res.status(400).json({ error: 'Invalid input: ' + e.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') });
     return;
@@ -406,6 +414,51 @@ lti.app.post('/api/teacher/materials', async (req: Request, res: Response) => {
     res.json({ material: await createMaterial(t.ctx, MaterialInput.parse(req.body ?? {}), me.id) });
   } catch (e) {
     fail(res, e, 'POST /api/teacher/materials');
+  }
+});
+
+lti.app.post('/api/teacher/materials/import-url', async (req: Request, res: Response) => {
+  try {
+    const t = await teacherCtx(res);
+    if (!t) return;
+    const url = String(req.body?.url ?? '').trim();
+    if (!url) return res.status(400).json({ error: 'url is required' });
+    const me = await studentFromToken(t.token);
+    const out = await importFromUrl(url, { wholeBook: !!req.body?.whole_book });
+    const materials = [];
+    for (const d of out.docs) {
+      materials.push(await createMaterial(t.ctx, MaterialInput.parse({
+        title: d.title, body: d.text, source_url: d.source_url, license: d.license, attribution: d.attribution,
+      }), me.id));
+    }
+    res.json({
+      materials: materials.map((m) => ({ ...m, chars: m.body.length })),
+      truncated: out.docs.filter((d) => d.truncated).map((d) => ({ title: d.title, original_chars: d.original_chars })),
+      pressbooks: out.pressbooks,
+      book: out.book,
+      capped: out.docs.length >= MAX_BOOK_CHAPTERS,
+    });
+  } catch (e) {
+    fail(res, e, 'POST /api/teacher/materials/import-url');
+  }
+});
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024, files: 1 } });
+
+lti.app.post('/api/teacher/materials/upload', upload.single('file'), async (req: Request, res: Response) => {
+  try {
+    const t = await teacherCtx(res);
+    if (!t) return;
+    const file = (req as Request & { file?: { originalname: string; buffer: Buffer } }).file;
+    if (!file) return res.status(400).json({ error: 'No file received. Choose a .txt, .md, .html, .docx or .pdf file.' });
+    const me = await studentFromToken(t.token);
+    const { title, text } = await extractFromFile(file.originalname, file.buffer);
+    if (text.trim().length < 20) return res.status(400).json({ error: 'No readable text was found in that file (a scanned PDF needs OCR first).' });
+    const fit = fitMaterial(text.trim());
+    const material = await createMaterial(t.ctx, MaterialInput.parse({ title, body: fit.text, attribution: file.originalname.slice(0, 500) }), me.id);
+    res.json({ material: { ...material, chars: material.body.length }, truncated: fit.truncated, original_chars: fit.original_chars });
+  } catch (e) {
+    fail(res, e, 'POST /api/teacher/materials/upload');
   }
 });
 

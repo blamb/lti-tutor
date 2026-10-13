@@ -19,7 +19,7 @@ The Paski sequence as built. Lecture, then the tutorial, then a group debrief ru
 | Paski | LTI Tutor |
 |---|---|
 | Faculty co-design each tutorial "as they'd guide their best TA" | **Instructor view → Tutorials.** A brief: learning goal, opening question, TA notes (probes in order, what to do when stuck), misconceptions to listen for, success criteria, target length, and a **pitch** (reading level and tone). **Draft it with AI** writes a first pass grounded in your materials, at the pitch you set and shaped for the session's **kind** (see [Kinds of session](#kinds-of-session)). |
-| Grounded in course materials | **Course materials.** Paste lecture notes, transcripts or readings (up to ~200k characters each) and attach them to tutorials. They're prompt-cached, so repeated turns cost a fraction. |
+| Grounded in course materials | **Course materials.** Paste lecture notes, transcripts or readings, import a web page or open-textbook chapter by URL, or upload .txt, .md, .html, .docx or .pdf (up to ~200k characters each) and attach them to tutorials. Each carries its source URL, licence and attribution, and the tutor names the material it draws on. They're prompt-cached, so repeated turns cost a fraction. |
 | Built into the core sequence | **Deep linking.** In Moodle, add an *External tool* activity, pick this tool, click **Select content**: each tutorial becomes its own activity you place right after its lecture. Launching it opens that tutorial directly. |
 | Voice, student decides when to speak | **Push-to-talk** via the browser's Web Speech API (Chrome, Edge, Safari), replies read aloud via speech synthesis. No extra service, no extra cost. In person (Flex 1 to 7) typing is the default and voice is opt-in, since the learner may be in a classroom; typing is always a full equivalent. |
 | Student profile personalises 5–10% | **About you** (optional, invisible to the instructor) feeds the tutorial prompt and the lecture debrief's "Consider this in your context, *name*" section. The **learner model** (what they have shown in earlier sessions) follows it into every prompt. |
@@ -72,6 +72,18 @@ Every summary carries `mastery`, `understood`, `sticking_points`, `next_step` an
 
 ---
 
+## Materials from open sources
+
+TRU Open Learning uses open educational resources only, so the materials view says so and links to the [BC Open Collection](https://collection.bccampus.ca/). Three ways in, all landing as plain text with `source_url`, `license` and `attribution` (`src/server/importers.ts`):
+
+- **Paste text**, as before.
+- **Import by URL.** The server fetches the page, strips navigation, headers, footers and scripts, keeps headings and lists, and reads a Creative Commons licence link if there is one. If the site is Pressbooks (BCcampus open textbooks are), the tool uses the Pressbooks REST API (`/wp-json/pressbooks/v2/`): a chapter URL imports that chapter with the book's title, authors and licence; ticking **whole book** imports every chapter as its own material (capped at 80). Only public http(s) URLs are fetched; private and local addresses are refused.
+- **Upload a file**: `.txt`, `.md`, `.html`, `.docx` (via mammoth) or `.pdf` (via unpdf, text layer only; scanned PDFs need OCR first). Text over the material limit is cut and the instructor is told how long the original was.
+
+The tutor's rules ask it to name the material it is drawing on (title and, where it can tell, the chapter or section) so learners can find the passage in the open textbook. Some Pressbooks hosts sit behind bot protection that refuses server-side requests; the importer reports that plainly and suggests the site's own PDF, EPUB or HTML export, which uploads fine.
+
+---
+
 ## The learner model
 
 After every completed session, one small model call maps the summary onto concept entries for that learner in that course: a short concept name, a status (`secure`, `developing`, `fragile`, `misconception`) and one sentence of evidence (`learner_model` table, `src/server/learner.ts`, recorded in `api_call` as `tutorial.learner_model`). The most recent 40 entries go into every tutorial's system prompt after the profile, inside the cached block, so the tutor knows what this learner has already shown; recall sessions are additionally told which concepts to prioritise (fragile or misconceived first, then longest unseen).
@@ -121,6 +133,7 @@ src/server/
   kinds.ts        the six session kinds: stages, rules, summary fields, draft guidance; unit tests alongside
   courses.ts      course_settings CRUD and the per-request CourseCtx
   learner.ts      the learner model: update after each session, prompt block, recall candidates, course report
+  importers.ts    materials by URL (readable text, Pressbooks API) and by file (.txt .md .html .docx .pdf); unit tests alongside
   llm.ts          shared model-call helpers (JSON calls with schema + retry)
   tutorials.ts    materials, briefs, profiles, the staged dialogue, summaries, debriefs, AI draft
   grades.ts       AGS completion passback
@@ -129,7 +142,7 @@ src/server/
   anthropic.ts    SDK client + model selection
   costs.ts        price table + api_call recording + summary
   db.ts, migrate.ts, students.ts
-  migrations/001_init.sql … 004_learner_model.sql
+  migrations/001_init.sql … 005_material_sources.sql
 src/web/launch.html
 ```
 
@@ -159,7 +172,7 @@ Register the tool in Moodle: *Site administration → Plugins → External tool 
 ### First run as an instructor
 
 1. Launch the tool from the course → **Instructor view → Course settings** → pick the TRUFlex mode and, optionally, the course level and a default pitch.
-2. **Course materials** → paste a lecture's notes, a transcript or a chapter.
+2. **Course materials** → paste a lecture's notes, import an open-textbook chapter by URL, or upload a file.
 3. **Tutorials → New tutorial** → choose the kind → tick the material → type the topic → **Draft** → edit → set status **Published** → **Save**. **Try it as a student** previews it.
 4. Optionally place it in the course: *Add an activity → External tool → (this tool) → Select content*. To seed a course's mode from a template, add the custom parameter `truflex=<1–10>` to the activity.
 5. After students run it: **Report** → generate the debrief brief, cohort note or revision brief, whichever the mode calls for.
@@ -178,7 +191,7 @@ Defaults are `claude-haiku-4-5` for both functions, the cheapest option that wor
 
 - **Voice privacy.** Chrome's speech recognition sends audio to Google's speech service; Safari uses Apple's. Firefox has no speech recognition, so the Speak button is disabled there. Typing always works.
 - **Voice in the LMS.** Inside Moodle's iframe the microphone is blocked; the page points students to **⛶ Full screen**, which re-issues the session first-party and opens the tool in the full window.
-- **Materials are text.** Paste from slides, notes or a transcript. File upload and URL import are the obvious next step.
+- **Materials are text.** Images, diagrams and equations rendered as images in a chapter or PDF are not carried into the material; the tutor only sees what the text says about them.
 - **One deployment, many courses.** Everything is scoped by platform issuer + course id. Instructors only see their own course's materials, tutorials and reports.
 
 ## License

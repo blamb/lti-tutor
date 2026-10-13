@@ -47,6 +47,12 @@ export interface Material {
   lti_context_id: string;
   title: string;
   body: string;
+  /** Where it came from (URL import or upload); empty for pasted text. */
+  source_url: string;
+  /** e.g. "CC BY 4.0"; empty if unknown. */
+  license: string;
+  /** Who to credit, e.g. "Concepts of Biology by …, CC BY 4.0". */
+  attribution: string;
   created_by: number | null;
   created_at: string;
   updated_at: string;
@@ -197,13 +203,15 @@ export const START_MARKER = '[Tutorial start]';
 
 // ─── Validation ─────────────────────────────────────────────────────────────
 
-/** Per-material and per-tutorial grounding caps (characters; ~4 chars/token). */
-export const MATERIAL_MAX_CHARS = 200_000;
-export const GROUNDING_MAX_CHARS = 400_000;
+import { MATERIAL_MAX_CHARS, GROUNDING_MAX_CHARS } from './limits.js';
+export { MATERIAL_MAX_CHARS, GROUNDING_MAX_CHARS };
 
 export const MaterialInput = z.object({
   title: z.string().trim().min(1).max(160),
   body: z.string().trim().min(1).max(MATERIAL_MAX_CHARS),
+  source_url: z.string().trim().max(2000).default(''),
+  license: z.string().trim().max(200).default(''),
+  attribution: z.string().trim().max(500).default(''),
 });
 export type MaterialInput = z.infer<typeof MaterialInput>;
 
@@ -256,18 +264,18 @@ export async function getMaterials(ids: number[], ctx: CourseCtx): Promise<Mater
 
 export async function createMaterial(ctx: CourseCtx, input: MaterialInput, createdBy: number): Promise<Material> {
   const rows = await query<Material>(
-    `insert into material (lti_iss, lti_context_id, title, body, created_by)
-     values ($1,$2,$3,$4,$5) returning *`,
-    [ctx.iss, ctx.contextId, input.title, input.body, createdBy]
+    `insert into material (lti_iss, lti_context_id, title, body, source_url, license, attribution, created_by)
+     values ($1,$2,$3,$4,$5,$6,$7,$8) returning *`,
+    [ctx.iss, ctx.contextId, input.title, input.body, input.source_url, input.license, input.attribution, createdBy]
   );
   return rows[0]!;
 }
 
 export async function updateMaterial(id: number, ctx: CourseCtx, input: MaterialInput): Promise<Material | null> {
   const rows = await query<Material>(
-    `update material set title = $4, body = $5, updated_at = now()
+    `update material set title = $4, body = $5, source_url = $6, license = $7, attribution = $8, updated_at = now()
      where id = $1 and lti_iss = $2 and lti_context_id = $3 returning *`,
-    [id, ctx.iss, ctx.contextId, input.title, input.body]
+    [id, ctx.iss, ctx.contextId, input.title, input.body, input.source_url, input.license, input.attribution]
   );
   return rows[0] ?? null;
 }
@@ -296,7 +304,8 @@ function materialsBlock(materials: Material[]): string | null {
       ? m.body.slice(0, Math.max(0, GROUNDING_MAX_CHARS - total)) + '\n[…truncated: grounding limit reached]'
       : m.body;
     total += body.length;
-    parts.push(`\n## ${m.title}\n${body}`);
+    const src = [m.license ? `licence: ${m.license}` : '', m.source_url ? `source: ${m.source_url}` : ''].filter(Boolean).join('; ');
+    parts.push(`\n## ${m.title}${src ? ` (${src})` : ''}\n${body}`);
     if (total >= GROUNDING_MAX_CHARS) break;
   }
   return parts.join('\n');
@@ -489,6 +498,7 @@ function buildTutorialRules(d: Delivery, kind: TutorialKind): string {
     'Vary technique: definition-probing, counter-example, cause-effect chain, zooming in and out between detail and big picture, analogy stress-test.',
     "If the student raises something correct that's adjacent to the goal, credit it briefly before steering back.",
     'Stay grounded in the course materials provided. If none are attached, draw on general knowledge of the subject described in the brief, and say so if asked where something comes from. If the student asks something outside the materials, say what you can and point them to the instructor.',
+    'When you draw on a course material, name it — its title and, if you can tell, the chapter or section — so the student can find the passage themselves in the open textbook or notes. Briefly, in passing; never as a citation list.',
     "Personalise lightly: about one example or analogy in ten should draw on the student's own context and interests. Never make the tutorial about them instead of the subject.",
   ];
   // Delivery-mode rules (hasLiveSessions / hasCohort), never the TRUFlex number.

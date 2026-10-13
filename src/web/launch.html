@@ -334,13 +334,29 @@
 
     <div class="tpane" data-tpane="materials" hidden>
       <div data-pane="list">
-        <p class="muted" style="margin:.25rem 0 .75rem">
-          Paste lecture notes, a transcript, or a reading as plain text. Materials ground the tutorials you attach them to
-          and power the students' personalised lecture debriefs. Up to about 200,000 characters each.
+        <p class="muted" style="margin:.25rem 0 .5rem">
+          Paste text, import a web page or open-textbook chapter by URL, or upload a file. Materials ground the sessions you attach
+          them to and power the learners' debriefs; the tutor names the material it draws on so learners can find the passage. Up to about 200,000 characters each.
         </p>
-        <div class="form-row" style="margin-bottom:.75rem"><button class="btn" id="material-new" type="button">+ Add material</button></div>
+        <p class="muted" style="margin:0 0 .75rem">
+          <strong>Open resources only.</strong> TRU Open Learning uses open educational resources, never publisher content. Find open textbooks in the
+          <a href="https://collection.bccampus.ca/" target="_blank" rel="noopener">BC Open Collection</a>. Most are Pressbooks sites: a chapter URL
+          imports with its title and licence, and "whole book" imports every chapter as its own material.
+        </p>
+        <div class="form-row" style="margin-bottom:.5rem">
+          <button class="btn" id="material-new" type="button">+ Paste text</button>
+          <input type="url" id="material-import-url" placeholder="https://… a web page or Pressbooks chapter" style="flex:1;min-width:240px;padding:.45rem .6rem;border:1px solid var(--border);border-radius:6px;font:inherit">
+          <label style="display:flex;align-items:center;gap:.3rem;font-size:.85rem;cursor:pointer"><input type="checkbox" id="material-import-book"> whole book</label>
+          <button class="btn btn-ghost" id="material-import-btn" type="button">Import URL</button>
+        </div>
+        <div class="form-row" style="margin-bottom:.5rem">
+          <input type="file" id="material-file" accept=".txt,.md,.markdown,.html,.htm,.docx,.pdf" style="font:inherit;font-size:.85rem">
+          <button class="btn btn-ghost" id="material-upload-btn" type="button">Upload file</button>
+          <span class="muted">.txt, .md, .html, .docx, .pdf · up to 25 MB</span>
+        </div>
+        <div class="muted" id="material-import-status" style="margin-bottom:.5rem"></div>
         <div style="overflow-x:auto">
-          <table class="tbl"><thead><tr><th>Title</th><th class="num">Size</th><th>Added</th><th></th></tr></thead><tbody id="materials-tbody"></tbody></table>
+          <table class="tbl"><thead><tr><th>Title</th><th>Source</th><th class="num">Size</th><th>Added</th><th></th></tr></thead><tbody id="materials-tbody"></tbody></table>
         </div>
         <div class="err" id="materials-err"></div>
       </div>
@@ -348,7 +364,12 @@
         <h4 id="material-edit-title" style="margin:.25rem 0 .75rem;font-size:.95rem">Add material</h4>
         <form class="form-grid" id="material-form" autocomplete="off">
           <label>Title <span class="hint">e.g. "Week 3 lecture: sampling distributions"</span><input type="text" name="title" maxlength="160" required></label>
-          <label>Text <span class="hint">Plain text or markdown. Paste from your notes, slides or a transcript.</span><textarea name="body" class="huge" required></textarea></label>
+          <label>Text <span class="hint">Plain text or markdown. Paste from your notes, slides or a transcript, or edit an imported chapter.</span><textarea name="body" class="huge" required></textarea></label>
+          <label>Source URL <span class="hint">Where this came from, if anywhere. Shown to the tutor so it can point learners to the original.</span><input type="url" name="source_url" maxlength="2000"></label>
+          <div class="form-row">
+            <label style="flex:1;min-width:160px">Licence <span class="hint">e.g. CC BY 4.0</span><input type="text" name="license" maxlength="200"></label>
+            <label style="flex:2;min-width:240px">Attribution <span class="hint">Who to credit, e.g. "Concepts of Biology by OpenStax, CC BY 4.0"</span><input type="text" name="attribution" maxlength="500"></label>
+          </div>
           <div class="form-row">
             <button class="btn" type="submit" id="material-save">Save</button>
             <button class="btn btn-ghost" type="button" id="material-cancel">Cancel</button>
@@ -1136,10 +1157,12 @@
     try {
       tm.materials = (await api('/api/teacher/materials')).materials || [];
       tbody.innerHTML = '';
-      if (!tm.materials.length) { tbody.innerHTML = '<tr><td colspan="4" class="muted">No materials yet. Add lecture notes, a transcript or a reading to ground tutorials and debriefs.</td></tr>'; }
+      if (!tm.materials.length) { tbody.innerHTML = '<tr><td colspan="5" class="muted">No materials yet. Paste notes, import an open-textbook chapter, or upload a file to ground sessions and debriefs.</td></tr>'; }
       for (const m of tm.materials) {
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${escapeHtml(m.title)}</td><td class="num">${(m.chars / 1000).toFixed(1)}k chars</td><td>${fmtTime(m.created_at)}</td><td></td>`;
+        const src = m.source_url ? `<a href="${escapeHtml(m.source_url)}" target="_blank" rel="noopener">${escapeHtml(truncate(m.source_url.replace(/^https?:\/\//, ''), 40))}</a>` : '<span class="muted">pasted</span>';
+        const lic = m.license ? ` <span class="chip" title="${escapeHtml(m.attribution || '')}">${escapeHtml(m.license)}</span>` : '';
+        tr.innerHTML = `<td>${escapeHtml(m.title)}</td><td>${src}${lic}</td><td class="num">${(m.chars / 1000).toFixed(1)}k chars</td><td>${fmtTime(m.created_at)}</td><td></td>`;
         const b = document.createElement('button'); b.className = 'link-btn'; b.type = 'button'; b.textContent = 'Edit';
         b.addEventListener('click', () => editMaterial(m));
         tr.lastElementChild.appendChild(b); tbody.appendChild(tr);
@@ -1152,6 +1175,9 @@
     $('#material-edit-title').textContent = m ? 'Edit material' : 'Add material';
     materialForm.elements.title.value = m ? m.title : '';
     materialForm.elements.body.value = m ? m.body : '';
+    materialForm.elements.source_url.value = m ? (m.source_url || '') : '';
+    materialForm.elements.license.value = m ? (m.license || '') : '';
+    materialForm.elements.attribution.value = m ? (m.attribution || '') : '';
     $('#material-delete').hidden = !m; $('#material-form-err').textContent = '';
     updateMaterialSize();
     paneShow('materials', 'edit');
@@ -1163,7 +1189,8 @@
   materialForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const err = $('#material-form-err'); err.textContent = ''; $('#material-save').disabled = true;
-    const body = { title: materialForm.elements.title.value.trim(), body: materialForm.elements.body.value.trim() };
+    const f = materialForm.elements;
+    const body = { title: f.title.value.trim(), body: f.body.value.trim(), source_url: f.source_url.value.trim(), license: f.license.value.trim(), attribution: f.attribution.value.trim() };
     try {
       if (tm.editingMaterial) await api(`/api/teacher/materials/${tm.editingMaterial.id}`, { method: 'PUT', body });
       else await api('/api/teacher/materials', { body });
@@ -1178,6 +1205,38 @@
       tm.editingMaterial = null; await loadTeacherMaterials(); paneShow('materials', 'list');
     } catch (ex) { $('#material-form-err').textContent = friendlyError(ex); }
   });
+  // ─── Import by URL / upload ───
+  function importStatus(msg, isError) { const el = $('#material-import-status'); el.textContent = msg; el.style.color = isError ? 'var(--bad)' : ''; }
+  function truncationNote(list) {
+    return list && list.length ? ` ${list.length === 1 ? 'One was' : list.length + ' were'} longer than the 200,000-character limit and ${list.length === 1 ? 'was' : 'were'} cut: ${list.map((t) => `${t.title} (${Math.round(t.original_chars / 1000)}k chars)`).join('; ')}.` : '';
+  }
+  $('#material-import-btn').addEventListener('click', async () => {
+    const url = $('#material-import-url').value.trim(); const btn = $('#material-import-btn');
+    if (!url) { importStatus('Paste a URL first.', true); return; }
+    const whole = $('#material-import-book').checked;
+    btn.disabled = true; importStatus(whole ? 'Importing the book, chapter by chapter… this can take a minute.' : 'Importing…');
+    try {
+      const d = await api('/api/teacher/materials/import-url', { body: { url, whole_book: whole } });
+      const n = d.materials.length;
+      importStatus(`Imported ${n} material${n === 1 ? '' : 's'}${d.book ? ` from "${d.book}"` : ''}${d.pressbooks ? ' via the Pressbooks API' : ''}.${d.capped ? ' Stopped at the first 80 chapters.' : ''}${truncationNote(d.truncated)}`);
+      $('#material-import-url').value = ''; await loadTeacherMaterials();
+    } catch (e) { importStatus(friendlyError(e), true); } finally { btn.disabled = false; }
+  });
+  $('#material-upload-btn').addEventListener('click', async () => {
+    const input = $('#material-file'); const btn = $('#material-upload-btn');
+    const file = input.files && input.files[0];
+    if (!file) { importStatus('Choose a file first.', true); return; }
+    btn.disabled = true; importStatus(`Reading ${file.name}…`);
+    try {
+      const fd = new FormData(); fd.append('file', file);
+      const resp = await fetch(apiUrl('/api/teacher/materials/upload'), { method: 'POST', body: fd });
+      const d = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(d.error || 'Server returned ' + resp.status);
+      importStatus(`Added "${d.material.title}" (${Math.round(d.material.chars / 1000)}k chars).${d.truncated ? ` It was longer than the 200,000-character limit (${Math.round(d.original_chars / 1000)}k) and was cut; consider splitting it by chapter.` : ''}`);
+      input.value = ''; await loadTeacherMaterials();
+    } catch (e) { importStatus(friendlyError(e), true); } finally { btn.disabled = false; }
+  });
+
   function renderMaterialChecks(selected = []) {
     const box = $('#tutorial-form-materials'); box.innerHTML = '';
     if (!tm.materials.length) { box.innerHTML = '<span class="muted">No course materials yet — add some under the "Course materials" tab. Without any, the tutor relies on general knowledge.</span>'; return; }
