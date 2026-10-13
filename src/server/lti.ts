@@ -101,6 +101,19 @@ lti.setup(
         res.redirect(`/?ltik=${encodeURIComponent(entry.ltik)}`);
       });
 
+      // Browser libraries served from this origin (no CDN; the page loads
+      // them lazily after first paint and renders plain text until then).
+      const VENDOR: Record<string, string> = {
+        'marked.umd.js': join(HERE, '..', '..', 'node_modules', 'marked', 'lib', 'marked.umd.js'),
+        'purify.min.js': join(HERE, '..', '..', 'node_modules', 'dompurify', 'dist', 'purify.min.js'),
+      };
+      server.get('/vendor/:file', (req, res) => {
+        const path = VENDOR[String(req.params.file)];
+        if (!path) return res.status(404).end();
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        res.sendFile(path);
+      });
+
       // Operator-only cost summary (JSON). Not exposed inside the LMS.
       server.get('/admin/costs', async (req, res) => {
         if (!env.ADMIN_TOKEN) return res.status(503).type('text').send('Admin endpoints are disabled (set ADMIN_TOKEN).');

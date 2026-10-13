@@ -53,6 +53,8 @@ Open Learning's continuous-entry courses: flexible start, up to 30 weeks, no coh
 
 With no cohort there is nothing to debrief, so the report's synthesis becomes a **course revision brief**: sticking points and misconceptions ranked by frequency across every completed run, with suggestions for which material or part of the brief to revise.
 
+For learners with limited or no internet (the former print mode grew out of Flex 9), every session also exists as a **paper version** and every material as a printable debrief; the instructor's **Export course pack** bundles them for the print shop or an offline device. See [Offline and low-bandwidth](#offline-and-low-bandwidth).
+
 ---
 
 ## Kinds of session
@@ -81,6 +83,18 @@ TRU Open Learning uses open educational resources only, so the materials view sa
 - **Upload a file**: `.txt`, `.md`, `.html`, `.docx` (via mammoth) or `.pdf` (via unpdf, text layer only; scanned PDFs need OCR first). Text over the material limit is cut and the instructor is told how long the original was.
 
 The tutor's rules ask it to name the material it is drawing on (title and, where it can tell, the chapter or section) so learners can find the passage in the open textbook. Some Pressbooks hosts sit behind bot protection that refuses server-side requests; the importer reports that plainly and suggests the site's own PDF, EPUB or HTML export, which uploads fine.
+
+---
+
+## Offline and low-bandwidth
+
+Nothing conversational works without a connection. What the tool can do is turn the same briefs into printable, self-contained artifacts so an offline learner gets the same learning design on paper (`src/server/print.ts`):
+
+- **Paper version of every session.** One model call turns the brief into a sheet the learner works through alone with a pen, following the same stages: for a tutorial, the opening question, the probes rewritten as questions with ruled space, the misconceptions as "check yourself" prompts, a written teach-back, and the success criteria as a checklist; equivalent structures for readiness and preparation checks, practice (feedback checklist, revise, one more), reflection and recall. Stored in `tutorial_print`, keyed by a hash of the brief, so it regenerates when the brief changes (recorded as `tutorial.print_script`). Learners open it from the **📄 Paper** button on each session; instructors from the editor.
+- **Debriefs as files.** A learner's own debrief downloads as a single HTML file with inline CSS and no JavaScript, and prints cleanly. For the course pack, each material also gets a non-personalised debrief template with space to "make it yours" (`material_debrief_template`, `tutorial.debrief_template`).
+- **Export course pack.** One zip: every published session's paper script (HTML and Markdown), every material's debrief template, and `index.txt`.
+- **Printing in the app.** A print stylesheet turns the tutorial transcript, the end-of-session summary and a debrief into a clean record, so a learner on an intermittent connection can keep one.
+- **Slow connections.** The page carries no CDN dependency: marked and DOMPurify are served from the tool itself and loaded lazily after first paint, so the transcript shows as plain text immediately and re-renders once they arrive (or never, with nothing lost). The page is about 110 KB before fonts.
 
 ---
 
@@ -120,7 +134,7 @@ Per-course settings also hold a course level (ABE, undergraduate, graduate), a d
 
 - **LTI 1.3** via [`ltijs`](https://github.com/Cvmcosta/ltijs) (Express-based), Postgres-backed. Dynamic registration, deep linking, Assignment & Grade Services.
 - **Backend** TypeScript + Node 20+, Postgres for app data. Migrations in `src/server/migrations`.
-- **Frontend** one HTML file served by the launch handler; no build step. Markdown via marked + DOMPurify from a CDN.
+- **Frontend** one HTML file served by the launch handler; no build step. Markdown via marked + DOMPurify, served from the tool itself at `/vendor/…` and loaded lazily.
 - **AI** Anthropic Claude through the official SDK. Models per function from env. System prompt order is rules (one fixed string per delivery variant) → materials (cached) → brief + profile (cached) → progress note, so a turn mid-tutorial re-reads the materials from cache.
 - **Cost tracking** every call writes model, tokens and USD to `api_call`; `/admin/costs?token=…` returns a JSON summary.
 
@@ -134,6 +148,7 @@ src/server/
   courses.ts      course_settings CRUD and the per-request CourseCtx
   learner.ts      the learner model: update after each session, prompt block, recall candidates, course report
   importers.ts    materials by URL (readable text, Pressbooks API) and by file (.txt .md .html .docx .pdf); unit tests alongside
+  print.ts        paper versions of sessions, debrief templates, standalone HTML, the course pack zip
   llm.ts          shared model-call helpers (JSON calls with schema + retry)
   tutorials.ts    materials, briefs, profiles, the staged dialogue, summaries, debriefs, AI draft
   grades.ts       AGS completion passback
@@ -142,7 +157,7 @@ src/server/
   anthropic.ts    SDK client + model selection
   costs.ts        price table + api_call recording + summary
   db.ts, migrate.ts, students.ts
-  migrations/001_init.sql … 005_material_sources.sql
+  migrations/001_init.sql … 006_print.sql
 src/web/launch.html
 ```
 

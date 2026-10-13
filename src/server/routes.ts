@@ -12,6 +12,8 @@
  *   POST /api/tutorials/session/:sid/turn       { message } | { begin: true } -> SSE
  *   POST /api/tutorials/session/:sid/complete   -> { summary, grade }
  *   POST /api/tutorials/session/:sid/nps        { score, comment? }
+ *   GET  /api/tutorials/:id/print               -> standalone HTML paper version (?format=md|json, ?download=1)
+ *   GET  /api/materials/:id/debrief.html        -> the learner's own debrief as a standalone file (?download=1)
  *   GET  /api/materials                         -> { materials: [{ id, title, has_debrief }] }
  *   GET  /api/materials/:id/debrief             -> { debrief | null }
  *   POST /api/materials/:id/debrief             -> { debrief }   (generates)
@@ -25,6 +27,7 @@
  *   POST       /api/teacher/tutorials/draft      { material_ids, topic, pitch? } -> { draft }
  *   GET        /api/teacher/tutorials/:id/report -> TutorialReport
  *   POST       /api/teacher/tutorials/:id/debrief -> { kind, debrief }  (group debrief / cohort note / revision brief)
+ *   GET        /api/teacher/course-pack.zip      -> zip of every published paper script + debrief template + index.txt
  *   POST       /api/deeplink                     (form) -> auto-submitting deep-link form
  */
 
@@ -42,6 +45,7 @@ import { TRUFLEX_MODES, deliveryLabels } from './delivery.js';
 import { isTutorialKind, kindCatalog, titledForKind, KINDS } from './kinds.js';
 import { listLearnerModel, deleteLearnerEntry, courseConceptReport, courseConceptsByWeek } from './learner.js';
 import { importFromUrl, extractFromFile, fitMaterial, ImportError, MAX_BOOK_CHAPTERS } from './importers.js';
+import { ensurePrintScript, printScriptHtml, personalDebriefHtml, buildCoursePack } from './print.js';
 import {
   TutorialInput, ProfileInput, MaterialInput, START_MARKER,
   listMaterials, getMaterials, createMaterial, updateMaterial, deleteMaterial,
@@ -299,6 +303,56 @@ lti.app.delete('/api/learning/:id', async (req: Request, res: Response) => {
   }
 });
 
+// ─── Paper versions (offline) ───────────────────────────────────────────────
+
+function fileSlug(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'file';
+}
+
+lti.app.get('/api/tutorials/:id/print', async (req: Request, res: Response) => {
+  try {
+    const { token, ctx } = await ctxOf(res);
+    const id = idParam(req, 'id');
+    if (!id) return res.status(400).json({ error: 'bad tutorial id' });
+    const tutorial = await getTutorial(id, ctx);
+    if (!tutorial || (tutorial.status !== 'published' && !isTeacher(token))) return res.status(404).json({ error: 'tutorial not found' });
+    const me = await studentFromToken(token);
+    const script = await ensurePrintScript(tutorial, ctx, attr(token, me.id, null, 'tutorial.print_script'), {
+      force: isTeacher(token) && req.query.regenerate === '1',
+    });
+    if (req.query.format === 'json') return res.json({ markdown: script.markdown, generated_at: script.generated_at });
+    const name = fileSlug(`${KINDS[tutorial.kind].label}-${tutorial.title}`);
+    if (req.query.format === 'md') {
+      res.type('text/markdown; charset=utf-8');
+      if (req.query.download === '1') res.setHeader('Content-Disposition', `attachment; filename="${name}.md"`);
+      return res.send(script.markdown);
+    }
+    res.type('html');
+    if (req.query.download === '1') res.setHeader('Content-Disposition', `attachment; filename="${name}.html"`);
+    res.send(printScriptHtml(tutorial, script, ctx));
+  } catch (e) {
+    fail(res, e, 'GET /api/tutorials/:id/print');
+  }
+});
+
+lti.app.get('/api/materials/:id/debrief.html', async (req: Request, res: Response) => {
+  try {
+    const { token, ctx } = await ctxOf(res);
+    const id = idParam(req, 'id');
+    if (!id) return res.status(400).json({ error: 'bad material id' });
+    const [material] = await getMaterials([id], ctx);
+    if (!material) return res.status(404).json({ error: 'material not found' });
+    const student = await studentFromToken(token);
+    const debrief = await getDebrief(student.id, id);
+    if (!debrief) return res.status(404).json({ error: 'No debrief written yet. Open the material and click "Write my debrief" first.' });
+    res.type('html');
+    if (req.query.download === '1') res.setHeader('Content-Disposition', `attachment; filename="${fileSlug('debrief-' + material.title)}.html"`);
+    res.send(personalDebriefHtml(material, debrief.markdown, ctx, debrief.generated_at));
+  } catch (e) {
+    fail(res, e, 'GET /api/materials/:id/debrief.html');
+  }
+});
+
 // ─── Student: lecture / study debriefs ──────────────────────────────────────
 
 lti.app.get('/api/materials', async (req: Request, res: Response) => {
@@ -374,6 +428,24 @@ lti.app.put('/api/teacher/course', async (req: Request, res: Response) => {
     res.json({ ...publicCourse(ctx), settings, modes: TRUFLEX_MODES, levels: COURSE_LEVEL_LABELS });
   } catch (e) {
     fail(res, e, 'PUT /api/teacher/course');
+  }
+});
+
+// ─── Instructor: course pack (offline) ──────────────────────────────────────
+
+lti.app.get('/api/teacher/course-pack.zip', async (req: Request, res: Response) => {
+  try {
+    const t = await teacherCtx(res);
+    if (!t) return;
+    const me = await studentFromToken(t.token);
+    const pack = await buildCoursePack(t.ctx, attr(t.token, me.id, null, 'tutorial.course_pack'));
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileSlug((t.ctx.title || 'course') + '-offline-pack')}.zip"`);
+    res.setHeader('X-Pack-Tutorials', String(pack.tutorials));
+    res.setHeader('X-Pack-Materials', String(pack.materials));
+    res.send(Buffer.from(pack.zip));
+  } catch (e) {
+    fail(res, e, 'GET /api/teacher/course-pack.zip');
   }
 });
 

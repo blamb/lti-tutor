@@ -14,10 +14,13 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.0",
+    "dompurify": "^3.4.17",
     "dotenv": "^16.4.5",
+    "fflate": "^0.8.3",
     "ltijs": "^5.9.9",
     "ltijs-sequelize": "^2.4.4",
     "mammoth": "^1.13.0",
+    "marked": "^18.1.1",
     "multer": "^2.4.0",
     "pg": "^8.13.0",
     "sequelize": "^6.37.0",

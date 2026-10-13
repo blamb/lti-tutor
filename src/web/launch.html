@@ -4,8 +4,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{TOOL_NAME}}</title>
-<script src="https://cdn.jsdelivr.net/npm/marked@14/marked.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
 <style>
   :root {
     --bg: #fafafa; --fg: #1a1a1a; --muted: #666; --muted-2: #999;
@@ -112,6 +110,21 @@
   .teacher-tabs { display: flex; gap: .25rem; border-bottom: 1px solid var(--border); margin-bottom: .75rem; }
   .teacher-tabs .ttab { padding: .4rem .9rem; cursor: pointer; border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0; font-size: .9rem; color: var(--muted); }
   .teacher-tabs .ttab.active { background: var(--card); border-color: var(--border); color: var(--fg); margin-bottom: -1px; padding-bottom: calc(.4rem + 1px); }
+
+  /* Print: the transcript, a summary or a debrief as a clean record on paper */
+  @media print {
+    body { padding: 0; background: #fff; color: #000; }
+    header .header-actions, .tut-toolbar, .compose, .voice-row, #tutorial-mode-hint, .nps, .back-btn, .teacher-tabs, button, .err:empty { display: none !important; }
+    .sticky-bar { position: static; border: none; margin: 0; padding: 0 0 .5rem; }
+    .card { border: none; box-shadow: none; padding: 0; margin-top: .5rem; }
+    .turns { max-height: none; overflow: visible; border: none; padding: 0; }
+    .turn { page-break-inside: avoid; }
+    .turn .bubble { max-width: 100%; border: 1px solid #ccc; background: #fff !important; color: #000 !important; }
+    .turn.user .bubble::before { content: "You: "; font-weight: 600; }
+    .turn.assistant .bubble::before { content: "Tutor: "; font-weight: 600; }
+    .view { display: none; } .view.active { display: block; }
+    a[href]::after { content: ""; }
+  }
 </style>
 </head>
 <body data-role="{{ROLE}}" data-return-url="{{RETURN_URL}}" data-tutorial-id="{{TUTORIAL_ID}}" data-delivery="{{DELIVERY}}">
@@ -200,6 +213,7 @@
       <div class="tut-toolbar">
         <span class="chip live" id="tutorial-stage">Starting…</span>
         <span class="spacer"></span>
+        <button class="link-btn" id="tutorial-print" type="button" title="Print or save this conversation as a record">🖨 Print</button>
         <button class="link-btn" id="tutorial-restart" type="button" title="Throw away this run and start from the beginning">↻ Start over</button>
         <button class="btn" id="tutorial-finish" type="button" title="End the tutorial and get your summary">✓ Finish tutorial</button>
       </div>
@@ -250,9 +264,11 @@
           A tutorial with "gradebook column" on posts completion (1/1) to the gradebook when a student finishes.
         </p>
         <div class="form-row" style="margin-bottom:.75rem">
-          <button class="btn" id="tutorial-new" type="button">+ New tutorial</button>
+          <button class="btn" id="tutorial-new" type="button">+ New session</button>
+          <button class="btn btn-ghost" id="course-pack-btn" type="button" title="One zip: every published session as a paper script, every material's debrief, and an index. For the print shop or an offline device.">⬇ Export course pack</button>
           <span id="tutorials-ags" class="muted"></span>
         </div>
+        <div class="muted" id="course-pack-status" style="margin:-.25rem 0 .5rem"></div>
         <div style="overflow-x:auto">
           <table class="tbl" id="tutorials-table">
             <thead><tr><th>Tutorial</th><th>Status</th><th class="num">Started</th><th class="num">Completed</th><th></th></tr></thead>
@@ -304,6 +320,7 @@
           <div class="form-row">
             <button class="btn" type="submit" id="tutorial-save">Save</button>
             <button class="btn btn-ghost" type="button" id="tutorial-try">▶ Try it as a student</button>
+            <button class="btn btn-ghost" type="button" id="tutorial-paper" title="Open the paper version in a new tab (regenerated when the brief changes)">📄 Paper version</button>
             <button class="btn btn-ghost" type="button" id="tutorial-cancel">Cancel</button>
             <button class="link-btn" type="button" id="tutorial-delete" style="color:var(--bad)">Delete</button>
           </div>
@@ -488,14 +505,40 @@
   function escapeHtml(s) {
     return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
+  // Markdown rendering. The libraries come from this server, not a CDN, and
+  // load lazily after first paint; until they arrive everything renders as
+  // escaped text with line breaks, then re-renders once.
+  const mdRegistry = new Set();
+  let mdLibsReady = !!(window.marked && window.DOMPurify);
   function mdToHtml(text) {
     const raw = String(text ?? '');
-    try {
-      const html = window.marked ? window.marked.parse(raw, { breaks: true, gfm: true }) : escapeHtml(raw).replace(/\n/g, '<br>');
-      return window.DOMPurify ? window.DOMPurify.sanitize(html) : html;
-    } catch { return escapeHtml(raw).replace(/\n/g, '<br>'); }
+    if (!mdLibsReady) return escapeHtml(raw).replace(/\n/g, '<br>');
+    try { return window.DOMPurify.sanitize(window.marked.parse(raw, { breaks: true, gfm: true })); }
+    catch { return escapeHtml(raw).replace(/\n/g, '<br>'); }
   }
-  function setMd(el, text) { el.classList.add('md'); el.innerHTML = mdToHtml(text); }
+  function setMd(el, text) { el.classList.add('md'); el._raw = String(text ?? ''); el.innerHTML = mdToHtml(el._raw); if (!mdLibsReady) mdRegistry.add(el); }
+  function loadScript(src) { return new Promise((resolve, reject) => { const sc = document.createElement('script'); sc.src = src; sc.async = true; sc.onload = resolve; sc.onerror = reject; document.head.appendChild(sc); }); }
+  function loadMdLibs() {
+    if (mdLibsReady) return;
+    Promise.all([loadScript('/vendor/marked.umd.js'), loadScript('/vendor/purify.min.js')]).then(() => {
+      mdLibsReady = !!(window.marked && window.DOMPurify);
+      if (!mdLibsReady) return;
+      for (const el of mdRegistry) { if (el.isConnected && el._raw !== undefined) el.innerHTML = mdToHtml(el._raw); }
+      mdRegistry.clear();
+    }).catch(() => { /* offline or blocked: plain-text rendering stays, nothing is lost */ });
+  }
+  // Fetch a file the server renders (paper version, debrief) and open or save it. Works inside the LMS frame.
+  async function fetchBlob(path) {
+    const resp = await fetch(apiUrl(path));
+    if (!resp.ok) { const b = await resp.json().catch(() => ({})); throw new Error(b.error || 'Server returned ' + resp.status); }
+    return resp.blob();
+  }
+  async function openFile(path) { const blob = await fetchBlob(path); const url = URL.createObjectURL(blob); window.open(url, '_blank', 'noopener'); setTimeout(() => URL.revokeObjectURL(url), 60000); }
+  async function saveFile(path, filename) {
+    const blob = await fetchBlob(path); const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
   function truncate(str, n) { str = String(str || ''); return str.length > n ? str.slice(0, n - 1) + '…' : str; }
   function fmtTime(iso) { try { return new Date(iso).toLocaleString(); } catch { return ''; } }
   function friendlyError(e) {
@@ -604,8 +647,13 @@
       const kindChip = t.kind && t.kind !== 'concept' ? `<span class="chip">${escapeHtml(kindUI(t.kind).label)}</span> ` : '';
       li.innerHTML =
         `<div><div class="t-title">${kindChip}${escapeHtml(t.title)}</div><div class="t-goal">${escapeHtml(t.learning_goal)}</div></div>` +
-        `<div class="t-meta"><div>~${t.target_minutes} min</div><div style="margin-top:.2rem">${chip}</div></div>`;
+        `<div class="t-meta"><div>~${t.target_minutes} min</div><div style="margin-top:.2rem">${chip}</div><div style="margin-top:.2rem"><button class="link-btn paper-btn" type="button" title="A printable version to work through on paper, offline">📄 Paper</button></div></div>`;
       li.addEventListener('click', () => openTutorial(t.id));
+      li.querySelector('.paper-btn').addEventListener('click', async (ev) => {
+        ev.stopPropagation(); const b = ev.currentTarget; b.disabled = true; b.textContent = 'Preparing…';
+        try { await openFile(`/api/tutorials/${t.id}/print`); } catch (e) { alert(friendlyError(e)); }
+        finally { b.disabled = false; b.textContent = '📄 Paper'; }
+      });
       list.appendChild(li);
     }
   }
@@ -836,6 +884,7 @@
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); $('#tutorial-compose').requestSubmit(); }
   });
   $('#tutorial-back-btn').addEventListener('click', () => { showView('home'); loadHome(); });
+  $('#tutorial-print').addEventListener('click', () => window.print());
   $('#tutorial-restart').addEventListener('click', () => {
     if (!tut.id) return;
     if (!confirm('Start this tutorial over from the beginning? Your current run is kept but won\'t continue.')) return;
@@ -896,7 +945,9 @@
     back.addEventListener('click', () => $('#tutorial-back-btn').click());
     const again = document.createElement('button'); again.className = 'btn btn-ghost'; again.textContent = '↻ Do it again';
     again.addEventListener('click', () => openTutorial(tut.id, { fresh: true, skipProfile: true }));
-    actions.append(back, again); out.appendChild(actions);
+    const print = document.createElement('button'); print.className = 'link-btn'; print.textContent = '🖨 Print this summary';
+    print.addEventListener('click', () => window.print());
+    actions.append(back, again, print); out.appendChild(actions);
   }
 
   function buildNpsStrip() {
@@ -1056,7 +1107,12 @@
     regen.title = 'Generate a fresh debrief (for example after updating About you)';
     regen.addEventListener('click', () => { stopSpeaking(); body.innerHTML = '<div class="empty-state">Writing a fresh debrief…</div><div class="err"></div>'; generateDebriefNow(); });
     const when = document.createElement('span'); when.className = 'muted'; when.textContent = d.generated_at ? 'Written ' + fmtTime(d.generated_at) : '';
-    bar.append(read, regen, when); body.appendChild(bar);
+    const print = document.createElement('button'); print.className = 'link-btn'; print.type = 'button'; print.textContent = '🖨 Print';
+    print.addEventListener('click', () => window.print());
+    const dl = document.createElement('button'); dl.className = 'link-btn'; dl.type = 'button'; dl.textContent = '⬇ Save as file';
+    dl.title = 'A single HTML file you can keep, print or open with no connection';
+    dl.addEventListener('click', async () => { try { await saveFile(`/api/materials/${currentDebriefMaterial}/debrief.html?download=1`, 'debrief.html'); } catch (e) { alert(friendlyError(e)); } });
+    bar.append(read, regen, print, dl, when); body.appendChild(bar);
     const md = document.createElement('div'); md.className = 'debrief-md'; setMd(md, d.markdown); body.appendChild(md);
   }
 
@@ -1339,6 +1395,19 @@
     return data.tutorial;
   }
   $('#tutorial-new').addEventListener('click', () => editTutorial(null));
+  $('#course-pack-btn').addEventListener('click', async () => {
+    const btn = $('#course-pack-btn'); const st = $('#course-pack-status');
+    btn.disabled = true; st.textContent = 'Building the pack… paper versions and debriefs that are missing or out of date are written first, so this can take a minute.';
+    try {
+      await saveFile('/api/teacher/course-pack.zip', 'course-pack.zip');
+      st.textContent = 'Downloaded. It contains every published session as a paper script (HTML and Markdown), every material\'s debrief, and index.txt.';
+    } catch (e) { st.textContent = friendlyError(e); } finally { btn.disabled = false; }
+  });
+  $('#tutorial-paper').addEventListener('click', async () => {
+    const err = $('#tutorial-form-err'); err.textContent = ''; const btn = $('#tutorial-paper'); btn.disabled = true;
+    try { const saved = await saveTutorial(readTutorialForm()); await openFile(`/api/tutorials/${saved.id}/print?regenerate=1`); }
+    catch (ex) { err.textContent = 'Save before the paper version: ' + friendlyError(ex); } finally { btn.disabled = false; }
+  });
   $('#tutorial-cancel').addEventListener('click', () => paneShow('tutorials', 'list'));
   $('#tutorial-report-back').addEventListener('click', () => paneShow('tutorials', 'list'));
   tutorialForm.addEventListener('submit', async (e) => {
@@ -1418,6 +1487,7 @@
 
   // ─── Launch ───
   applyDeliveryLabels();
+  (window.requestIdleCallback || ((fn) => setTimeout(fn, 50)))(loadMdLibs);
   const launchTutorialId = parseInt(document.body.dataset.tutorialId || '', 10);
   loadHome().then(() => {
     if (Number.isInteger(launchTutorialId) && launchTutorialId > 0) openTutorial(launchTutorialId);
