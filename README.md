@@ -10,7 +10,7 @@ Subject-agnostic: instructors paste their own course materials (lecture notes, t
 
 Sam Paddock's write-up of [Paski](http://www.sampaddock.com/blog/2025/10/27/1-week-five-faculty-130-students-ai-tutor-paski-nps-78-live-faculty-meets-generative-ai), Next Gen Learning's AI tutor, argues that most AI tutors fail because they're bolted on: they sit outside the learning sequence and know nothing about the student. Paski's answer: faculty co-design each tutorial as they'd brief their best TA, the tutorial sits in the core sequence (live lecture → 1-on-1 AI tutorial → group debrief), students hold it by voice, it's personalised from a profile, and results feed back to faculty. Half of students' learning time went to it; NPS +78.
 
-That sequence assumes a scheduled, instructor-led course. Thompson Rivers University also runs paced and self-paced online courses through Open Learning, so the tool knows each course's **TRUFlex delivery mode** and adapts its wording, its debriefs and its report without forking into separate tools. See [Delivery modes](#delivery-modes).
+That sequence assumes a scheduled, instructor-led course. Thompson Rivers University also runs paced and self-paced online courses through Open Learning, so the tool knows each course's **TRUFlex delivery mode** and adapts its wording, its debriefs and its report without forking into separate tools. See [Delivery modes](#delivery-modes), and [docs/ALIGNMENT.md](docs/ALIGNMENT.md) for how each mode maps to TRU's engagement types and where every mode switch lives in the code.
 
 ### Scheduled courses (TRUFlex 1 to 8)
 
