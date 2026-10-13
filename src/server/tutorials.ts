@@ -34,6 +34,8 @@ import type { Student } from './students.js';
 import { COURSE_LEVEL_LABELS, type CourseCtx } from './courses.js';
 import type { Delivery } from './delivery.js';
 import { KINDS, TUTORIAL_KINDS, stageFor, type TutorialKind } from './kinds.js';
+import { jsonCall, textOf } from './llm.js';
+import { listLearnerModel, learnerModelBlock, recallCandidates, recallCandidatesBlock, updateLearnerModelFromSummary } from './learner.js';
 
 export type { CourseCtx } from './courses.js';
 
@@ -614,9 +616,14 @@ export async function streamTutorialReply(params: {
   const system: Anthropic.TextBlockParam[] = [{ type: 'text', text: tutorialRulesFor(ctx.delivery, tutorial.kind) }];
   const grounding = materialsBlock(materials);
   if (grounding) system.push({ type: 'text', text: grounding, cache_control: { type: 'ephemeral' } });
+  // Learner model after the profile, inside the cached block: it changes
+  // only when a session completes, so mid-tutorial turns still hit cache.
+  const extras = [learnerModelBlock(await listLearnerModel(student.id, ctx))];
+  if (tutorial.kind === 'recall') extras.push(recallCandidatesBlock(await recallCandidates(student.id, ctx)));
+  const extraText = extras.filter(Boolean).map((b) => `\n\n${b}`).join('');
   system.push({
     type: 'text',
-    text: `${await briefFor(tutorial, ctx)}\n\n# STUDENT PROFILE\n${profileBlock(student, profile)}`,
+    text: `${await briefFor(tutorial, ctx)}\n\n# STUDENT PROFILE\n${profileBlock(student, profile)}${extraText}`,
     cache_control: { type: 'ephemeral' },
   });
   system.push({
@@ -679,57 +686,6 @@ function transcriptText(turns: Turn[], studentName: string): string {
     .join('\n\n');
 }
 
-function textOf(res: Anthropic.Message): string {
-  return res.content
-    .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-    .map((b) => b.text)
-    .join('\n')
-    .trim();
-}
-
-function stripFences(text: string): string {
-  return text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
-}
-
-/** Ask for JSON, parse against a schema, retry once with a correction nudge. */
-async function jsonCall<T>(params: {
-  schema: z.ZodType<T>;
-  system: string | Anthropic.TextBlockParam[];
-  userPrompt: string;
-  maxTokens: number;
-  attribution: Attribution;
-  endpoint: string;
-  /** Applied to the parsed JSON before schema validation. */
-  preprocess?: (raw: unknown) => unknown;
-}): Promise<T> {
-  const client = getAnthropic();
-  const pre = params.preprocess ?? ((x: unknown) => x);
-  const t0 = Date.now();
-  const res = await client.messages.create({
-    model: GEN_MODEL,
-    max_tokens: params.maxTokens,
-    system: params.system,
-    messages: [{ role: 'user', content: params.userPrompt }],
-  });
-  void recordApiCall({ ...params.attribution, endpoint: params.endpoint, model: GEN_MODEL, usage: res.usage, durationMs: Date.now() - t0 });
-  try {
-    return params.schema.parse(pre(JSON.parse(stripFences(textOf(res)))));
-  } catch {
-    const t1 = Date.now();
-    const retry = await client.messages.create({
-      model: GEN_MODEL,
-      max_tokens: params.maxTokens,
-      system: params.system,
-      messages: [
-        { role: 'user', content: params.userPrompt },
-        { role: 'assistant', content: textOf(res) || '(empty)' },
-        { role: 'user', content: 'That was not valid JSON matching the schema. Return ONLY the JSON object.' },
-      ],
-    });
-    void recordApiCall({ ...params.attribution, endpoint: params.endpoint + '.retry', model: GEN_MODEL, usage: retry.usage, durationMs: Date.now() - t1 });
-    return params.schema.parse(pre(JSON.parse(stripFences(textOf(retry)))));
-  }
-}
 
 export async function completeTutorialSession(params: {
   tutorial: Tutorial;
@@ -764,6 +720,12 @@ export async function completeTutorialSession(params: {
     tutorialSession.session_id,
     JSON.stringify({ tutorial_id: tutorial.id, mastery: summary.mastery }),
   ]);
+  // One more small call: fold the summary into the learner model. Best-effort.
+  try {
+    await updateLearnerModelFromSummary({ student, ctx, tutorial, summary, tutorialSessionId: tutorialSession.id, attribution });
+  } catch (e) {
+    console.warn(`learner model: update failed for tutorial_session ${tutorialSession.id}:`, (e as Error).message);
+  }
   return summary;
 }
 

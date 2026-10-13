@@ -22,7 +22,7 @@ The Paski sequence as built. Lecture, then the tutorial, then a group debrief ru
 | Grounded in course materials | **Course materials.** Paste lecture notes, transcripts or readings (up to ~200k characters each) and attach them to tutorials. They're prompt-cached, so repeated turns cost a fraction. |
 | Built into the core sequence | **Deep linking.** In Moodle, add an *External tool* activity, pick this tool, click **Select content**: each tutorial becomes its own activity you place right after its lecture. Launching it opens that tutorial directly. |
 | Voice, student decides when to speak | **Push-to-talk** via the browser's Web Speech API (Chrome, Edge, Safari), replies read aloud via speech synthesis. No extra service, no extra cost. In person (Flex 1 to 7) typing is the default and voice is opt-in, since the learner may be in a classroom; typing is always a full equivalent. |
-| Student profile personalises 5–10% | **About you** (optional, invisible to the instructor) feeds the tutorial prompt and the lecture debrief's "Consider this in your context, *name*" section. |
+| Student profile personalises 5–10% | **About you** (optional, invisible to the instructor) feeds the tutorial prompt and the lecture debrief's "Consider this in your context, *name*" section. The **learner model** (what they have shown in earlier sessions) follows it into every prompt. |
 | Pask's conversation theory: understanding confirmed by teaching it back | Staged dialogue: **orient → explore → teach-back → wrap-up**. In teach-back the student explains the idea as if to a classmate who missed the lecture; the tutor plays it back and checks. |
 | Personalised lecture debriefs | **Lecture debriefs.** Per material, a short written recap: shared big ideas, common slips, a personal section, three self-test questions. Read-aloud button. |
 | Group debrief with faculty | Each run ends in a structured summary (mastery, understood, sticking points, teach-back quality). The instructor's **report** aggregates them; **Generate debrief brief** turns them into discussion prompts and a one-minute re-teach for the live follow-up. |
@@ -48,7 +48,7 @@ Open Learning's continuous-entry courses: flexible start, up to 30 weeks, no coh
 | 5. Feedback after engaging with new content, including telling the instructor how it landed | **Study debriefs** per material; NPS and comments after every session. |
 | 6. Apply learning in a safe, unassessed practice setting | **Practice** sessions: the learner pastes or speaks a draft or attempt, gets feedback against the brief's criteria (two strengths, one thing to improve, as a question), revises, and is offered one more practice prompt. Never a grade. |
 | 7. Reflect on learning: metacognition, strategies | **Reflections**: a short conversation about what was hard, what strategy worked, and one concrete thing to do differently next. The summary keeps their strategy in their own words. |
-| 8. Revisit and recall learning from weeks or months earlier | **Recall** sessions: retrieval first (smallest cue if blank), then connection to the current unit. The brief points at earlier sessions; the summary records what was retained and what faded. (Phase 3 adds the learner model that chooses what to revisit.) |
+| 8. Revisit and recall learning from weeks or months earlier | **Recall** sessions: retrieval first (smallest cue if blank), then connection to the current unit. The brief points at earlier sessions, and the **learner model** tells the tutor which of this learner's concepts are fragile, misconceived or longest unseen. The summary records what was retained and what faded. |
 | 9. Demonstrate learning and get feedback on drafts | **Practice** sessions on components of larger assessments. |
 
 With no cohort there is nothing to debrief, so the report's synthesis becomes a **course revision brief**: sticking points and misconceptions ranked by frequency across every completed run, with suggestions for which material or part of the brief to revise.
@@ -68,7 +68,16 @@ Every tutorial has a **kind**, chosen in the editor. The kind sets the stage tem
 | Reflection | 7 | open → probe → plan → wrap-up | 4–8 exchanges |
 | Recall | 8 | retrieve → connect → wrap-up | 6–24 exchanges |
 
-Every summary carries `mastery`, `understood`, `sticking_points`, `next_step` and `student_note`, so the report and (from Phase 3) the learner model treat all kinds alike; each kind adds its own fields (readiness: prior knowledge and misconceptions found; practice: strengths, what to improve, whether they revised; recall: retained and faded; and so on). The definitions live in `src/server/kinds.ts`.
+Every summary carries `mastery`, `understood`, `sticking_points`, `next_step` and `student_note`, so the report and the learner model treat all kinds alike; each kind adds its own fields (readiness: prior knowledge and misconceptions found; practice: strengths, what to improve, whether they revised; recall: retained and faded; and so on). The definitions live in `src/server/kinds.ts`.
+
+---
+
+## The learner model
+
+After every completed session, one small model call maps the summary onto concept entries for that learner in that course: a short concept name, a status (`secure`, `developing`, `fragile`, `misconception`) and one sentence of evidence (`learner_model` table, `src/server/learner.ts`, recorded in `api_call` as `tutorial.learner_model`). The most recent 40 entries go into every tutorial's system prompt after the profile, inside the cached block, so the tutor knows what this learner has already shown; recall sessions are additionally told which concepts to prioritise (fragile or misconceived first, then longest unseen).
+
+- **Learners** see it as **My learning**: what they have shown they understand, what is still developing, what is worth revisiting, and a mix-up the tutor noticed, each with the date. Plain language throughout, and any entry can be removed.
+- **Instructors** see **Concepts**: counts per concept across the course, no names, with the most fragile or misconceived concepts first. Where the course has fixed dates and a start date (Course settings, or the launch custom parameter `course_start=$CourseSection.timeFrame.begin`), the same data is broken down by week of the course, so the instructor can see what the class is carrying forward.
 
 ---
 
@@ -89,7 +98,7 @@ What each boolean switches today:
 - **hasLiveSessions** — tutor rules (no lecture or follow-up assumed, discovery framing), teach-back audience, lecture vs study debrief wording and labels, the home-page blurbs, deep-link descriptions.
 - **hasCohort** — teach-back audience (classmate vs "someone who has never studied this"), the no-peers rule, group debrief / cohort note vs course revision brief.
 - **inPerson** — typing-first input with voice opt-in; the learner's own choice is remembered in the browser.
-- **hasFixedDates** — nothing yet (weekly grouping and due dates arrive in Phase 7).
+- **hasFixedDates** — the course start date field and the concepts report by week (weekly grouping and due dates arrive in Phase 7).
 
 Per-course settings also hold a course level (ABE, undergraduate, graduate), a default pitch and the AI disclosure text.
 
@@ -111,6 +120,8 @@ src/server/
   delivery.ts     TRUFlex → { pacing, hasCohort, hasFixedDates, hasLiveSessions, inPerson }; unit tests alongside
   kinds.ts        the six session kinds: stages, rules, summary fields, draft guidance; unit tests alongside
   courses.ts      course_settings CRUD and the per-request CourseCtx
+  learner.ts      the learner model: update after each session, prompt block, recall candidates, course report
+  llm.ts          shared model-call helpers (JSON calls with schema + retry)
   tutorials.ts    materials, briefs, profiles, the staged dialogue, summaries, debriefs, AI draft
   grades.ts       AGS completion passback
   reqctx.ts       token / student / attribution / instructor gate helpers
@@ -118,7 +129,7 @@ src/server/
   anthropic.ts    SDK client + model selection
   costs.ts        price table + api_call recording + summary
   db.ts, migrate.ts, students.ts
-  migrations/001_init.sql, 002_course_settings.sql, 003_tutorial_kinds.sql
+  migrations/001_init.sql … 004_learner_model.sql
 src/web/launch.html
 ```
 

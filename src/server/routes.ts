@@ -37,6 +37,7 @@ import { tokenOf, studentFromToken, attr, gateTeacher } from './reqctx.js';
 import { courseCtxFromToken, CourseSettingsInput, upsertCourseSettings, courseCtxFromSettings, COURSE_LEVEL_LABELS, type CourseCtx } from './courses.js';
 import { TRUFLEX_MODES, deliveryLabels } from './delivery.js';
 import { isTutorialKind, kindCatalog, titledForKind, KINDS } from './kinds.js';
+import { listLearnerModel, deleteLearnerEntry, courseConceptReport, courseConceptsByWeek } from './learner.js';
 import {
   TutorialInput, ProfileInput, MaterialInput, START_MARKER,
   listMaterials, getMaterials, createMaterial, updateMaterial, deleteMaterial,
@@ -73,7 +74,7 @@ function fail(res: Response, e: unknown, where: string): void {
 /** The parts of the course settings every launcher may see. */
 function publicCourse(ctx: CourseCtx) {
   return {
-    settings: { truflex: ctx.settings.truflex, course_level: ctx.settings.course_level, ai_disclosure: ctx.settings.ai_disclosure },
+    settings: { truflex: ctx.settings.truflex, course_level: ctx.settings.course_level, ai_disclosure: ctx.settings.ai_disclosure, course_start: ctx.settings.course_start },
     delivery: ctx.delivery,
     labels: deliveryLabels(ctx.delivery),
     debrief_kind: debriefKindFor(ctx.delivery),
@@ -265,6 +266,31 @@ lti.app.post('/api/tutorials/session/:sid/nps', async (req: Request, res: Respon
   }
 });
 
+// ─── Student: my learning (the learner model, in their own hands) ───────────
+
+lti.app.get('/api/learning', async (req: Request, res: Response) => {
+  try {
+    const { token, ctx } = await ctxOf(res);
+    const student = await studentFromToken(token);
+    res.json({ entries: await listLearnerModel(student.id, ctx, 200) });
+  } catch (e) {
+    fail(res, e, 'GET /api/learning');
+  }
+});
+
+lti.app.delete('/api/learning/:id', async (req: Request, res: Response) => {
+  try {
+    const { token, ctx } = await ctxOf(res);
+    const student = await studentFromToken(token);
+    const id = idParam(req, 'id');
+    if (!id) return res.status(400).json({ error: 'bad entry id' });
+    if (!(await deleteLearnerEntry(student.id, ctx, id))) return res.status(404).json({ error: 'entry not found' });
+    res.json({ ok: true });
+  } catch (e) {
+    fail(res, e, 'DELETE /api/learning/:id');
+  }
+});
+
 // ─── Student: lecture / study debriefs ──────────────────────────────────────
 
 lti.app.get('/api/materials', async (req: Request, res: Response) => {
@@ -340,6 +366,22 @@ lti.app.put('/api/teacher/course', async (req: Request, res: Response) => {
     res.json({ ...publicCourse(ctx), settings, modes: TRUFLEX_MODES, levels: COURSE_LEVEL_LABELS });
   } catch (e) {
     fail(res, e, 'PUT /api/teacher/course');
+  }
+});
+
+// ─── Instructor: concepts across the course (no names) ──────────────────────
+
+lti.app.get('/api/teacher/concepts', async (req: Request, res: Response) => {
+  try {
+    const t = await teacherCtx(res);
+    if (!t) return;
+    const concepts = await courseConceptReport(t.ctx);
+    const byWeek = t.ctx.delivery.hasFixedDates && t.ctx.settings.course_start
+      ? await courseConceptsByWeek(t.ctx, t.ctx.settings.course_start)
+      : null;
+    res.json({ concepts, by_week: byWeek, course_start: t.ctx.settings.course_start, has_fixed_dates: t.ctx.delivery.hasFixedDates });
+  } catch (e) {
+    fail(res, e, 'GET /api/teacher/concepts');
   }
 });
 

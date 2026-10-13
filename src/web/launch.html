@@ -124,6 +124,7 @@
     <div class="header-actions">
       <button class="link-btn teacher-only" id="nav-teacher" type="button">👩‍🏫 Instructor view</button>
       <button class="link-btn" id="nav-profile" type="button" title="Tell the tutor about yourself so it can connect the material to your goals">👤 About you</button>
+      <button class="link-btn" id="nav-learning" type="button" title="What you've shown you understand so far in this course">📚 My learning</button>
       <button class="link-btn" id="nav-fullscreen" type="button" hidden title="Open in the full browser window (needed for voice inside the LMS)">⛶ Full screen</button>
       <button class="link-btn" id="nav-return" type="button" hidden title="Return to the course">↩ Back to course</button>
     </div>
@@ -170,6 +171,20 @@
       </div>
       <div class="err" id="profile-err"></div>
     </form>
+  </div>
+
+  <!-- ───── My learning ───── -->
+  <div class="view card" id="view-learning">
+    <div class="view-header">
+      <h2>My learning</h2>
+      <button class="back-btn" id="learning-back-btn" type="button">← Back</button>
+    </div>
+    <p class="muted" style="margin:.25rem 0 1rem">
+      After each session the tutor notes what you showed you understand, what is still developing, and what is worth revisiting,
+      and uses it to pick up where you left off next time. Your instructor sees course-wide patterns, not your list.
+      Remove anything you don't want it to keep.
+    </p>
+    <div id="learning-body"></div>
   </div>
 
   <!-- ───── Tutorial ───── -->
@@ -222,6 +237,7 @@
     <div class="teacher-tabs">
       <div class="ttab active" data-ttab="tutorials">Tutorials</div>
       <div class="ttab" data-ttab="materials">Course materials</div>
+      <div class="ttab" data-ttab="concepts">Concepts</div>
       <div class="ttab" data-ttab="course">Course settings</div>
     </div>
 
@@ -344,6 +360,24 @@
       </div>
     </div>
 
+    <div class="tpane" data-tpane="concepts" hidden>
+      <div data-pane="list">
+        <p class="muted" style="margin:.25rem 0 .75rem">
+          What learners across the course have shown about each concept, from every completed session, without names.
+          <em>Fragile</em> means recalled only with heavy cues or faded; <em>misconception</em> means a specific wrong idea was heard.
+          Concepts with the most fragile or misconceived entries come first.
+        </p>
+        <div style="overflow-x:auto">
+          <table class="tbl" id="concepts-table">
+            <thead><tr><th>Concept</th><th class="num">Learners</th><th class="num">Secure</th><th class="num">Developing</th><th class="num">Fragile</th><th class="num">Misconception</th><th>Last seen</th></tr></thead>
+            <tbody id="concepts-tbody"></tbody>
+          </table>
+        </div>
+        <div id="concepts-weeks"></div>
+        <div class="err" id="concepts-err"></div>
+      </div>
+    </div>
+
     <div class="tpane" data-tpane="course" hidden>
       <div data-pane="list">
         <p class="muted" style="margin:.25rem 0 .75rem">
@@ -363,6 +397,8 @@
           </label>
           <label>Default pitch <span class="hint">Reading level and tone for tutorials that don't set their own, e.g. "Adult Basic Education reading level, short sentences, everyday examples" or "upper-year undergraduate".</span>
             <input type="text" name="pitch_default" maxlength="500"></label>
+          <label id="course-start-label">Course start date <span class="hint">Week 1 begins on this date. Used to show the concepts report by week. Moodle can set it on launch with the custom parameter <code>course_start=$CourseSection.timeFrame.begin</code>.</span>
+            <input type="date" name="course_start"></label>
           <label>AI disclosure shown to learners <span class="hint">Leave blank for the tool's default text (what the tutor is, what it stores, that voice may use the browser vendor's speech service, that typing always works).</span>
             <textarea name="ai_disclosure" maxlength="4000"></textarea></label>
           <div class="form-row">
@@ -408,6 +444,7 @@
     $('#debriefs-blurb').innerHTML = live
       ? 'A short written recap of a lecture or reading — the big ideas, plus one section that connects them to <em>your</em> goals, and three questions to test yourself.'
       : 'A short written recap of a reading or chapter — the big ideas, plus one section that connects them to <em>your</em> goals, and three questions to test yourself.';
+    $('#course-start-label').hidden = !delivery.hasFixedDates;
     const ui = DEBRIEF_KIND_UI[debriefKindOf(delivery)];
     $('#tutorial-debrief-heading').textContent = ui.heading;
     $('#tutorial-debrief-desc').textContent = ui.desc;
@@ -471,7 +508,7 @@
   }
 
   // ─── Views ───
-  const VIEWS = ['home', 'profile', 'tutorial', 'debrief', 'teacher'];
+  const VIEWS = ['home', 'profile', 'learning', 'tutorial', 'debrief', 'teacher'];
   function showView(name) {
     if (name !== 'tutorial') stopTutorialVoice();
     VIEWS.forEach((v) => $('#view-' + v).classList.toggle('active', v === name));
@@ -610,6 +647,46 @@
       $('#profile-err').textContent = friendlyError(err);
     } finally { $('#profile-save').disabled = false; }
   });
+
+  // ═══════════ My learning ═══════════
+  const LEARNING_GROUPS = [
+    ['secure', "You've shown you understand", 'The tutor heard you explain these on your own.'],
+    ['developing', 'Still developing', 'You got there with some prompting. One more session usually makes these solid.'],
+    ['fragile', 'Worth revisiting', 'These came back only with heavy hints, or had faded. A recall session is a good place to bring them back.'],
+    ['misconception', 'A mix-up the tutor noticed', 'You held an idea here that the material contradicts. Worth a careful second look.'],
+  ];
+  async function openLearning() {
+    const body = $('#learning-body'); body.innerHTML = '<div class="empty-state">Loading…</div>';
+    showView('learning');
+    try { renderLearning((await api('/api/learning')).entries || []); }
+    catch (e) { body.innerHTML = `<div class="err">${escapeHtml(friendlyError(e))}</div>`; }
+  }
+  function renderLearning(entries) {
+    const body = $('#learning-body'); body.innerHTML = '';
+    if (!entries.length) { body.innerHTML = '<div class="empty-state">Nothing here yet. Finish a session and the tutor will start keeping track.</div>'; return; }
+    for (const [status, heading, blurb] of LEARNING_GROUPS) {
+      const items = entries.filter((e) => e.status === status);
+      if (!items.length) continue;
+      const sec = document.createElement('div'); sec.style.marginBottom = '1rem';
+      sec.innerHTML = `<h3 style="margin:0 0 .15rem;font-size:1rem">${heading}</h3><div class="muted" style="margin-bottom:.4rem">${blurb}</div><ul class="items"></ul>`;
+      const ul = sec.querySelector('ul');
+      for (const e of items) {
+        const li = document.createElement('li'); li.className = 'static';
+        li.innerHTML = `<div><div class="t-title">${escapeHtml(e.concept)}</div><div class="t-goal">${escapeHtml(e.evidence || '')}</div></div>` +
+          `<div class="t-meta"><div>${e.last_seen ? new Date(e.last_seen).toLocaleDateString() : ''}</div></div>`;
+        const rm = document.createElement('button'); rm.className = 'link-btn'; rm.type = 'button'; rm.textContent = 'Remove'; rm.title = 'Remove this from what the tutor keeps about you';
+        rm.addEventListener('click', async () => {
+          rm.disabled = true;
+          try { await api(`/api/learning/${e.id}`, { method: 'DELETE' }); renderLearning(entries.filter((x) => x.id !== e.id)); }
+          catch (err) { rm.disabled = false; rm.textContent = friendlyError(err); }
+        });
+        li.lastElementChild.appendChild(rm); ul.appendChild(li);
+      }
+      body.appendChild(sec);
+    }
+  }
+  $('#nav-learning').addEventListener('click', openLearning);
+  $('#learning-back-btn').addEventListener('click', () => { showView('home'); loadHome(); });
 
   // ═══════════ Tutorial run ═══════════
   const tut = { id: null, sessionId: null, tutorial: null, busy: false, npsDone: false };
@@ -970,7 +1047,7 @@
   if (isTeacherRole) {
     $('#nav-teacher').addEventListener('click', () => { showView('teacher'); teacherTab('tutorials'); paneShow('tutorials', 'list'); loadTeacher(); });
     $('#teacher-back-btn').addEventListener('click', () => { showView('home'); loadHome(); });
-    $$('.ttab').forEach((t) => t.addEventListener('click', () => { teacherTab(t.dataset.ttab); paneShow(t.dataset.ttab, 'list'); }));
+    $$('.ttab').forEach((t) => t.addEventListener('click', () => { teacherTab(t.dataset.ttab); paneShow(t.dataset.ttab, 'list'); if (t.dataset.ttab === 'concepts') loadConcepts(); }));
   }
   function teacherTab(name) {
     $$('.ttab').forEach((t) => t.classList.toggle('active', t.dataset.ttab === name));
@@ -982,6 +1059,33 @@
 
   async function loadTeacher() {
     await Promise.all([loadTeacherMaterials(), loadTeacherTutorials(), loadCourseSettings()]);
+  }
+
+  // ─── Concepts across the course (no names) ───
+  async function loadConcepts() {
+    const tbody = $('#concepts-tbody'); const err = $('#concepts-err'); const weeks = $('#concepts-weeks');
+    err.textContent = ''; tbody.innerHTML = '<tr><td colspan="7" class="muted">Loading…</td></tr>'; weeks.innerHTML = '';
+    try {
+      const d = await api('/api/teacher/concepts');
+      tbody.innerHTML = '';
+      if (!d.concepts.length) tbody.innerHTML = '<tr><td colspan="7" class="muted">Nothing yet. Entries appear as learners complete sessions.</td></tr>';
+      for (const c of d.concepts) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${escapeHtml(c.concept)}</td><td class="num">${c.learners}</td><td class="num">${c.secure}</td><td class="num">${c.developing}</td>` +
+          `<td class="num"${c.fragile ? ' style="color:#8a5a00"' : ''}>${c.fragile}</td><td class="num"${c.misconception ? ' style="color:var(--bad)"' : ''}>${c.misconception}</td><td>${c.last_seen ? new Date(c.last_seen).toLocaleDateString() : ''}</td>`;
+        tbody.appendChild(tr);
+      }
+      if (d.has_fixed_dates) {
+        if (!d.course_start) {
+          weeks.innerHTML = '<p class="muted" style="margin-top:1rem">Set the course start date under Course settings to see this by week of the course.</p>';
+        } else if (d.by_week && d.by_week.length) {
+          weeks.innerHTML = '<h4 style="margin:1.25rem 0 .25rem;font-size:.9rem">By week of the course</h4><div class="muted" style="margin-bottom:.4rem">What the class as a whole is carrying forward: the concepts most often fragile or misconceived in sessions that week.</div>' +
+            '<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Week</th><th class="num">Entries</th><th class="num">Secure</th><th class="num">Developing</th><th class="num">Fragile</th><th class="num">Misconception</th><th>Carried forward</th></tr></thead><tbody>' +
+            d.by_week.map((w) => `<tr><td>Week ${w.week}</td><td class="num">${w.entries}</td><td class="num">${w.secure}</td><td class="num">${w.developing}</td><td class="num">${w.fragile}</td><td class="num">${w.misconception}</td><td>${escapeHtml(w.carried_forward.join('; ') || '—')}</td></tr>`).join('') +
+            '</tbody></table></div>';
+        }
+      }
+    } catch (e) { tbody.innerHTML = ''; err.textContent = friendlyError(e); }
   }
 
   // ─── Course settings (delivery mode) ───
@@ -1004,6 +1108,7 @@
       courseForm.elements.course_level.value = d.settings.course_level || '';
       courseForm.elements.pitch_default.value = d.settings.pitch_default || '';
       courseForm.elements.ai_disclosure.value = d.settings.ai_disclosure || '';
+      courseForm.elements.course_start.value = d.settings.course_start || '';
       renderTruflexDesc();
     } catch (e) { err.textContent = friendlyError(e); }
   }
@@ -1017,6 +1122,7 @@
         const d = await api('/api/teacher/course', { method: 'PUT', body: {
           truflex: parseInt(f.truflex.value, 10), course_level: f.course_level.value || null,
           pitch_default: f.pitch_default.value.trim(), ai_disclosure: f.ai_disclosure.value.trim(),
+          course_start: f.course_start.value || null,
         } });
         delivery = d.delivery; applyDeliveryLabels();
         $('#course-status').textContent = 'Saved. Tutorials, debriefs and reports now follow this mode.';
