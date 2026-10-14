@@ -96,7 +96,7 @@ To set one up: tick the unit's text and reading, its activities and study questi
 
 ## 5. What learners see
 
-Learners launch a session from the course and talk to the tutor by typing or by voice; replies can be read aloud. When they click **Finish**, they get a short summary: what they figured out, where it got sticky, one next step. They can do a session again at any time.
+Learners launch a session from the course and talk to the tutor by typing or by voice; replies can be read aloud. The voices come from the learner's own device and browser: the tool picks the most natural one installed, and a **Voice** menu beside *Read replies aloud* lets them choose another and hear a sample. On a Mac, higher-quality voices can be downloaded under System Settings → Accessibility → Spoken Content; on Windows, Edge includes "Natural" voices. When they click **Finish**, they get a short summary: what they figured out, where it got sticky, one next step. They can do a session again at any time.
 
 Their home page shows every session, what is suggested next, and gentle nudges (a readiness check not done yet; a recall session whose concepts have gone a few weeks without a look). **My learning** shows what they have demonstrated across sessions, in their own terms, and is never shown to you. **About you** lets them tell the tutor their program, goals and interests so an example in ten can touch their world.
 

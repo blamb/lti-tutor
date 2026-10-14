@@ -316,6 +316,7 @@
       <div class="voice-row">
         <button class="mic-btn" id="tutorial-mic" type="button" aria-pressed="false" aria-describedby="tutorial-voice-hint tutorial-mode-hint" title="Hold the conversation by voice. You decide when to start and stop."><span aria-hidden="true">🎤</span> <span class="mic-label">Speak</span></button>
         <label style="display:flex;align-items:center;gap:.35rem;cursor:pointer"><input type="checkbox" id="tutorial-tts"> Read replies aloud</label>
+        <label style="display:flex;align-items:center;gap:.35rem" id="tutorial-voice-pick" hidden>Voice <select id="tutorial-voice" aria-label="Voice that reads replies aloud" title="Voices come from your device and browser. The automatic choice picks the most natural one available."><option value="">Automatic</option></select><button class="link-btn" type="button" id="tutorial-voice-test" title="Hear a sample in this voice">▶ sample</button></label>
         <span id="tutorial-voice-hint"></span>
       </div>
       <div class="muted" id="tutorial-mode-hint" hidden></div>
@@ -1384,13 +1385,74 @@
     if (send && text) { tutInput.value = ''; tutorialStream({ message: text }); }
   }
   function stopSpeaking() { try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {} }
+
+  // ─── Which voice reads the replies ───
+  // Browsers ship several voices of very different quality and default to the
+  // oldest. Rank the installed voices for the page's language: natural and
+  // premium voices first, well-known good ones next, the robotic ones last.
+  const VOICE_KEY = 'lti-tutor-voice';
+  const VOICE_GOOD = [/natural/i, /premium/i, /enhanced/i, /neural/i, /siri/i, /^google/i, /\b(samantha|karen|daniel|moira|tessa|fiona|serena|allison|ava|zoe|evan|tom|nicky|aaron|arthur|martha|catherine|jamie|flo|reed|rocko|sandy|shelley|eddy|grandma|grandpa)\b/i];
+  const VOICE_BAD = [/compact/i, /espeak/i, /desktop/i, /\bfred\b/i, /\balbert\b/i, /\bbad news\b/i, /\bbells\b/i, /\bboing\b/i, /\bbubbles\b/i, /\bcellos\b/i, /\bwobble\b/i, /\bzarvox\b/i, /\btrinoids\b/i, /\bwhisper\b/i, /\bjester\b/i, /\borgan\b/i, /\bsuperstar\b/i, /\bgood news\b/i, /\bhysterical\b/i, /\bpipe organ\b/i];
+  function voiceScore(v, lang) {
+    let s = 0;
+    const l = (v.lang || '').toLowerCase(); const want = lang.toLowerCase();
+    if (l === want) s += 30; else if (l.split('-')[0] === want.split('-')[0]) s += 20; else return -1;
+    if (VOICE_BAD.some((re) => re.test(v.name))) s -= 40;
+    VOICE_GOOD.forEach((re, i) => { if (re.test(v.name)) s += 20 - i; });
+    if (v.localService === false) s += 2; // cloud voices (Chrome's "Google …") usually sound better
+    if (v.default) s += 1;
+    return s;
+  }
+  function usableVoices() {
+    try { return (window.speechSynthesis && window.speechSynthesis.getVoices()) || []; } catch { return []; }
+  }
+  function rankedVoices() {
+    const lang = navigator.language || 'en-US';
+    return usableVoices().map((v) => ({ v, s: voiceScore(v, lang) })).filter((x) => x.s >= 0).sort((a, b) => b.s - a.s).map((x) => x.v);
+  }
+  function storedVoice() { try { return localStorage.getItem(VOICE_KEY) || ''; } catch { return ''; } }
+  function rememberVoice(name) { try { if (name) localStorage.setItem(VOICE_KEY, name); else localStorage.removeItem(VOICE_KEY); } catch { /* storage blocked: applies for this page only */ } }
+  function chosenVoice() {
+    const ranked = rankedVoices();
+    const wanted = storedVoice();
+    return (wanted && ranked.find((v) => v.name === wanted)) || ranked[0] || null;
+  }
+  function fillVoiceMenu() {
+    const sel = $('#tutorial-voice'); const pick = $('#tutorial-voice-pick');
+    if (!sel || !window.speechSynthesis) return;
+    const ranked = rankedVoices();
+    pick.hidden = ranked.length < 2;
+    const current = storedVoice();
+    sel.innerHTML = '<option value="">Automatic' + (ranked[0] ? ` (${escapeHtml(ranked[0].name)})` : '') + '</option>' +
+      ranked.map((v) => `<option value="${escapeHtml(v.name)}"${v.name === current ? ' selected' : ''}>${escapeHtml(v.name.replace(/^Microsoft |^Google /, ''))}${/natural|premium|enhanced|neural/i.test(v.name) ? ' ★' : ''} (${escapeHtml(v.lang)})</option>`).join('');
+  }
+  if (window.speechSynthesis) {
+    fillVoiceMenu();
+    try { window.speechSynthesis.addEventListener('voiceschanged', fillVoiceMenu); } catch { window.speechSynthesis.onvoiceschanged = fillVoiceMenu; }
+    $('#tutorial-voice').addEventListener('change', (e) => { rememberVoice(e.target.value); fillVoiceMenu(); });
+    $('#tutorial-voice-test').addEventListener('click', () => speakText("Hello. This is the voice that will read the tutor's replies. What do you think of it?"));
+  }
+
+  // Speak sentence by sentence: smoother pauses, and Chrome stops reading a
+  // single long utterance after about fifteen seconds.
   function speakText(text) {
     if (!window.speechSynthesis) return;
     const plain = String(text).replace(/```[\s\S]*?```/g, ' ').replace(/[*_`#>]+/g, '').replace(/\[(.*?)\]\(.*?\)/g, '$1').replace(/\s+/g, ' ').trim();
     if (!plain) return;
     stopSpeaking();
-    const u = new SpeechSynthesisUtterance(plain); u.lang = navigator.language || 'en-US';
-    window.speechSynthesis.speak(u);
+    const voice = chosenVoice();
+    const chunks = plain.match(/[^.!?]+[.!?]+["')\]]*\s*|[^.!?]+$/g) || [plain];
+    let buf = '';
+    const parts = [];
+    for (const c of chunks) { buf += c; if (buf.length > 180) { parts.push(buf.trim()); buf = ''; } }
+    if (buf.trim()) parts.push(buf.trim());
+    for (const part of parts) {
+      const u = new SpeechSynthesisUtterance(part);
+      u.lang = (voice && voice.lang) || navigator.language || 'en-US';
+      if (voice) u.voice = voice;
+      u.rate = 0.98; u.pitch = 1;
+      window.speechSynthesis.speak(u);
+    }
   }
   function stopTutorialVoice() { if (listening) stopListening(false); stopSpeaking(); }
 
