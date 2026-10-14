@@ -17,6 +17,9 @@ export const env = {
   PORT: parseInt(optional('PORT', '3000'), 10),
   DATABASE_URL: required('DATABASE_URL'),
   LTI_COOKIE_SECRET: required('LTI_COOKIE_SECRET'),
+  // Encrypts per-course Moodle web-service tokens at rest (secrets.ts).
+  // Empty = derive from LTI_COOKIE_SECRET.
+  TOKEN_SECRET: optional('TOKEN_SECRET', ''),
   ANTHROPIC_API_KEY: optional('ANTHROPIC_API_KEY', ''),
   // An Anthropic-compatible endpoint (e.g. a sovereign or institutional
   // gateway). Empty = api.anthropic.com.

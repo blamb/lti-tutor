@@ -33,6 +33,7 @@ Environment name `lti-tutor` → `https://lti-tutor.ca.reclaim.cloud`.
 | `DATABASE_URL` | `postgres://webadmin:<password>@node17689-lti-tutor.ca.reclaim.cloud:5432/postgres` — the password is in the "environment created" email, or reset it from the PostgreSQL node's ⚙ menu. The `postgres` database works as-is; to use a dedicated one, create `lti_tutor` in the node's web admin (its *Open in browser* icon) and change the last path segment. |
 | `ANTHROPIC_API_KEY` | the key for this deployment's Console workspace |
 | `ANTHROPIC_BASE_URL` | optional: a sovereign endpoint |
+| `TOKEN_SECRET` | optional: encrypts per-course Moodle web-service tokens; empty derives the key from `LTI_COOKIE_SECRET` (rotating either invalidates stored tokens; instructors reconnect) |
 
    The database node (`node17689`, 10.100.2.10) accepts password logins from the application node (`pg_hba`: `host all all 0.0.0.0/0 md5`) and listens on 5432.
 

@@ -75,7 +75,29 @@ export function rewriteRequestArgs(args: Args, hosts: Map<string, Target>): [Req
   return [next, cb];
 }
 
+/**
+ * The URL to use with fetch() for a platform host: listed hosts are rewritten
+ * to plain HTTP on their mapped port (fetch does not go through
+ * https.request, so the patch below cannot catch it). Other URLs come back
+ * unchanged.
+ */
+export function platformUrl(url: string, hosts: Map<string, Target> = ACTIVE_HOSTS): string {
+  try {
+    const u = new URL(url);
+    const target = hosts.get(u.hostname.toLowerCase());
+    if (!target || u.protocol !== 'https:') return url;
+    u.protocol = 'http:';
+    u.port = target.port === 80 ? '' : String(target.port);
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
+let ACTIVE_HOSTS: Map<string, Target> = new Map();
+
 export function installPlatformHttpRouting(hosts: Map<string, Target>): void {
+  ACTIVE_HOSTS = hosts;
   if (hosts.size === 0) return;
   const origRequest = https.request;
   const origGet = https.get;

@@ -26,16 +26,13 @@
 import fs from 'node:fs';
 import zlib from 'node:zlib';
 import { unzipSync } from 'fflate';
-import { ImportError, htmlToText, fitMaterial, extractFromFile, decodeEntities } from './importers.js';
-import type { MaterialRole } from './tutorials.js';
+import { ImportError, htmlToText, decodeEntities } from './importers.js';
+import { buildPreview, ATTACHMENT_TYPES, ATTACHMENT_MAX_BYTES, type CourseModel, type ModelFile, type ModelModule, type ModelSection, type BackupPreview } from './course-model.js';
+export { roleFor } from './course-model.js';
+export type { BackupPreview, BackupItem, BackupUnit } from './course-model.js';
 
 export const BACKUP_MAX_BYTES = 150 * 1024 * 1024;
-/** Attached files larger than this are listed in the preview but not read. */
-const ATTACHMENT_MAX_BYTES = 40 * 1024 * 1024;
 const XML_MAX_BYTES = 25 * 1024 * 1024;
-/** Labels shorter than this (images, dividers, "Welcome!") are dropped. */
-const MIN_CHARS = 80;
-const ATTACHMENT_TYPES = new Set(['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain', 'text/markdown', 'text/html']);
 
 // ─── Tiny XML reader ────────────────────────────────────────────────────────
 //
@@ -241,50 +238,9 @@ export async function readArchive(filePath: string, want: Want, onFile: OnFile):
 
 // ─── Backup model ───────────────────────────────────────────────────────────
 
-export interface BackupItem {
-  /** Stable identity across re-imports, e.g. "moodle_backup:page-412" or "moodle_backup:section-7-activities". */
-  key: string;
-  unit: string;
-  unit_order: number;
-  modname: string;
-  title: string;
-  role: MaterialRole;
-  text: string;
-  chars: number;
-  visible: boolean;
-  source_url: string;
-  /** Things the instructor should know: hidden in the course, attachment not read, cut to the limit … */
-  notes: string[];
-  /** Default tick in the preview. */
-  include: boolean;
-}
-
-export interface BackupUnit { title: string; order: number; visible: boolean; items: BackupItem[] }
-
-export interface BackupPreview {
-  course: { fullname: string; shortname: string; course_id: string; wwwroot: string; backup_date: string | null; moodle_release: string };
-  units: BackupUnit[];
-  skipped: Array<{ title: string; modname: string; reason: string }>;
-}
-
 interface ActivityRef { moduleid: string; sectionid: string; modname: string; title: string; directory: string }
 interface SectionRef { sectionid: string; title: string; directory: string }
 interface FileRef { contenthash: string; contextid: string; component: string; filearea: string; filename: string; mimetype: string; filesize: number }
-
-const ACTIVITY_WORDS = /^\s*(?:#+\s*)?(?:(?:learning\s+)?activit(?:y|ies)|exercises?|study\s+questions?|discussion\s+questions?|review\s+questions?|questions?\s+for\s+(?:review|reflection|discussion)|practice(?:\s+questions?)?|self[-\s]?(?:check|test|assessment)|check\s+your\s+understanding|try\s+(?:it|this)|think\s+about|reflect(?:ion)?\b)/i;
-
-/** Which role a module's content plays, from its type first and its heading second. */
-export function roleFor(modname: string, title: string, text: string): MaterialRole {
-  if (modname === 'assign') return 'assignment';
-  if (modname === 'forum') return 'activities';
-  if (modname === 'label' || modname === 'page' || modname === 'book') {
-    const firstLine = text.split('\n').find((l) => l.trim()) ?? '';
-    if (ACTIVITY_WORDS.test(title) || ACTIVITY_WORDS.test(firstLine)) return 'activities';
-    return 'reading';
-  }
-  if (modname === 'resource' || modname === 'url' || modname === 'lesson' || modname === 'glossary') return 'reading';
-  return 'other';
-}
 
 function html(s: string): string {
   return htmlToText(s.replace(/@@PLUGINFILE@@\/?/g, ''), { fragment: true }).text;
@@ -393,8 +349,8 @@ function wantXml(name: string, size: number): boolean {
   return true;
 }
 
-/** Read a backup from disk into a preview the instructor can review. */
-export async function parseMoodleBackup(filePath: string): Promise<BackupPreview> {
+/** Read a backup from disk into the shared course model (files read in a second pass). */
+export async function parseBackupModel(filePath: string): Promise<CourseModel> {
   const xml = new Map<string, string>();
   await readArchive(filePath, wantXml, (name, data) => { xml.set(name, data.toString('utf8')); });
   const manifest = xml.get('moodle_backup.xml');
@@ -422,26 +378,22 @@ export async function parseMoodleBackup(filePath: string): Promise<BackupPreview
     filename: txt(f, 'filename'), mimetype: txt(f, 'mimetype'), filesize: Number(txt(f, 'filesize')) || 0,
   })).filter((f) => f.filename && f.filename !== '.');
 
-  const skipped: BackupPreview['skipped'] = [];
   const byModule = new Map(activities.map((a) => [a.moduleid, a]));
-  const units: BackupUnit[] = [];
-  // Attachments to fetch on a second pass: archive path → where the text goes.
-  const wanted = new Map<string, Array<{ item: BackupItem; file: FileRef }>>();
+  // Archive path → the files (by reference) that want its bytes.
+  const wanted = new Map<string, Array<{ holder: { data?: Buffer } }>>();
+  const modelSections: ModelSection[] = [];
 
   for (const s of sections) {
     const sx = xml.get(`${s.directory}/section.xml`);
     const sec = sx ? child(parseXml(sx), 'section') : undefined;
     const number = Number(txt(sec, 'number')) || 0;
-    const name = txt(sec, 'name') || s.title || (number === 0 ? 'General' : `Section ${number}`);
-    const visible = txt(sec, 'visible') !== '0';
-    const summary = html(txt(sec, 'summary'));
     const sequence = txt(sec, 'sequence').split(',').map((x) => x.trim()).filter(Boolean);
     const inSection = activities.filter((a) => a.sectionid === s.sectionid).map((a) => a.moduleid);
     const order = [...sequence.filter((id) => byModule.has(id)), ...inSection.filter((id) => !sequence.includes(id))];
-    const sectionUrl = `${wwwroot}/course/view.php?id=${courseId}&section=${number}`;
-    const unit: BackupUnit = { title: name, order: number, visible, items: [] };
-    const merged: Record<'reading' | 'activities', string[]> = { reading: summary ? [summary] : [], activities: [] };
-
+    const section: ModelSection = {
+      id: s.sectionid, number, name: txt(sec, 'name') || s.title, summary: html(txt(sec, 'summary')), visible: txt(sec, 'visible') !== '0',
+      url: wwwroot ? `${wwwroot}/course/view.php?id=${courseId}&section=${number}` : '', modules: [],
+    };
     for (const id of order) {
       const a = byModule.get(id)!;
       const ax = xml.get(`${a.directory}/${a.modname}.xml`);
@@ -451,96 +403,42 @@ export async function parseMoodleBackup(filePath: string): Promise<BackupPreview
       const grading = a.modname === 'assign' && xml.get(`${a.directory}/grading.xml`) ? parseXml(xml.get(`${a.directory}/grading.xml`)!) : undefined;
       const { text, attachments } = activityContent(a.modname, act, grading);
       const title = txt(child(act, a.modname), 'name') || a.title || `${a.modname} ${a.moduleid}`;
-      const role = roleFor(a.modname, title, text);
-      if (a.modname === 'label') {
-        if (text.length < MIN_CHARS) { skipped.push({ title: title.slice(0, 80), modname: 'label', reason: text.length ? 'too short to be useful' : 'no text (an image or a divider)' }); continue; }
-        if (!moduleVisible) { skipped.push({ title: title.slice(0, 80), modname: 'label', reason: 'hidden in the course' }); continue; }
-        merged[role === 'activities' ? 'activities' : 'reading'].push(text);
-        continue;
-      }
       const contextid = act?.attrs.contextid ?? '';
-      const item: BackupItem = {
-        key: `moodle_backup:${a.modname}-${a.moduleid}`,
-        unit: name, unit_order: number, modname: a.modname, title: title.slice(0, 160), role, text, chars: text.length,
-        visible: visible && moduleVisible,
-        source_url: wwwroot ? `${wwwroot}/mod/${a.modname}/view.php?id=${a.moduleid}` : '',
-        notes: [], include: true,
-      };
-      if (!moduleVisible) item.notes.push('hidden in the course');
-      if (a.modname === 'quiz') item.notes.push('quiz questions are not imported, only the description');
-      if (a.modname === 'forum') item.notes.push('forum posts are never imported, only the prompt');
+      const modFiles: ModelFile[] = [];
       for (const att of attachments) {
         for (const f of files.filter((f) => f.contextid === contextid && f.component === att.component && f.filearea === att.filearea)) {
-          if (!ATTACHMENT_TYPES.has(f.mimetype)) { item.notes.push(`attached "${f.filename}" is not a text, Word or PDF file and was not read`); continue; }
-          if (f.filesize > ATTACHMENT_MAX_BYTES) { item.notes.push(`attached "${f.filename}" is over 40 MB and was not read`); continue; }
+          const holder: { data?: Buffer } = {};
           const path = `files/${f.contenthash.slice(0, 2)}/${f.contenthash}`;
-          const list = wanted.get(path) ?? [];
-          list.push({ item, file: f });
-          wanted.set(path, list);
+          if (ATTACHMENT_TYPES.has(f.mimetype) && f.filesize <= ATTACHMENT_MAX_BYTES) {
+            const list = wanted.get(path) ?? [];
+            list.push({ holder });
+            wanted.set(path, list);
+          }
+          modFiles.push({
+            filename: f.filename, mimetype: f.mimetype, filesize: f.filesize,
+            read: async () => { if (!holder.data) throw new Error('file missing from the archive'); return holder.data; },
+          });
         }
       }
-      unit.items.push(item);
+      section.modules.push({
+        id: a.moduleid, modname: a.modname, name: title, visible: moduleVisible, text, files: modFiles,
+        url: wwwroot ? `${wwwroot}/mod/${a.modname}/view.php?id=${a.moduleid}` : '',
+      } satisfies ModelModule);
     }
-
-    const mergedItem = (role: 'reading' | 'activities', parts: string[]): BackupItem | null => {
-      const text = parts.join('\n\n').trim();
-      if (text.length < MIN_CHARS) return null;
-      const suffix = role === 'activities' ? 'activities and study questions' : 'text';
-      return {
-        key: `moodle_backup:section-${s.sectionid}-${role}`,
-        unit: name, unit_order: number, modname: 'label', title: `${name} — ${suffix}`.slice(0, 160), role, text, chars: text.length,
-        visible, source_url: wwwroot ? sectionUrl : '', notes: [], include: true,
-      };
-    };
-    const reading = mergedItem('reading', merged.reading);
-    const acts = mergedItem('activities', merged.activities);
-    if (reading) unit.items.unshift(reading);
-    if (acts) unit.items.splice(reading ? 1 : 0, 0, acts);
-    if (!visible) for (const it of unit.items) it.notes.push('in a hidden section');
-    if (unit.items.length) units.push(unit);
+    modelSections.push(section);
   }
 
-  // Second pass: the attachments, read into text where the type allows.
   if (wanted.size) {
     await readArchive(filePath, (name) => wanted.has(name), (name, data) => {
-      for (const { item, file } of wanted.get(name) ?? []) {
-        item.notes.push(`__pending:${file.filename}`);
-        (item as BackupItem & { _files?: Array<{ file: FileRef; data: Buffer }> })._files ??= [];
-        (item as BackupItem & { _files?: Array<{ file: FileRef; data: Buffer }> })._files!.push({ file, data });
-      }
+      for (const { holder } of wanted.get(name) ?? []) holder.data = data;
     });
-    for (const unit of units) {
-      for (const item of unit.items) {
-        const pend = (item as BackupItem & { _files?: Array<{ file: FileRef; data: Buffer }> })._files;
-        if (!pend) continue;
-        delete (item as BackupItem & { _files?: unknown })._files;
-        item.notes = item.notes.filter((n) => !n.startsWith('__pending:'));
-        for (const { file, data } of pend) {
-          try {
-            const { text } = await extractFromFile(file.filename, data);
-            const clean = text.trim();
-            if (clean.length < 20) { item.notes.push(`attached "${file.filename}" has no readable text (a scanned PDF needs OCR first)`); continue; }
-            item.text = item.modname === 'resource' && !item.text ? clean : `${item.text}\n\n## Attached: ${file.filename}\n\n${clean}`.trim();
-            item.notes.push(`includes the text of "${file.filename}"`);
-          } catch (e) {
-            item.notes.push(`attached "${file.filename}" could not be read: ${(e as Error).message}`);
-          }
-        }
-      }
-    }
   }
+  return { source: 'backup', course, sections: modelSections };
+}
 
-  // Fit to the material limit and decide the default ticks.
-  for (const unit of units) {
-    for (const item of unit.items) {
-      const fit = fitMaterial(item.text);
-      if (fit.truncated) item.notes.push(`cut from ${Math.round(fit.original_chars / 1000)}k to the 200,000-character limit`);
-      item.text = fit.text;
-      item.chars = item.text.length;
-      item.include = item.visible && item.chars >= MIN_CHARS;
-      if (item.chars < MIN_CHARS) item.notes.push('little or no text');
-    }
-  }
-  if (!units.length) throw new ImportError('The backup holds no course content the tool can use (no sections with text, pages, files or assignments).');
-  return { course, units, skipped };
+/** Read a backup from disk into a preview the instructor can review. */
+export async function parseMoodleBackup(filePath: string): Promise<BackupPreview> {
+  const preview = await buildPreview(await parseBackupModel(filePath));
+  if (!preview.units.length) throw new ImportError('The backup holds no course content the tool can use (no sections with text, pages, files or assignments).');
+  return preview;
 }

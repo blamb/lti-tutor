@@ -10,6 +10,7 @@ import { z } from 'zod';
 import { query } from './db.js';
 import { contextIdOf } from './reqctx.js';
 import { deliveryOf, DEFAULT_TRUFLEX, parseTruFlex, type Delivery } from './delivery.js';
+import { encryptSecret, decryptSecret } from './secrets.js';
 
 export type CourseLevel = 'abe' | 'undergraduate' | 'graduate';
 
@@ -84,6 +85,44 @@ export async function ensureCourseSettings(
     );
   }
   return getCourseSettings(iss, contextId);
+}
+
+// ─── Moodle web-service connection (live course sync) ───────────────────────
+
+export interface MoodleWsStatus {
+  connected: boolean;
+  /** Moodle username the token belongs to, for the settings page. */
+  user: string;
+  checked_at: string | null;
+}
+
+/** The decrypted token for this course, or null when none is stored (or it was encrypted under another secret). */
+export async function getMoodleWsToken(iss: string, contextId: string): Promise<{ token: string | null; status: MoodleWsStatus }> {
+  const rows = await query<{ moodle_ws_token_enc: string; moodle_ws_user: string; moodle_ws_checked_at: string | null }>(
+    `select moodle_ws_token_enc, moodle_ws_user, moodle_ws_checked_at::text from course_settings where lti_iss = $1 and lti_context_id = $2`,
+    [iss, contextId]
+  );
+  const r = rows[0];
+  const token = r?.moodle_ws_token_enc ? decryptSecret(r.moodle_ws_token_enc) : null;
+  return { token, status: { connected: !!token, user: token ? r!.moodle_ws_user : '', checked_at: token ? r!.moodle_ws_checked_at : null } };
+}
+
+export async function setMoodleWsToken(iss: string, contextId: string, token: string, user: string): Promise<void> {
+  await query(
+    `insert into course_settings (lti_iss, lti_context_id, moodle_ws_token_enc, moodle_ws_user, moodle_ws_checked_at)
+     values ($1, $2, $3, $4, now())
+     on conflict (lti_iss, lti_context_id) do update
+       set moodle_ws_token_enc = excluded.moodle_ws_token_enc, moodle_ws_user = excluded.moodle_ws_user, moodle_ws_checked_at = now()`,
+    [iss, contextId, encryptSecret(token), user]
+  );
+}
+
+export async function touchMoodleWs(iss: string, contextId: string): Promise<void> {
+  await query(`update course_settings set moodle_ws_checked_at = now() where lti_iss = $1 and lti_context_id = $2`, [iss, contextId]);
+}
+
+export async function clearMoodleWsToken(iss: string, contextId: string): Promise<void> {
+  await query(`update course_settings set moodle_ws_token_enc = '', moodle_ws_user = '', moodle_ws_checked_at = null where lti_iss = $1 and lti_context_id = $2`, [iss, contextId]);
 }
 
 export async function upsertCourseSettings(iss: string, contextId: string, input: CourseSettingsInput): Promise<CourseSettings> {

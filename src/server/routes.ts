@@ -21,7 +21,9 @@
  *   POST /api/materials/:id/debrief             -> { debrief }   (generates)
  *
  * Instructor
- *   GET/PUT    /api/teacher/course               course settings (TRUFlex mode, level, pitch, disclosure)
+ *   GET/PUT    /api/teacher/course               course settings (TRUFlex mode, level, pitch, disclosure) (+ moodle_ws status on GET)
+ *   PUT/DELETE /api/teacher/course/moodle-ws     { token } -> verify and store the Moodle web-service token / forget it
+ *   POST       /api/teacher/materials/sync-preview  -> preview of the live course through Moodle web services
  *   GET/POST   /api/teacher/materials, PUT/DELETE /api/teacher/materials/:id
  *   POST       /api/teacher/materials/import-url { url, whole_book? } -> { materials, truncated, pressbooks, book? }
  *   POST       /api/teacher/materials/upload     multipart 'file' -> { material, truncated, original_chars }
@@ -43,13 +45,16 @@ import multer from 'multer';
 import os from 'node:os';
 import fs from 'node:fs';
 import { parseMoodleBackup, BACKUP_MAX_BYTES } from './moodle-backup.js';
+import { buildPreview } from './course-model.js';
+import { wsClient, checkConnection, fetchCourseModel, WS_FUNCTIONS, WsError } from './moodle-ws.js';
 import type { DeepLinkContentItem, IdToken } from 'ltijs';
 import { z } from 'zod';
 import { lti, mintFullscreenNonce } from './lti.js';
 import { env } from './env.js';
 import { isTeacher } from './auth.js';
 import { tokenOf, studentFromToken, attr, gateTeacher } from './reqctx.js';
-import { courseCtxFromToken, CourseSettingsInput, upsertCourseSettings, courseCtxFromSettings, COURSE_LEVEL_LABELS, defaultAiDisclosure, type CourseCtx } from './courses.js';
+import { courseCtxFromToken, CourseSettingsInput, upsertCourseSettings, courseCtxFromSettings, COURSE_LEVEL_LABELS, defaultAiDisclosure, type CourseCtx, getMoodleWsToken, setMoodleWsToken, clearMoodleWsToken, touchMoodleWs,
+} from './courses.js';
 import { deleteMyData } from './retention.js';
 import { TRUFLEX_MODES, deliveryLabels } from './delivery.js';
 import { isTutorialKind, kindCatalog, titledForKind, KINDS } from './kinds.js';
@@ -458,9 +463,78 @@ lti.app.get('/api/teacher/course', async (req: Request, res: Response) => {
   try {
     const t = await teacherCtx(res);
     if (!t) return;
-    res.json({ ...publicCourse(t.ctx), settings: t.ctx.settings, modes: TRUFLEX_MODES, levels: COURSE_LEVEL_LABELS });
+    const ws = await getMoodleWsToken(t.ctx.iss, t.ctx.contextId);
+    res.json({
+      ...publicCourse(t.ctx), settings: t.ctx.settings, modes: TRUFLEX_MODES, levels: COURSE_LEVEL_LABELS,
+      moodle_ws: { ...ws.status, wwwroot: t.ctx.iss, course_id: t.ctx.contextId, functions: WS_FUNCTIONS },
+    });
   } catch (e) {
     fail(res, e, 'GET /api/teacher/course');
+  }
+});
+
+// ─── Instructor: Moodle web-service connection ──────────────────────────────
+
+lti.app.put('/api/teacher/course/moodle-ws', async (req: Request, res: Response) => {
+  try {
+    const t = await teacherCtx(res);
+    if (!t) return;
+    const token = String(req.body?.token ?? '').trim();
+    if (!/^[a-f0-9]{32}$/i.test(token)) return res.status(400).json({ error: 'That does not look like a Moodle web-service token (32 letters and digits). Copy it from Moodle without spaces.' });
+    const client = wsClient(t.ctx.iss, token);
+    const check = await checkConnection(client);
+    if (check.missing.length) {
+      return res.status(400).json({ error: `The token works (${check.site.fullname}, ${check.site.sitename}) but its service does not allow: ${check.missing.join(', ')}. Ask the Moodle administrator to add those functions to the service, then try again.` });
+    }
+    // Can this user actually see this course?
+    try {
+      await client.call('core_course_get_contents', { courseid: Number(t.ctx.contextId), options: [{ name: 'excludecontents', value: 1 }] });
+    } catch (e) {
+      if (e instanceof WsError) return res.status(400).json({ error: `The token belongs to ${check.site.fullname}, but that account cannot read this course (${e.code}). Use a token for an account enrolled in the course as a teacher.` });
+      throw e;
+    }
+    await setMoodleWsToken(t.ctx.iss, t.ctx.contextId, token, check.site.username);
+    res.json({ connected: true, user: check.site.username, fullname: check.site.fullname, sitename: check.site.sitename, missing_optional: check.missing_optional });
+  } catch (e) {
+    fail(res, e, 'PUT /api/teacher/course/moodle-ws');
+  }
+});
+
+lti.app.delete('/api/teacher/course/moodle-ws', async (req: Request, res: Response) => {
+  try {
+    const t = await teacherCtx(res);
+    if (!t) return;
+    await clearMoodleWsToken(t.ctx.iss, t.ctx.contextId);
+    res.json({ connected: false });
+  } catch (e) {
+    fail(res, e, 'DELETE /api/teacher/course/moodle-ws');
+  }
+});
+
+lti.app.post('/api/teacher/materials/sync-preview', async (req: Request, res: Response) => {
+  try {
+    const t = await teacherCtx(res);
+    if (!t) return;
+    const ws = await getMoodleWsToken(t.ctx.iss, t.ctx.contextId);
+    if (!ws.token) return res.status(400).json({ error: 'This course is not connected to Moodle yet. Add a web-service token under Course settings → Moodle connection.' });
+    const client = wsClient(t.ctx.iss, ws.token);
+    const { model, notes } = await fetchCourseModel(client, t.ctx.contextId, { fullname: t.ctx.title || '' });
+    const preview = await buildPreview(model);
+    await touchMoodleWs(t.ctx.iss, t.ctx.contextId);
+    const have = await existingSourceKeys(t.ctx);
+    const units = preview.units.map((u) => ({ ...u, items: u.items.map((i) => ({ ...i, existing: have.has(i.key) })) }));
+    const items = units.reduce((n, u) => n + u.items.length, 0);
+    res.json({
+      source: 'sync', notes,
+      course: { ...preview.course, same_course: true, same_site: true },
+      units, skipped: preview.skipped, stats: { items, units: units.length, updates: units.reduce((n, u) => n + u.items.filter((i) => i.existing).length, 0) },
+    });
+  } catch (e) {
+    if (e instanceof WsError && e.accessDenied) {
+      res.status(400).json({ error: `Moodle refused the request (${e.code}). The token may have been revoked or its service changed; reconnect under Course settings → Moodle connection.` });
+      return;
+    }
+    fail(res, e, 'POST /api/teacher/materials/sync-preview');
   }
 });
 
@@ -598,6 +672,7 @@ lti.app.post('/api/teacher/materials/import-backup', uploadBackup.single('file')
     const units = preview.units.map((u) => ({ ...u, items: u.items.map((i) => ({ ...i, existing: have.has(i.key) })) }));
     const items = units.reduce((n, u) => n + u.items.length, 0);
     res.json({
+      source: 'backup', notes: [],
       course: {
         ...preview.course,
         same_course: preview.course.course_id === t.ctx.contextId,

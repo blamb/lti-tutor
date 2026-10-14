@@ -330,9 +330,11 @@ export async function createMaterial(ctx: CourseCtx, input: MaterialInput, creat
 /** Create, or update in place when a material with the same source_key already exists in this course. */
 export async function upsertMaterialBySourceKey(ctx: CourseCtx, input: MaterialInput, createdBy: number): Promise<{ material: Material; updated: boolean }> {
   if (input.source_key) {
+    // Keys were "moodle_backup:…" before the live sync existed; match those too.
+    const keys = [input.source_key, ...(input.source_key.startsWith('moodle:') ? [input.source_key.replace(/^moodle:/, 'moodle_backup:')] : [])];
     const existing = await query<{ id: number }>(
-      `select id from material where lti_iss = $1 and lti_context_id = $2 and source_key = $3 order by id limit 1`,
-      [ctx.iss, ctx.contextId, input.source_key]
+      `select id from material where lti_iss = $1 and lti_context_id = $2 and source_key = any($3::text[]) order by id limit 1`,
+      [ctx.iss, ctx.contextId, keys]
     );
     if (existing[0]) {
       const material = await updateMaterial(existing[0].id, ctx, input);
@@ -348,7 +350,7 @@ export async function existingSourceKeys(ctx: CourseCtx): Promise<Set<string>> {
     `select source_key from material where lti_iss = $1 and lti_context_id = $2 and source_key <> ''`,
     [ctx.iss, ctx.contextId]
   );
-  return new Set(rows.map((r) => r.source_key));
+  return new Set(rows.map((r) => r.source_key.replace(/^moodle_backup:/, 'moodle:')));
 }
 
 export async function updateMaterial(id: number, ctx: CourseCtx, input: MaterialInput): Promise<Material | null> {

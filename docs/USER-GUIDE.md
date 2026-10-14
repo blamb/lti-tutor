@@ -122,18 +122,17 @@ Open a session from **Tutorials** and click its report. For each learner you see
 
 ---
 
-## 8. Coming next, and what it needs from your Moodle administrator
+## 8. Live sync with the course
 
-**Live sync with the course (needs web services).** Today the course comes in through a backup you make and upload. The next step is a live connection: the tool reads the course through Moodle's web services, so a **Sync** button refreshes materials and new assignments appear without a backup. This is the single most useful improvement still to make, and it cannot be done from the tool's side alone: **Moodle web services must be enabled by a site administrator**, and on moodbox they are currently off.
+If your Moodle site allows it, the course can be connected directly, so you do not need to make a backup each time. Under **Course settings → Moodle connection**, paste a web-service token and click **Connect**. The tool checks who the token belongs to, that it is allowed to read what the tool needs, and that the account can see this course. Then **Sync from Moodle** appears on the Course materials tab: it reads the course as it is right now and shows the same preview as the backup import. Items imported before are refreshed in place; new ones are added. Nothing about people is read, nothing is written to Moodle, and the token can be revoked in Moodle at any time.
 
-What to ask your administrator for, when you are ready:
+**Getting a token** needs a Moodle administrator once per site:
 
-1. Enable web services (*Site administration → Advanced features → Enable web services*; most institutional Moodles already have this on for the Moodle mobile app) and the REST protocol.
-2. Create an external service named, say, **LTI Tutor course sync**, with only these read functions: `core_webservice_get_site_info`, `core_course_get_contents`, `mod_page_get_pages_by_courses`, `mod_book_get_books_by_courses`, `mod_label_get_labels_by_courses`, `mod_resource_get_resources_by_courses`, `mod_url_get_urls_by_courses`, `mod_assign_get_assignments`, `mod_forum_get_forums_by_courses`, `mod_lesson_get_lessons_by_courses`, `mod_glossary_get_glossaries_by_courses`. Nothing that touches users, grades or submissions, and nothing that writes.
-3. Allow file download for the service (so attached PDFs can be read).
-4. Issue a token for that service, either to each instructor who uses the tool or to one service account enrolled as a non-editing teacher in the relevant courses.
+1. Enable web services and the REST protocol (*Site administration → Advanced features → Enable web services*; most institutional Moodles already have this on for the Moodle mobile app).
+2. Create an external service named, say, **LTI Tutor course sync**, allowing only these read functions: `core_webservice_get_site_info`, `core_course_get_contents`, `mod_page_get_pages_by_courses`, `mod_resource_get_resources_by_courses`, `mod_url_get_urls_by_courses`, `mod_assign_get_assignments`, and optionally `mod_book_get_books_by_courses`, `mod_forum_get_forums_by_courses`, `mod_lesson_get_lessons_by_courses`, `mod_glossary_get_glossaries_by_courses`, `mod_glossary_get_entries_by_letter`, `core_grading_get_definitions`. Tick *Can download files*. Nothing that touches users, grades or submissions, and nothing that writes.
+3. Create a token for your account on that service (*Site administration → Server → Web services → Manage tokens → Create token*), or let instructors create their own under *Preferences → User account → Security keys*.
 
-The instructor pastes the token into **Course settings** in the tool; it is stored encrypted and can be revoked in Moodle at any moment. If the administrator says no, the backup import keeps working exactly as it does now.
+The settings page in the tool repeats these steps and lists the functions. If the administrator says no, the backup import keeps working exactly as it does now.
 
 ---
 

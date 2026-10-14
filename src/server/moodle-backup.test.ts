@@ -171,7 +171,7 @@ for (const format of ['tgz', 'zip'] as const) {
     ]);
     const acts = u1.items[1]!;
     assert.match(acts.text, /Exercise 1\.1[\s\S]*Study questions[\s\S]*deductive/);
-    assert.equal(acts.key, 'moodle_backup:section-7-activities');
+    assert.equal(acts.key, 'moodle:section-7-activities');
     assert.equal(acts.source_url, 'https://moodbox.example.ca/course/view.php?id=12&section=1');
     const russell = u1.items[2]!;
     assert.match(russell.text, /THE VALUE OF PHILOSOPHY/);
@@ -180,7 +180,7 @@ for (const format of ['tgz', 'zip'] as const) {
     const a1 = u1.items[3]!;
     assert.match(a1.text, /^Due: 2025-10-25\nMarked out of 100\n\nStandardise/);
     assert.match(a1.text, /## Marking rubric: Assignment 1 rubric\n- Identifies premises and conclusion\n  5 pts: All identified correctly/);
-    assert.equal(a1.key, 'moodle_backup:assign-105');
+    assert.equal(a1.key, 'moodle:assign-105');
     assert.ok(u1.items.every((i) => i.include && i.visible));
 
     const u2 = out.units[1]!;

@@ -472,6 +472,7 @@
         <div class="form-row" style="margin-bottom:.5rem">
           <button class="btn" id="material-new" type="button">+ Paste text</button>
           <button class="btn" id="material-backup-btn" type="button">Import course backup</button>
+          <button class="btn" id="material-sync-btn" type="button" title="Read the course from Moodle through its web services and refresh the imported materials">↻ Sync from Moodle</button>
           <input type="url" id="material-import-url" class="text-input" aria-label="URL to import" placeholder="https://… a web page or Pressbooks chapter" style="flex:1;min-width:240px">
           <label style="display:flex;align-items:center;gap:.3rem;font-size:.85rem;cursor:pointer"><input type="checkbox" id="material-import-book"> whole book</label>
           <button class="btn btn-ghost" id="material-import-btn" type="button">Import URL</button>
@@ -490,12 +491,17 @@
       </div>
       <div data-pane="import" hidden>
         <h3 id="backup-title" tabindex="-1" style="margin:.25rem 0 .5rem;font-size:.95rem">Import from a Moodle course backup</h3>
-        <p class="muted" style="margin:0 0 .5rem">
+        <p class="muted" id="sync-intro" hidden style="margin:0 0 .5rem">
+          The course is read straight from Moodle through its web services, as it is right now: each unit's text, its activities and study questions, its pages,
+          books and readings (including attached PDFs and Word files), its links, and each assignment with its due date and rubric. Nothing about people is read.
+          Items imported before are refreshed in place; new ones are added. You review everything below before anything is saved.
+        </p>
+        <p class="muted" id="backup-intro" style="margin:0 0 .5rem">
           A backup brings the course in as it is: each unit's text, its activities and study questions, its pages, books and readings (including attached PDFs
           and Word files), its links, and each assignment with its due date and rubric. Nothing about people is read: no users, grades, submissions or forum posts.
           The file is deleted as soon as it has been read. You review everything below before anything is saved.
         </p>
-        <details style="margin:0 0 .75rem">
+        <details id="backup-how" style="margin:0 0 .75rem">
           <summary style="cursor:pointer;font-size:.9rem">How to make the backup in Moodle (about a minute)</summary>
           <ol style="margin:.4rem 0 0 1.2rem;font-size:.9rem;line-height:1.5">
             <li>In your course, open <strong>More → Course reuse → Backup</strong> (in older Moodles: the gear menu → Backup).</li>
@@ -506,12 +512,17 @@
           </ol>
           <p class="muted" style="margin:.4rem 0 0;font-size:.85rem">Backups up to 150 MB are accepted. If yours is larger, make a backup without the course's video or audio files, or import the units you need by URL instead.</p>
         </details>
-        <div class="form-row" style="margin-bottom:.5rem">
+        <div class="form-row" id="backup-file-row" style="margin-bottom:.5rem">
           <label for="backup-file" class="visually-hidden">Backup file</label>
           <input type="file" id="backup-file" accept=".mbz,.zip,.tgz,.gz,application/gzip,application/zip" style="font:inherit;font-size:.85rem">
           <button class="btn" id="backup-read-btn" type="button">Read the backup</button>
           <button class="btn btn-ghost" id="backup-cancel-btn" type="button">Back to materials</button>
         </div>
+        <div class="form-row" id="sync-row" hidden style="margin-bottom:.5rem">
+          <button class="btn" id="sync-read-btn" type="button">↻ Read the course again</button>
+          <button class="btn btn-ghost" id="sync-cancel-btn" type="button">Back to materials</button>
+        </div>
+        <div class="muted" id="sync-notes" hidden style="margin-bottom:.5rem;font-size:.85rem"></div>
         <div class="muted" id="backup-status" role="status" aria-live="polite" style="margin-bottom:.5rem"></div>
         <div id="backup-preview" hidden>
           <div id="backup-course" style="margin:.25rem 0 .5rem;font-size:.9rem"></div>
@@ -604,6 +615,31 @@
           </div>
           <div class="err" id="course-err" role="alert"></div>
         </form>
+        <section id="moodle-ws" style="max-width:640px;margin-top:1.5rem;padding-top:1rem;border-top:1px solid var(--rule)">
+          <h3 style="margin:0 0 .35rem;font-size:.95rem">Moodle connection (live course sync)</h3>
+          <p class="muted" style="margin:0 0 .5rem">
+            With a web-service token the tool can read this course straight from Moodle: a <strong>Sync from Moodle</strong> button on the materials tab
+            brings in the units, readings, activities and assignments and refreshes them later with one click. The token is stored encrypted, only ever used
+            to read, and can be revoked in Moodle at any time. It never touches users, grades, submissions or posts.
+          </p>
+          <div id="moodle-ws-status" role="status" style="margin:0 0 .5rem;font-size:.9rem"></div>
+          <details id="moodle-ws-how" style="margin:0 0 .6rem">
+            <summary style="cursor:pointer;font-size:.9rem">How to get a token</summary>
+            <ol style="margin:.4rem 0 0 1.2rem;font-size:.9rem;line-height:1.5">
+              <li>Your Moodle administrator enables web services and the REST protocol, and creates an external service (suggested name <em>LTI Tutor course sync</em>) that allows only the read functions listed below. Most sites already have web services on for the Moodle app.</li>
+              <li>The administrator creates a token for your account on that service (<em>Site administration → Server → Web services → Manage tokens → Create token</em>), or, if they allow it, you create one yourself under <em>Preferences → User account → Security keys</em>.</li>
+              <li>Paste the token here and click <strong>Connect</strong>. The tool checks who it belongs to, that the service allows what it needs, and that the account can read this course.</li>
+            </ol>
+            <p class="muted" style="margin:.4rem 0 0;font-size:.85rem">Functions the service should allow: <code id="moodle-ws-functions"></code></p>
+          </details>
+          <form class="form-row" id="moodle-ws-form" autocomplete="off">
+            <label for="moodle-ws-token" class="visually-hidden">Moodle web-service token</label>
+            <input type="password" id="moodle-ws-token" class="text-input" placeholder="Paste the token from Moodle" autocomplete="off" style="flex:1;min-width:240px">
+            <button class="btn" type="submit" id="moodle-ws-connect">Connect</button>
+            <button class="btn btn-ghost" type="button" id="moodle-ws-disconnect" hidden>Disconnect</button>
+          </form>
+          <div class="err" id="moodle-ws-err" role="alert"></div>
+        </section>
       </div>
     </div>
   </div>
@@ -1591,8 +1627,40 @@
       courseForm.elements.ai_disclosure.value = d.settings.ai_disclosure || '';
       courseForm.elements.course_start.value = d.settings.course_start || '';
       renderTruflexDesc();
+      renderMoodleWs(d.moodle_ws || { connected: false });
     } catch (e) { err.textContent = friendlyError(e); }
   }
+  let moodleWs = { connected: false };
+  function renderMoodleWs(ws) {
+    moodleWs = ws;
+    const st = $('#moodle-ws-status');
+    st.innerHTML = ws.connected
+      ? `<span class="chip done">✓ connected</span> as <strong>${escapeHtml(ws.user || '')}</strong> on ${escapeHtml((ws.wwwroot || '').replace(/^https?:\/\//, ''))}${ws.checked_at ? ` · last read ${escapeHtml(new Date(ws.checked_at).toLocaleString())}` : ''}. Use <strong>Sync from Moodle</strong> on the materials tab.`
+      : `<span class="chip">not connected</span> Materials can still be imported from a backup.`;
+    $('#moodle-ws-disconnect').hidden = !ws.connected;
+    $('#moodle-ws-connect').textContent = ws.connected ? 'Replace token' : 'Connect';
+    $('#moodle-ws-functions').textContent = (ws.functions || []).join(', ');
+    $('#moodle-ws-how').open = !ws.connected;
+    const sync = $('#material-sync-btn'); if (sync) { sync.disabled = !ws.connected; sync.title = ws.connected ? 'Read the course from Moodle and refresh the imported materials' : 'Connect this course to Moodle under Course settings first'; }
+  }
+  $('#moodle-ws-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const err = $('#moodle-ws-err'); err.textContent = ''; const btn = $('#moodle-ws-connect'); const input = $('#moodle-ws-token');
+    const token = input.value.trim();
+    if (!token) { err.textContent = 'Paste the token first.'; return; }
+    btn.disabled = true; $('#moodle-ws-status').textContent = 'Checking the token with Moodle…';
+    try {
+      const d = await api('/api/teacher/course/moodle-ws', { method: 'PUT', body: { token } });
+      input.value = '';
+      const c = await api('/api/teacher/course'); renderMoodleWs(c.moodle_ws);
+      $('#moodle-ws-status').insertAdjacentHTML('beforeend', `<div style="margin-top:.3rem">Connected as ${escapeHtml(d.fullname)} (${escapeHtml(d.sitename)}).${d.missing_optional && d.missing_optional.length ? ` The service does not allow ${escapeHtml(d.missing_optional.join(', '))}; the sync will skip what those cover.` : ''}</div>`);
+    } catch (ex) { err.textContent = friendlyError(ex); renderMoodleWs(moodleWs); } finally { btn.disabled = false; }
+  });
+  $('#moodle-ws-disconnect').addEventListener('click', async () => {
+    const err = $('#moodle-ws-err'); err.textContent = '';
+    try { await api('/api/teacher/course/moodle-ws', { method: 'DELETE' }); const c = await api('/api/teacher/course'); renderMoodleWs(c.moodle_ws); $('#moodle-ws-status').insertAdjacentHTML('beforeend', '<div style="margin-top:.3rem">Token forgotten here. Revoke it in Moodle too if it is no longer needed.</div>'); }
+    catch (ex) { err.textContent = friendlyError(ex); }
+  });
   if (isTeacherRole) {
     courseForm.elements.truflex.addEventListener('change', renderTruflexDesc);
     courseForm.addEventListener('submit', async (e) => {
@@ -1705,10 +1773,30 @@
   const ROLE_OPTIONS = [['reading', 'Reading, notes or transcript'], ['activities', 'Activities and study questions'], ['assignment', 'Assignment description and criteria'], ['other', 'Other']];
   let backupPreview = null;
   function backupStatus(msg, isError) { const el = $('#backup-status'); el.textContent = msg; el.style.color = isError ? 'var(--bad)' : ''; }
-  $('#material-backup-btn').addEventListener('click', () => {
+  let importMode = 'backup';
+  function openImportPane(mode) {
+    importMode = mode;
     backupPreview = null; $('#backup-preview').hidden = true; $('#backup-units').innerHTML = ''; backupStatus(''); $('#backup-err').textContent = '';
+    $('#backup-title').textContent = mode === 'sync' ? 'Sync from Moodle' : 'Import from a Moodle course backup';
+    $('#backup-intro').hidden = mode === 'sync'; $('#sync-intro').hidden = mode !== 'sync';
+    $('#backup-how').hidden = mode === 'sync'; $('#backup-file-row').hidden = mode === 'sync';
+    $('#sync-row').hidden = mode !== 'sync'; $('#sync-notes').hidden = true; $('#sync-notes').textContent = '';
     paneShow('materials', 'import');
-  });
+  }
+  $('#material-backup-btn').addEventListener('click', () => openImportPane('backup'));
+  $('#material-sync-btn').addEventListener('click', () => { openImportPane('sync'); readCourseFromMoodle(); });
+  $('#sync-read-btn').addEventListener('click', readCourseFromMoodle);
+  $('#sync-cancel-btn').addEventListener('click', () => paneShow('materials', 'list'));
+  async function readCourseFromMoodle() {
+    const btn = $('#sync-read-btn'); btn.disabled = true; $('#backup-preview').hidden = true;
+    backupStatus('Reading the course from Moodle… a course with many PDFs can take a minute.');
+    try {
+      const d = await api('/api/teacher/materials/sync-preview', { body: {} });
+      backupPreview = d; renderBackupPreview(d);
+      const notes = $('#sync-notes'); notes.hidden = !(d.notes && d.notes.length); notes.textContent = d.notes && d.notes.length ? d.notes.join(' ') : '';
+      backupStatus(`Read ${d.stats.items} item${d.stats.items === 1 ? '' : 's'} in ${d.stats.units} unit${d.stats.units === 1 ? '' : 's'} from Moodle.${d.stats.updates ? ` ${d.stats.updates} ${d.stats.updates === 1 ? 'was' : 'were'} imported before and will be refreshed.` : ''} Review below, then import.`);
+    } catch (e) { backupStatus(friendlyError(e), true); } finally { btn.disabled = false; }
+  }
   $('#backup-cancel-btn').addEventListener('click', () => paneShow('materials', 'list'));
   $('#backup-read-btn').addEventListener('click', async () => {
     const input = $('#backup-file'); const btn = $('#backup-read-btn');
@@ -1778,7 +1866,7 @@
     try {
       const d = await api('/api/teacher/materials/import-backup/commit', { body: { items } });
       await loadTeacherMaterials(); paneShow('materials', 'list');
-      importStatus(`Imported from the course backup: ${d.created} added${d.updated ? `, ${d.updated} updated` : ''}. Each material says what it is; edit one to change that. Next: create a session and tick the unit's materials, or pick "Assignment start" for an assignment.`);
+      importStatus(`${importMode === 'sync' ? 'Synced from Moodle' : 'Imported from the course backup'}: ${d.created} added${d.updated ? `, ${d.updated} updated` : ''}. Each material says what it is; edit one to change that. Next: create a session and tick the unit's materials, or pick "Assignment start" for an assignment.`);
     } catch (e) { err.textContent = friendlyError(e); backupStatus(''); } finally { btn.disabled = false; }
   });
 
