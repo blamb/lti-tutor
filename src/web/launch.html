@@ -531,6 +531,12 @@
             pages, readings and assignments are separate. Check the <em>what it is</em> column: it decides how the tutor uses each material, and a wrong guess is easy to fix here
             or later in the materials list. Items marked <em>update</em> were imported before and will be refreshed in place rather than added again.
           </p>
+          <div class="form-row" id="backup-select-all" style="margin:0 0 .5rem;font-size:.9rem;align-items:center">
+            <span class="muted">Whole course:</span>
+            <button class="link-btn" type="button" id="backup-all">select all</button>
+            <button class="link-btn" type="button" id="backup-none">select none</button>
+            <button class="link-btn" type="button" id="backup-suggested" title="Visible items with text ticked; hidden items and empty ones unticked">back to suggested</button>
+          </div>
           <div id="backup-units"></div>
           <div id="backup-skipped" class="muted" style="font-size:.85rem;margin:.5rem 0"></div>
           <div class="form-row" style="margin-top:.75rem">
@@ -1845,6 +1851,12 @@
       box.querySelectorAll(`tr[data-unit="${ui}"] .bk-include`).forEach((cb) => { cb.checked = on; }); updateBackupCount();
     }));
     box.addEventListener('change', updateBackupCount);
+    $('#backup-all').onclick = () => { $$('#backup-units .bk-include').forEach((cb) => { cb.checked = true; }); updateBackupCount(); };
+    $('#backup-none').onclick = () => { $$('#backup-units .bk-include').forEach((cb) => { cb.checked = false; }); updateBackupCount(); };
+    $('#backup-suggested').onclick = () => {
+      $$('#backup-units tr[data-unit]').forEach((tr) => { const it = d.units[Number(tr.dataset.unit)].items[Number(tr.dataset.item)]; tr.querySelector('.bk-include').checked = !!it.include; });
+      updateBackupCount();
+    };
     const sk = $('#backup-skipped');
     sk.textContent = d.skipped.length ? `Left out (${d.skipped.length}): ${d.skipped.slice(0, 12).map((s) => `${s.title} (${s.reason})`).join('; ')}${d.skipped.length > 12 ? '; …' : ''}.` : '';
     $('#backup-preview').hidden = false; updateBackupCount();
