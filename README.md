@@ -6,6 +6,8 @@ Subject-agnostic: instructors paste their own course materials (lecture notes, t
 
 ---
 
+> **Instructors:** start with the short [user guide](docs/USER-GUIDE.md). This README is the full reference.
+
 ## The idea
 
 Sam Paddock's write-up of [Paski](http://www.sampaddock.com/blog/2025/10/27/1-week-five-faculty-130-students-ai-tutor-paski-nps-78-live-faculty-meets-generative-ai), Next Gen Learning's AI tutor, argues that most AI tutors fail because they're bolted on: they sit outside the learning sequence and know nothing about the student. Paski's answer: faculty co-design each tutorial as they'd brief their best TA, the tutorial sits in the core sequence (live lecture → 1-on-1 AI tutorial → group debrief), students hold it by voice, it's personalised from a profile, and results feed back to faculty. Half of students' learning time went to it; NPS +78.
