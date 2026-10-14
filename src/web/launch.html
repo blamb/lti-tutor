@@ -297,6 +297,7 @@
       </div>
     </div>
     <div class="tut-goal" id="tutorial-goal"></div>
+    <div class="tut-goal" id="tutorial-frame" hidden></div>
     <div class="tut-panel" data-state="chat">
       <div class="tut-toolbar">
         <span class="chip live" id="tutorial-stage" role="status">Starting…</span>
@@ -387,6 +388,7 @@
               <option value="concept">Tutorial — the core Socratic tutorial</option>
               <option value="readiness">Readiness check — before a unit</option>
               <option value="preparation_check">Preparation check — after an assigned reading</option>
+              <option value="assignment_start">Assignment start — get going on an assignment</option>
               <option value="practice">Practice — feedback on a draft or attempt</option>
               <option value="reflection">Reflection — after a unit</option>
               <option value="recall">Recall — revisit earlier learning</option>
@@ -407,7 +409,7 @@
           <label><span data-kf="ta_brief">How to run it — your notes to the TA</span> <span class="hint" data-kh="ta_brief">How to open, the probes to work through in order and what a good answer contains, what to do when they're stuck, when to move to the teach-back.</span><textarea name="ta_brief" class="tall"></textarea></label>
           <label><span data-kf="misconceptions">Misconceptions to listen for</span> <span class="hint" data-kh="misconceptions">One per line, with the question that exposes it.</span><textarea name="misconceptions"></textarea></label>
           <label><span data-kf="success_criteria">What "got it" sounds like</span> <span class="hint" data-kh="success_criteria">Used to judge the end-of-tutorial summary.</span><textarea name="success_criteria"></textarea></label>
-          <label id="tutorial-practice-prompts" hidden>Practice prompts <span class="hint">Sample questions or scenarios the tutor may offer when the learner has nothing to share or is ready for one more. One per line.</span><textarea name="practice_prompts"></textarea></label>
+          <label id="tutorial-practice-prompts" hidden><span data-kf="practice_prompts">Practice prompts</span> <span class="hint" data-kh="practice_prompts">Sample questions or scenarios the tutor may offer when the learner has nothing to share or is ready for one more. One per line.</span><textarea name="practice_prompts"></textarea></label>
           <label id="tutorial-recall-sources" hidden>Earlier sessions this revisits <span class="hint">The tutor opens with a retrieval prompt about what these covered, then connects it to the current unit. Tick any that apply.</span>
             <div class="check-list" id="tutorial-form-recall"></div></label>
           <div class="form-row"><label style="flex-direction:row;align-items:center;gap:.4rem"><input type="checkbox" name="gradebook"> Post completion to the gradebook (1/1)</label></div>
@@ -484,6 +486,13 @@
         <h3 id="material-edit-title" tabindex="-1" style="margin:.25rem 0 .75rem;font-size:.95rem">Add material</h3>
         <form class="form-grid" id="material-form" autocomplete="off">
           <label>Title <span class="hint">e.g. "Week 3 lecture: sampling distributions"</span><input type="text" name="title" maxlength="160" required></label>
+          <label>What it is <span class="hint">Readings ground the tutor. The course's own activities and study questions become its probes before it invents any. An assignment description is the task itself, never a source to teach from.</span>
+            <select name="role">
+              <option value="reading">Reading, notes or transcript</option>
+              <option value="activities">Activities and study questions</option>
+              <option value="assignment">Assignment description and criteria</option>
+              <option value="other">Other</option>
+            </select></label>
           <label>Text <span class="hint">Plain text or markdown. Paste from your notes, slides or a transcript, or edit an imported chapter.</span><textarea name="body" class="huge" required></textarea></label>
           <label>Source URL <span class="hint">Where this came from, if anywhere. Shown to the tutor so it can point learners to the original.</span><input type="url" name="source_url" maxlength="2000"></label>
           <div class="form-row">
@@ -1002,7 +1011,10 @@
       fields: { learning_goal: ['Key ideas to check', 'Which ideas from the reading the learner should be able to recount.'], opening_question: ['Opening question', 'An open question about the reading that someone who did it can answer easily.'], ta_brief: ['How to run it — your notes to the TA', "The three to five key ideas to check recall of, how to handle someone who hasn't done the reading, and the connect prompt."], misconceptions: ['Ideas commonly garbled', 'One per line, with the question that exposes it.'], success_criteria: ['What "did the reading" sounds like', 'Used to judge the summary.'] } },
     practice: { label: 'Practice', blurb: 'The learner brings a draft or attempt; the tutor gives feedback against your criteria and offers more practice. Never a grade.', done: 'Practice complete',
       mastery: { solid: 'Meets the criteria', developing: 'Getting there', needs_work: 'Needs work' }, placeholder: 'Paste or type your draft or attempt, or ask for a practice question…',
-      fields: { learning_goal: ['What they should be able to do', 'The skill or kind of work this session practises.'], opening_question: ['Invitation to share', 'How the tutor asks for their draft or attempt, naming what kind of work it is.'], ta_brief: ['How to give feedback — your notes to the TA', 'How to judge against the criteria, the common weaknesses to look for, what to push on in revision, how to introduce a second prompt.'], misconceptions: ['Common errors in attempts', 'One per line, with the question that exposes it.'], success_criteria: ['What a strong attempt contains', 'The feedback is judged against this. Be specific.'] } },
+      fields: { learning_goal: ['What they should be able to do', 'The skill or kind of work this session practises.'], opening_question: ['Invitation to share', 'How the tutor asks for their draft or attempt, naming what kind of work it is.'], ta_brief: ['How to give feedback — your notes to the TA', 'How to judge against the criteria, the common weaknesses to look for, what to push on in revision, how to introduce a second prompt.'], misconceptions: ['Common errors in attempts', 'One per line, with the question that exposes it.'], success_criteria: ['What a strong attempt contains', 'The feedback is judged against this. Be specific.'], practice_prompts: ['Practice prompts', 'Sample questions or scenarios the tutor may offer when the learner has nothing to share or is ready for one more. One per line.'] } },
+    assignment_start: { label: 'Assignment start', blurb: 'Get going on an assignment: unpack what it asks, connect it to the readings and activities, choose an approach, take the first step out loud. Nothing it produces is submittable.', done: 'Assignment start complete',
+      mastery: { solid: 'Ready to continue', developing: 'Partly ready', needs_work: 'Not yet started' }, placeholder: 'Say what you think the assignment is asking, or where you are stuck…',
+      fields: { learning_goal: ['What they should leave able to do', 'Understand the task, have a plan, have taken the first step: on their own.'], opening_question: ['Opening question', 'Names the assignment and asks them to say in their own words what it is asking for.'], ta_brief: ['How to run it — your notes to the TA', 'What the assignment requires (parts and criteria), which readings bear on which part, which of the course\'s own activities and study questions to use as probes, and how to decline requests to write any of it.'], misconceptions: ['Common misreadings of the assignment', 'One per line, with the question that exposes it.'], success_criteria: ['What "ready to continue alone" sounds like', 'Used to judge the summary. Never about the quality of the eventual assignment.'], practice_prompts: ['First-step prompts', 'Prompts the tutor may offer for the first step, one per line: the course\'s own activities adapted to the assignment where possible.'] } },
     reflection: { label: 'Reflection', blurb: 'A short metacognitive conversation after a unit (4–8 exchanges): what was hard, what worked, what to change.', done: 'Reflection complete',
       mastery: { solid: 'Specific', developing: 'Developing', needs_work: 'Needs more' }, placeholder: null,
       fields: { learning_goal: ['What to notice', 'What the learner should notice about their own learning by the end.'], opening_question: ['Opening question', 'The first reflective question, e.g. what was hardest in this unit and why.'], ta_brief: ['How to run it — your notes to the TA', 'The probes about strategy, self-monitoring and what to change; what to listen for.'], misconceptions: ['Unhelpful beliefs about learning', 'One per line, e.g. that re-reading equals understanding.'], success_criteria: ['What a productive reflection sounds like', 'Used to judge the summary.'] } },
@@ -1039,6 +1051,9 @@
       $('#tutorial-title').textContent = (data.tutorial.kind && data.tutorial.kind !== 'concept' ? ku.label + ': ' : '') + data.tutorial.title + (data.tutorial.status !== 'published' ? ' (draft preview)' : '');
       applyInputMode(inputMode());
       $('#tutorial-goal').textContent = 'Goal: ' + data.tutorial.learning_goal;
+      const frame = $('#tutorial-frame');
+      frame.hidden = data.tutorial.kind !== 'assignment_start';
+      frame.textContent = frame.hidden ? '' : 'This session helps you start the assignment: it asks, it does not write. Nothing here is submittable text, and the tutor will not draft any part of it for you.';
       if (data.session.status === 'completed' && data.session.summary) {
         renderTutorialSummary(data.session.summary, { posted: !!data.session.grade_posted_at });
         tutShowState('done'); return;
@@ -1142,6 +1157,9 @@
       case 'practice': return `<div><strong>Strengths</strong>${list(s.strengths)}</div><div><strong>To improve next</strong>${list(s.improve)}</div>` + line('Revised during the session', s.revised ? 'yes' : 'no');
       case 'reflection': return line('How you learn, in your words', s.strategy_in_own_words) + line('Your next action', s.suggested_action);
       case 'recall': return `<div><strong>Came back readily</strong>${list(s.retained)}</div><div><strong>Had faded</strong>${list(s.faded)}</div>`;
+      case 'assignment_start': return line('Understanding of the task', { clear: 'clear', partial: 'partly there', unclear: 'not yet clear' }[s.task_understanding] || s.task_understanding) +
+        line('Your plan', s.plan) + line('Your first step', s.first_step) + `<div><strong>Readings and activities you drew on</strong>${list(s.sources_used)}</div>` +
+        '<div class="muted" style="font-size:.85rem;margin-top:.25rem">Nothing in this session is submittable text. The plan and the first step are yours; the assignment is still yours to write.</div>';
       default: return line('Teach-back', s.teachback);
     }
   }
@@ -1151,8 +1169,8 @@
     const ku = kindUI(kind);
     const box = document.createElement('div'); box.className = 'tut-summary';
     const list = (items) => items && items.length ? '<ul>' + items.map((i) => `<li>${escapeHtml(i)}</li>`).join('') + '</ul>' : '<div class="muted">—</div>';
-    const understoodLabel = kind === 'practice' ? 'What you did well' : kind === 'reflection' ? 'What you said you now grasp' : 'What you showed you understand';
-    const stickyLabel = kind === 'practice' ? 'Where the work fell short' : kind === 'reflection' ? 'What still feels hard' : 'Where it got sticky';
+    const understoodLabel = kind === 'practice' ? 'What you did well' : kind === 'reflection' ? 'What you said you now grasp' : kind === 'assignment_start' ? 'What you worked out about the task' : 'What you showed you understand';
+    const stickyLabel = kind === 'practice' ? 'Where the work fell short' : kind === 'reflection' ? 'What still feels hard' : kind === 'assignment_start' ? 'Where you got stuck' : 'Where it got sticky';
     box.innerHTML =
       `<h3>${ku.done} <span class="chip ${summary.mastery}">${masteryLabel(kind, summary.mastery)}</span></h3>` +
       `<div class="md" id="tut-sum-note"></div>` +
@@ -1486,6 +1504,7 @@
   }
 
   // ─── Materials ───
+  const MATERIAL_ROLE_CHIP = { activities: 'activities', assignment: 'assignment', other: 'other' };
   async function loadTeacherMaterials() {
     const tbody = $('#materials-tbody'); const err = $('#materials-err'); err.textContent = '';
     try {
@@ -1496,7 +1515,8 @@
         const tr = document.createElement('tr');
         const src = m.source_url ? `<a href="${escapeHtml(m.source_url)}" target="_blank" rel="noopener">${escapeHtml(truncate(m.source_url.replace(/^https?:\/\//, ''), 40))}</a>` : '<span class="muted">pasted</span>';
         const lic = m.license ? ` <span class="chip" title="${escapeHtml(m.attribution || '')}">${escapeHtml(m.license)}</span>` : '';
-        tr.innerHTML = `<td>${escapeHtml(m.title)}</td><td>${src}${lic}</td><td class="num">${(m.chars / 1000).toFixed(1)}k chars</td><td>${fmtTime(m.created_at)}</td><td></td>`;
+        const role = MATERIAL_ROLE_CHIP[m.role] ? ` <span class="chip">${MATERIAL_ROLE_CHIP[m.role]}</span>` : '';
+        tr.innerHTML = `<td>${escapeHtml(m.title)}${role}</td><td>${src}${lic}</td><td class="num">${(m.chars / 1000).toFixed(1)}k chars</td><td>${fmtTime(m.created_at)}</td><td></td>`;
         const b = document.createElement('button'); b.className = 'link-btn'; b.type = 'button'; b.textContent = 'Edit';
         b.addEventListener('click', () => editMaterial(m));
         tr.lastElementChild.appendChild(b); tbody.appendChild(tr);
@@ -1512,6 +1532,7 @@
     materialForm.elements.source_url.value = m ? (m.source_url || '') : '';
     materialForm.elements.license.value = m ? (m.license || '') : '';
     materialForm.elements.attribution.value = m ? (m.attribution || '') : '';
+    materialForm.elements.role.value = m ? (m.role || 'reading') : 'reading';
     $('#material-delete').hidden = !m; $('#material-form-err').textContent = '';
     updateMaterialSize();
     paneShow('materials', 'edit');
@@ -1524,7 +1545,7 @@
     e.preventDefault();
     const err = $('#material-form-err'); err.textContent = ''; $('#material-save').disabled = true;
     const f = materialForm.elements;
-    const body = { title: f.title.value.trim(), body: f.body.value.trim(), source_url: f.source_url.value.trim(), license: f.license.value.trim(), attribution: f.attribution.value.trim() };
+    const body = { title: f.title.value.trim(), body: f.body.value.trim(), source_url: f.source_url.value.trim(), license: f.license.value.trim(), attribution: f.attribution.value.trim(), role: f.role.value };
     try {
       if (tm.editingMaterial) await api(`/api/teacher/materials/${tm.editingMaterial.id}`, { method: 'PUT', body });
       else await api('/api/teacher/materials', { body });
@@ -1618,7 +1639,7 @@
       const l = tutorialForm.querySelector(`[data-kf="${name}"]`); const h = tutorialForm.querySelector(`[data-kh="${name}"]`);
       if (l) l.textContent = label; if (h) h.textContent = hint;
     }
-    $('#tutorial-practice-prompts').hidden = kind !== 'practice';
+    $('#tutorial-practice-prompts').hidden = !ku.fields.practice_prompts;
     $('#tutorial-recall-sources').hidden = kind !== 'recall';
   }
   function renderRecallChecks(selected = [], selfId = null) {
@@ -1727,7 +1748,7 @@
     try {
       const current = readTutorialForm();
       const { draft } = await api('/api/teacher/tutorials/draft', { body: { topic, kind: current.kind, material_ids: current.material_ids, pitch: current.pitch } });
-      if (current.kind !== 'practice') delete draft.practice_prompts;
+      if (!kindUI(current.kind).fields.practice_prompts) delete draft.practice_prompts;
       fillTutorialForm({ ...current, ...draft, id: tm.editing && tm.editing.id });
     } catch (ex) { err.textContent = friendlyError(ex); } finally { btn.disabled = false; btn.textContent = 'Draft'; }
   });

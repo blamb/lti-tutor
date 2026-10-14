@@ -47,6 +47,19 @@ test('even the shortest practice session visits every stage', () => {
   assert.deepEqual(sequence('practice', 5), ['SHARE', 'FEEDBACK', 'REVISE', 'MORE-PRACTICE', 'WRAP-UP']);
 });
 
+test('assignment start walks unpack → connect → plan → first step → wrap-up at every length, and never writes for the learner', () => {
+  for (const minutes of [5, 15, 60]) {
+    assert.deepEqual(sequence('assignment_start', minutes), ['UNPACK', 'CONNECT', 'PLAN', 'FIRST-STEP', 'WRAP-UP'], `${minutes} minutes`);
+  }
+  assert.equal(KINDS.assignment_start.short, false);
+  assert.ok(KINDS.assignment_start.prompts, 'uses the prompts field for first-step prompts');
+  const text = [KINDS.assignment_start.purpose(deliveryOf(9)), ...KINDS.assignment_start.rules(deliveryOf(9))].join('\n');
+  assert.match(text, /submittable/i);
+  assert.match(text, /activity|activities|study question/i, 'reaches for the course\'s own activities');
+  assert.match(text, /never .*grade/i);
+  assert.equal(titledForKind('assignment_start', 'Assignment 1'), 'Assignment start: Assignment 1');
+});
+
 test('mode wording never mentions classes or weeks where the course has none', () => {
   const selfPaced = deliveryOf(9);
   const paced = deliveryOf(10);

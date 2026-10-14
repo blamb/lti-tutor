@@ -84,6 +84,13 @@ Never include a mark, grade or score anywhere.`,
 3. "Now check" — tell them to open the material and note what came back and what had faded, then [write].
 4. "Connect" — how the earlier idea applies to the current section, then [write].
 5. "What faded, and where to find it" — a line for each, then [write].`,
+  assignment_start: `1. "What is being asked" — the opening question (restate the assignment in your own words), then [write]. Then "The parts I must produce, in order:" and [write].
+2. "Where the readings come in" — for each reading or activity in the instructor's notes, a question asking which part of the task it bears on and what the learner remembers of it, each followed by [write]. Use the course's own activity and study questions where the notes give them, adapted to the assignment and attributed.
+3. "Check yourself" — each common misreading as "Some people take this assignment to mean … Is that right?" followed by [write].
+4. "My plan" — "The approach I will take, and the parts in order:" then [write] twice.
+5. "First step" — the first-step prompts from the notes (or one in their spirit): "Do it here, roughly, in your own words", then [write] twice.
+6. "Before I continue alone" — the success criteria as ☐ lines, then "What I will do next:" and [write].
+Never write any part of the assignment for the learner, never give a model answer, and never include a mark.`,
 };
 
 function printSystem(kind: TutorialKind): string {

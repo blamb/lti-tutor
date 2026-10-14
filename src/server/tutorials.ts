@@ -53,6 +53,8 @@ export interface Material {
   license: string;
   /** Who to credit, e.g. "Concepts of Biology by …, CC BY 4.0". */
   attribution: string;
+  /** What the material is, so the tutor and the draft can use it for what it is (see MATERIAL_ROLES). */
+  role: MaterialRole;
   created_by: number | null;
   created_at: string;
   updated_at: string;
@@ -140,8 +142,15 @@ export const RecallSummary = z.object({
   retained: z.array(z.string()).max(6),
   faded: z.array(z.string()).max(6),
 });
+export const AssignmentStartSummary = z.object({
+  kind: z.literal('assignment_start'), ...SummaryBase,
+  task_understanding: z.enum(['clear', 'partial', 'unclear']),
+  plan: z.string(),
+  first_step: z.string(),
+  sources_used: z.array(z.string()).max(6),
+});
 export const TutorialSummary = z.discriminatedUnion('kind', [
-  ConceptSummary, ReadinessSummary, PreparationCheckSummary, PracticeSummary, ReflectionSummary, RecallSummary,
+  ConceptSummary, ReadinessSummary, PreparationCheckSummary, PracticeSummary, ReflectionSummary, RecallSummary, AssignmentStartSummary,
 ]);
 /** Runs completed before kinds existed have no `kind`; treat them as concept. */
 export type TutorialSummary = z.infer<typeof TutorialSummary> & { turns?: number };
@@ -173,6 +182,10 @@ export function summaryHighlight(s: TutorialSummary): string {
     case 'recall': {
       const r = s as z.infer<typeof RecallSummary>;
       return `Retained: ${(r.retained ?? []).join('; ') || '—'}; faded: ${(r.faded ?? []).join('; ') || '—'}`;
+    }
+    case 'assignment_start': {
+      const r = s as z.infer<typeof AssignmentStartSummary>;
+      return `Task understanding: ${r.task_understanding ?? '—'}; plan: ${r.plan || '—'}; first step: ${r.first_step || '—'}; sources used: ${(r.sources_used ?? []).join('; ') || '—'}`;
     }
     default: {
       const r = s as z.infer<typeof ConceptSummary>;
@@ -214,12 +227,36 @@ export const START_MARKER = '[Tutorial start]';
 import { MATERIAL_MAX_CHARS, GROUNDING_MAX_CHARS } from './limits.js';
 export { MATERIAL_MAX_CHARS, GROUNDING_MAX_CHARS };
 
+/**
+ * What a material is. Readings are the default; the other roles tell the
+ * tutor and the AI draft to use the material for what it is: the course's
+ * own activities and study questions become probes before the model invents
+ * any, and an assignment description is the task itself, never a source.
+ * A course import sets the role from the course structure; by hand it is a
+ * selector on the material.
+ */
+export const MATERIAL_ROLES = ['reading', 'activities', 'assignment', 'other'] as const;
+export type MaterialRole = (typeof MATERIAL_ROLES)[number];
+export const MATERIAL_ROLE_LABELS: Record<MaterialRole, string> = {
+  reading: 'Reading, notes or transcript',
+  activities: 'Activities and study questions',
+  assignment: 'Assignment description and criteria',
+  other: 'Other',
+};
+const MATERIAL_ROLE_NOTES: Record<MaterialRole, string> = {
+  reading: '',
+  activities: "the course's own activities and study questions: use these as probes, adapted as needed, before inventing your own, and say which one you are drawing on",
+  assignment: 'the assignment description and its criteria: this is the task the student must do themselves, not a source to teach from, and nothing you say may be submittable as part of it',
+  other: '',
+};
+
 export const MaterialInput = z.object({
   title: z.string().trim().min(1).max(160),
   body: z.string().trim().min(1).max(MATERIAL_MAX_CHARS),
   source_url: z.string().trim().max(2000).default(''),
   license: z.string().trim().max(200).default(''),
   attribution: z.string().trim().max(500).default(''),
+  role: z.enum(MATERIAL_ROLES).default('reading'),
 });
 export type MaterialInput = z.infer<typeof MaterialInput>;
 
@@ -275,18 +312,18 @@ export async function getMaterials(ids: number[], ctx: CourseCtx): Promise<Mater
 
 export async function createMaterial(ctx: CourseCtx, input: MaterialInput, createdBy: number): Promise<Material> {
   const rows = await query<Material>(
-    `insert into material (lti_iss, lti_context_id, title, body, source_url, license, attribution, created_by)
-     values ($1,$2,$3,$4,$5,$6,$7,$8) returning *`,
-    [ctx.iss, ctx.contextId, input.title, input.body, input.source_url, input.license, input.attribution, createdBy]
+    `insert into material (lti_iss, lti_context_id, title, body, source_url, license, attribution, role, created_by)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning *`,
+    [ctx.iss, ctx.contextId, input.title, input.body, input.source_url, input.license, input.attribution, input.role, createdBy]
   );
   return rows[0]!;
 }
 
 export async function updateMaterial(id: number, ctx: CourseCtx, input: MaterialInput): Promise<Material | null> {
   const rows = await query<Material>(
-    `update material set title = $4, body = $5, source_url = $6, license = $7, attribution = $8, updated_at = now()
+    `update material set title = $4, body = $5, source_url = $6, license = $7, attribution = $8, role = $9, updated_at = now()
      where id = $1 and lti_iss = $2 and lti_context_id = $3 returning *`,
-    [id, ctx.iss, ctx.contextId, input.title, input.body, input.source_url, input.license, input.attribution]
+    [id, ctx.iss, ctx.contextId, input.title, input.body, input.source_url, input.license, input.attribution, input.role]
   );
   return rows[0] ?? null;
 }
@@ -306,17 +343,25 @@ export async function deleteMaterial(id: number, ctx: CourseCtx): Promise<boolea
   return rows.length > 0;
 }
 
-function materialsBlock(materials: Material[]): string | null {
+/** The one-line note under a material's heading for roles the model must treat specially. */
+export function materialRoleNote(role: MaterialRole | undefined): string {
+  return MATERIAL_ROLE_NOTES[role ?? 'reading'] ?? '';
+}
+
+export function materialsBlock(materials: Material[]): string | null {
   if (materials.length === 0) return null;
   let total = 0;
   const parts = ['# COURSE MATERIALS (provided by the instructor)'];
+  const hasActivities = materials.some((m) => m.role === 'activities');
+  if (hasActivities) parts.push("Some materials are marked as the course's own activities and study questions. Prefer those as probes, adapted to the moment, before inventing your own.");
   for (const m of materials) {
     const body = total + m.body.length > GROUNDING_MAX_CHARS
       ? m.body.slice(0, Math.max(0, GROUNDING_MAX_CHARS - total)) + '\n[…truncated: grounding limit reached]'
       : m.body;
     total += body.length;
     const src = [m.license ? `licence: ${m.license}` : '', m.source_url ? `source: ${m.source_url}` : ''].filter(Boolean).join('; ');
-    parts.push(`\n## ${m.title}${src ? ` (${src})` : ''}\n${body}`);
+    const note = materialRoleNote(m.role);
+    parts.push(`\n## ${m.title}${src ? ` (${src})` : ''}${note ? `\n(This material is ${note}.)` : ''}\n${body}`);
     if (total >= GROUNDING_MAX_CHARS) break;
   }
   return parts.join('\n');
@@ -518,6 +563,7 @@ function buildTutorialRules(d: Delivery, kind: TutorialKind): string {
     "If the student raises something correct that's adjacent to the goal, credit it briefly before steering back.",
     'Stay grounded in the course materials provided. If none are attached, draw on general knowledge of the subject described in the brief, and say so if asked where something comes from. If the student asks something outside the materials, say what you can and point them to the instructor.',
     'When you draw on a course material, name it — its title and, if you can tell, the chapter or section — so the student can find the passage themselves in the open textbook or notes. Briefly, in passing; never as a citation list.',
+    "Where the materials include the course's own activities or study questions, prefer those as your probes, adapted to the moment, before inventing your own.",
     "Personalise lightly: about one example or analogy in ten should draw on the student's own context and interests. Never make the tutorial about them instead of the subject.",
   ];
   // Delivery-mode rules (hasLiveSessions / hasCohort), never the TRUFlex number.
@@ -579,7 +625,7 @@ function tutorialBrief(t: Tutorial, ctx: CourseCtx, recallSources: Tutorial[] = 
   if (t.ta_brief) parts.push(`\n## How to run it — the instructor's notes to their TA\n${t.ta_brief}`);
   if (t.misconceptions) parts.push(`\n## Misconceptions to listen for\n${t.misconceptions}`);
   if (t.success_criteria) parts.push(`\n## What "got it" sounds like\n${t.success_criteria}`);
-  if (t.kind === 'practice' && t.practice_prompts) parts.push(`\n## Practice prompts the tutor may offer\n${t.practice_prompts}`);
+  if (spec.prompts && t.practice_prompts) parts.push(`\n## ${spec.prompts.label} the tutor may offer\n${t.practice_prompts}`);
   if (t.kind === 'recall' && recallSources.length) {
     parts.push('\n## Earlier learning this session revisits');
     for (const r of recallSources) {
@@ -1101,12 +1147,14 @@ export type DraftBrief = z.infer<typeof DraftBrief>;
 
 function draftSystemFor(kind: TutorialKind): string {
   const spec = KINDS[kind];
-  const practiceKey = kind === 'practice'
-    ? `,\n  "practice_prompts": three to five practice questions or scenarios the tutor may offer, one per line in one string`
+  const practiceKey = spec.prompts
+    ? `,\n  "practice_prompts": ${spec.prompts.label.toLowerCase()}: three to five the tutor may offer, one per line in one string`
     : '';
   return `You help an instructor draft a one-on-one AI ${spec.label.toLowerCase()} session for their course. The instructor gives you a topic (and sometimes rough notes); if course materials are provided, ground everything in them. Draft the brief the way the instructor would write notes for their best teaching assistant — first person, practical, specific.
 
 ${spec.draftGuide}
+
+Activity-first: if a material is marked as the course's own activities and study questions, draw the probes (and any prompts) from those questions first, adapted to this session and attributed to where they come from ("Exercise 1.2", "the study questions for unit 1"); invent your own only where the course has none. A material marked as an assignment description is the task itself: quote its requirements and criteria in the brief, but never draft any part of the answer.
 
 If a pitch (reading level and tone) is given, honour it exactly: the opening question, the probes, the misconception questions and the success criteria must all be phrased at that level. "Adult Basic Education" means high-school completion: short sentences, everyday examples, no unexplained jargon.
 

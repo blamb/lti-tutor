@@ -35,7 +35,7 @@ export interface HomeGroup {
 
 export interface Nudge {
   tutorial_id: number;
-  kind: 'due' | 'moved_on' | 'readiness' | 'recall' | 'reflection';
+  kind: 'due' | 'moved_on' | 'readiness' | 'recall' | 'reflection' | 'assignment';
   text: string;
 }
 
@@ -125,11 +125,18 @@ export async function buildHomeProgress(params: {
     }
   }
 
-  // Readiness checks not yet done, where whatever they follow is done.
+  // Readiness checks and assignment starts not yet done, where whatever they follow is done.
   for (const t of tutorials) {
-    if (t.kind !== 'readiness' || done(t) || nudges.some((n) => n.tutorial_id === t.id)) continue;
+    if ((t.kind !== 'readiness' && t.kind !== 'assignment_start') || done(t) || nudges.some((n) => n.tutorial_id === t.id)) continue;
     const after = t.suggested_after_tutorial_id !== null ? byId.get(t.suggested_after_tutorial_id) : undefined;
     if (after && !done(after)) continue;
+    if (t.kind === 'assignment_start') {
+      nudges.push({
+        tutorial_id: t.id, kind: 'assignment',
+        text: `Starting the assignment? ${title(t)} helps you unpack the task, connect it to the readings and take the first step. It writes nothing for you.`,
+      });
+      continue;
+    }
     nudges.push({
       tutorial_id: t.id, kind: 'readiness',
       text: d.hasFixedDates && t.week !== null ? `A quick readiness check before week ${t.week}'s material: ${title(t)}.` : `A quick readiness check you haven't done yet: ${title(t)}. A few minutes before you start the next material.`,

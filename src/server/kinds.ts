@@ -8,6 +8,8 @@
  *   practice           6, 9   feedback on a draft or attempt, never a grade
  *   reflection         7      metacognition after a unit
  *   recall             8      retrieval of earlier learning, then connection
+ *   assignment_start   4, 9   getting started on an assignment: unpack, connect
+ *                             to the readings and activities, plan, first step
  *
  * Every kind is available in every delivery mode; only wording changes, and
  * that wording keys on the delivery booleans (never on the TRUFlex number).
@@ -17,7 +19,7 @@
 
 import type { Delivery } from './delivery.js';
 
-export const TUTORIAL_KINDS = ['readiness', 'preparation_check', 'concept', 'practice', 'reflection', 'recall'] as const;
+export const TUTORIAL_KINDS = ['readiness', 'preparation_check', 'concept', 'practice', 'reflection', 'recall', 'assignment_start'] as const;
 export type TutorialKind = (typeof TUTORIAL_KINDS)[number];
 
 export function isTutorialKind(v: unknown): v is TutorialKind {
@@ -62,6 +64,8 @@ export interface KindSpec {
   summaryGuidance: string;
   /** What each brief field should contain, for the AI draft. */
   draftGuide: string;
+  /** How this kind uses the `practice_prompts` field, or null if it does not. */
+  prompts: { label: string; hint: string } | null;
 }
 
 const WRAP_UP_FINISH = 'tell them they can click "Finish tutorial" to get their summary. Then stop asking questions.';
@@ -95,6 +99,7 @@ export const KINDS: Record<TutorialKind, KindSpec> = {
   "watch_for": [up to 4 short pointers the tutor gave them for the upcoming material],`,
     summaryGuidance: 'Here "mastery" means readiness for the unit: "solid" = relevant prior knowledge and no serious misconceptions; "developing" = some footing; "needs_work" = little to build on or a misconception that will block the unit. Put the misconceptions in sticking_points too.',
     draftGuide: `This is a READINESS CHECK run before the unit. learning_goal = what we want to find out and activate before the unit (not what they should learn). opening_question = the first diagnostic question: concrete, about something they may already have met. ta_brief = three or four probes targeting the prior knowledge the unit builds on and the misconceptions listed, plus what to tell them to watch for at the end. misconceptions = the ones to listen for (do not correct them). success_criteria = what "ready for this unit" sounds like.`,
+    prompts: null,
   },
 
   preparation_check: {
@@ -126,6 +131,7 @@ export const KINDS: Record<TutorialKind, KindSpec> = {
   "ideas_missed": [up to 6 short phrases: key ideas from the reading that did not land or were absent],`,
     summaryGuidance: 'Here "mastery" means how well the preparation landed: "solid" = they did the reading and can recount the key ideas; "needs_work" = little evidence of preparation. Put ideas_missed in sticking_points too.',
     draftGuide: `This is a PREPARATION CHECK run after an assigned reading. learning_goal = which key ideas from the reading the student should be able to recount. opening_question = an open question about the reading that someone who did it can answer easily. ta_brief = the three to five key ideas to check recall of (each with what a good recount contains), how to handle a student who has not done the reading, and the connect prompt. misconceptions = ideas commonly garbled on a first reading. success_criteria = what shows they did the reading and understood it.`,
+    prompts: null,
   },
 
   concept: {
@@ -162,6 +168,7 @@ export const KINDS: Record<TutorialKind, KindSpec> = {
     summaryExtras: `  "teachback": one sentence on how well they explained the core idea back in their own words, or "Teach-back not reached" if the tutorial ended before that stage,`,
     summaryGuidance: '"solid" means they could explain the idea unprompted and survived a counter-example. A short transcript with little from the student is "needs_work", not "developing".',
     draftGuide: `This is a CONCEPT TUTORIAL. learning_goal = what the student should be able to explain by the end. opening_question = open, concrete, answerable from the materials, not yes/no. ta_brief = how to open, the 3–5 probes to work through in order (each with what a good answer contains), what to do when the student is stuck, and when to move to the teach-back. misconceptions = 3–5 lines, each a misconception and the question that exposes it. success_criteria = what a student who "got it" can say or do.`,
+    prompts: null,
   },
 
   practice: {
@@ -198,6 +205,7 @@ export const KINDS: Record<TutorialKind, KindSpec> = {
   "revised": true if the student revised their work during the session, else false,`,
     summaryGuidance: 'Here "mastery" describes the work against the success criteria, not a grade: "solid" = meets them with minor issues; "developing" = partly; "needs_work" = a fundamental problem. Put the improve items in sticking_points too. Never mention marks.',
     draftGuide: `This is a PRACTICE session on a draft or attempt. learning_goal = what the student should be able to do or produce. opening_question = the invitation to share their draft or attempt, naming what kind of work it is. ta_brief = how to give feedback against the criteria, the common weaknesses to look for, what to push on in revision, and how to introduce a second practice prompt. misconceptions = common errors in attempts at this kind of work. success_criteria = what a strong attempt contains (this is what the feedback is judged against). practice_prompts = three to five practice questions or scenarios the tutor may offer, one per line.`,
+    prompts: { label: 'Practice prompts', hint: 'Sample questions or scenarios the tutor may offer when the learner has nothing to share or is ready for one more. One per line.' },
   },
 
   reflection: {
@@ -229,6 +237,7 @@ export const KINDS: Record<TutorialKind, KindSpec> = {
   "suggested_action": the one concrete next action they committed to (or the tutor suggested),`,
     summaryGuidance: 'Here "mastery" means quality of reflection: "solid" = specific, honest, with a concrete plan; "needs_work" = generic or disengaged. understood = what they said they now grasp; sticking_points = what they said remains hard.',
     draftGuide: `This is a REFLECTION run after a unit. learning_goal = what the student should notice about their own learning by the end. opening_question = the first reflective question (e.g. what was hardest in this unit and why). ta_brief = the probes about strategy, self-monitoring and what to change, and what to listen for. misconceptions = unhelpful beliefs about learning to listen for (e.g. that re-reading equals understanding). success_criteria = what a productive, specific reflection sounds like.`,
+    prompts: null,
   },
 
   recall: {
@@ -258,6 +267,45 @@ export const KINDS: Record<TutorialKind, KindSpec> = {
   "faded": [up to 6 short phrases: what had faded or was distorted],`,
     summaryGuidance: 'Here "mastery" means retention: "solid" = recalled unaided and connected it; "developing" = recalled with cues; "needs_work" = mostly faded. Put faded items in sticking_points too.',
     draftGuide: `This is a RECALL tutorial revisiting earlier learning. learning_goal = which earlier idea to retrieve and what to connect it to now. opening_question = the retrieval prompt: asks them to recall the earlier idea from memory, no notes. ta_brief = what to cue (smallest hint first) if they draw a blank, the typical distortions, and how to connect it to the current unit. misconceptions = how the idea typically distorts after time. success_criteria = what "retained and connected" sounds like.`,
+    prompts: null,
+  },
+
+  assignment_start: {
+    kind: 'assignment_start',
+    label: 'Assignment start',
+    engagement: [4, 9],
+    blurb: 'Get going on an assignment: unpack what it asks, connect it to the readings and activities, choose an approach, take the first step out loud. Nothing it produces is submittable.',
+    short: false,
+    stages: [
+      { name: 'UNPACK', until: 0.25 },
+      { name: 'CONNECT', until: 0.5 },
+      { name: 'PLAN', until: 0.7 },
+      { name: 'FIRST-STEP', until: 0.9 },
+      { name: 'WRAP-UP', until: Infinity },
+    ],
+    replyWords: 90,
+    purpose: () =>
+      'This is an assignment start session. The student is about to begin an assignment described in the brief and has written nothing yet, or only notes. Your job is to help them start well: understand what is being asked, see which readings and activities bear on it, choose an approach, and take the first concrete step out loud. You are not helping them write it. Nothing said here is submittable text; the student leaves with their own understanding of the task, their own plan and a first step they made themselves.',
+    rules: () => [
+      'Never produce text the student could submit: no thesis statements, no paragraphs, no outlines written by you, no worked answers to any part of the assignment. When they ask you to, decline in one sentence and ask the question that lets them do it themselves.',
+      "Ground the session in the assignment's own wording and in the course's readings and activities. When an activity or study question from the materials fits, ask it (adapted to the assignment) rather than inventing a new one, and say where it comes from.",
+      "Retrieve, don't re-teach: when a reading bears on the task, ask what the student remembers of it and send them to the passage, rather than summarising the reading yourself.",
+      'Never assign or estimate a grade, and never say whether the assignment would pass. If asked, say that the instructor assesses.',
+    ],
+    stageGuide: () => [
+      '- UNPACK (first reply only, then continue): greet the student by first name in one short sentence, name the assignment, say this session is for getting started on it rather than writing it, then ask the opening question. On later turns in this stage, ask them to restate what the assignment asks in their own words and probe one thing they have missed or misread: the task itself, the parts it requires, or the criteria.',
+      '- CONNECT: ask which reading or which activity from the brief bears on the task, and how. Use the course\'s own activity and study questions where they fit. Send them to the passage; do not summarise it for them.',
+      '- PLAN: ask them to choose an approach and name the parts they will need to produce, in order. Help them make it concrete: what first, what second. Their plan, in their words.',
+      '- FIRST-STEP: ask them to do the first step now, out loud, using a first-step prompt from the brief where one fits: for example standardise the first argument, state the first claim in one sentence, pick the passage they will analyse and say why. Respond to the attempt with one strength and one question; do not fix it for them.',
+      `- WRAP-UP: in four or five sentences, play back their understanding of the task, their plan and the first step they took, name what to do next on their own, remind them that nothing here is submittable text, and ${WRAP_UP_FINISH}`,
+    ],
+    summaryExtras: `  "task_understanding": "clear" | "partial" | "unclear",
+  "plan": one or two sentences: the approach and the parts the student chose, in their words, or "No plan yet",
+  "first_step": one sentence: what the student actually decided or produced as a first step, or "No first step taken",
+  "sources_used": [up to 6 short phrases: the readings and activities the student connected to the task],`,
+    summaryGuidance: 'Here "mastery" means readiness to continue the assignment alone: "solid" = understood the task, has a plan and took a real first step; "developing" = understood the task but the plan or first step is thin; "needs_work" = misread the task or could not start. sticking_points = what they misread or got stuck on. Never mention marks, and never judge the assignment itself.',
+    draftGuide: `This is an ASSIGNMENT START session: the student is about to begin an assignment and has not written anything yet. learning_goal = what the student should be able to do unaided when they leave (understand the task, have a plan, have taken the first step). opening_question = names the assignment and asks them to say in their own words what it is asking for. ta_brief = what the assignment requires (the parts and the criteria, from its description), which readings bear on which part and the passages to send them to, which of the course's own activities and study questions to use as probes (quote or closely paraphrase them and say where they come from), how to run the plan and first-step stages, and how to decline requests to write any of it. misconceptions = common misreadings of this assignment, each with the question that exposes it. success_criteria = what "ready to continue alone" sounds like. practice_prompts = three to five first-step prompts the tutor may offer, drawn from the course's activities where possible, one per line.`,
+    prompts: { label: 'First-step prompts', hint: 'Prompts the tutor may offer for the first step, one per line: the course\'s own activities adapted to the assignment where possible.' },
   },
 };
 

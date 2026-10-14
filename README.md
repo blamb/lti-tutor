@@ -71,8 +71,15 @@ Every tutorial has a **kind**, chosen in the editor. The kind sets the stage tem
 | Practice | 6, 9 | share → feedback → revise → more practice → wrap-up | 6–24 exchanges |
 | Reflection | 7 | open → probe → plan → wrap-up | 4–8 exchanges |
 | Recall | 8 | retrieve → connect → wrap-up | 6–24 exchanges |
+| Assignment start | 4, 9 | unpack → connect → plan → first step → wrap-up | 6–24 exchanges |
 
-Every summary carries `mastery`, `understood`, `sticking_points`, `next_step` and `student_note`, so the report and the learner model treat all kinds alike; each kind adds its own fields (readiness: prior knowledge and misconceptions found; practice: strengths, what to improve, whether they revised; recall: retained and faded; and so on). The definitions live in `src/server/kinds.ts`.
+Every summary carries `mastery`, `understood`, `sticking_points`, `next_step` and `student_note`, so the report and the learner model treat all kinds alike; each kind adds its own fields (readiness: prior knowledge and misconceptions found; practice: strengths, what to improve, whether they revised; recall: retained and faded; assignment start: understanding of the task, the plan and the first step in the learner's words, and the sources they drew on). The definitions live in `src/server/kinds.ts`.
+
+### Starting an assignment
+
+An **assignment start** session is for the moment a learner opens an assignment and does not know where to begin. The tutor helps them restate what is being asked and catches a misreading, asks which reading and which activity bear on the task (sending them to the passage rather than summarising it), gets them to choose an approach and name the parts in order, and then has them take the first step out loud: standardise the first argument, state the first claim in a sentence, pick the passage they will analyse. Nothing in the session is submittable text: the tutor's rules forbid writing any part of it, the screen says so to the learner, and the summary records the learner's own understanding of the task, their plan, their first step and the sources they used, so the instructor sees who is stuck before the due date. Deep-link it under the assignment in the course; in self-paced courses it is also nudged once whatever it follows is done.
+
+The brief for one is built from three materials: the assignment description (marked as such), the readings, and the unit's **activities and study questions** (marked as such). The draft then draws its probes and its **first-step prompts** from the course's own questions before inventing any. See *Materials from open sources* for the marks.
 
 ---
 
@@ -83,6 +90,8 @@ TRU Open Learning uses open educational resources only, so the materials view sa
 - **Paste text**, as before.
 - **Import by URL.** The server fetches the page, strips navigation, headers, footers and scripts, keeps headings and lists, and reads a Creative Commons licence link if there is one. If the site is Pressbooks (BCcampus open textbooks are), the tool uses the Pressbooks REST API (`/wp-json/pressbooks/v2/`): a chapter URL imports that chapter with the book's title, authors and licence; ticking **whole book** imports every chapter as its own material (capped at 80). Only public http(s) URLs are fetched; private and local addresses are refused.
 - **Upload a file**: `.txt`, `.md`, `.html`, `.docx` (via mammoth) or `.pdf` (via unpdf, text layer only; scanned PDFs need OCR first). Text over the material limit is cut and the instructor is told how long the original was.
+
+Each material also says **what it is**: a reading, notes or transcript (the default); the course's own **activities and study questions**; an **assignment description and criteria**; or other. The tutor and the AI draft use a material for what it is: activities and study questions become probes before the model invents any (and are named, "Exercise 1.2"), and an assignment description is the task itself, quoted for its requirements and never answered. By hand the mark is a selector on the material; a course import will set it from the course's own structure.
 
 The tutor's rules ask it to name the material it is drawing on (title and, where it can tell, the chapter or section) so learners can find the passage in the open textbook. Some Pressbooks hosts sit behind bot protection that refuses server-side requests; the importer reports that plainly and suggests the site's own PDF, EPUB or HTML export, which uploads fine.
 

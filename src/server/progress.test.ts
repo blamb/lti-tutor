@@ -45,6 +45,19 @@ test('self-paced: one group, no dates, readiness and reflection nudges, suggeste
   assert.doesNotMatch(p.nudges.map((n) => n.text).join(' '), /week|due|cohort|class/i);
 });
 
+test('assignment start is nudged like a readiness check, without dates, and says it writes nothing', async () => {
+  const ctx = courseCtxFromSettings('i', 'c', 'T', defaultCourseSettings('i', 'c', 9));
+  const tutorials = [tut({ id: 1, title: 'Unit 1 tutorial' }), tut({ id: 2, title: 'Start Assignment 1', kind: 'assignment_start', suggested_after_tutorial_id: 1 })];
+  const before = await buildHomeProgress({ ctx, studentId: 1, tutorials, latest: new Map(), now: NOW });
+  assert.equal(before.nudges.length, 0, 'waits for the session it follows');
+  const after = await buildHomeProgress({ ctx, studentId: 1, tutorials, latest: new Map([done(1, '2026-10-10T00:00:00Z')]), now: NOW });
+  assert.deepEqual(after.nudges.map((n) => n.kind), ['assignment']);
+  assert.match(after.nudges[0]!.text, /writes nothing for you/);
+  assert.doesNotMatch(after.nudges[0]!.text, /week|due|cohort|class/i);
+  const doneToo = await buildHomeProgress({ ctx, studentId: 1, tutorials, latest: new Map([done(1, '2026-10-10T00:00:00Z'), done(2, '2026-10-11T00:00:00Z')]), now: NOW });
+  assert.equal(doneToo.nudges.length, 0);
+});
+
 test('readiness nudge waits for the session it follows', async () => {
   const ctx = courseCtxFromSettings('i', 'c', 'T', defaultCourseSettings('i', 'c', 9));
   const tutorials = [tut({ id: 1, title: 'Cells' }), tut({ id: 2, title: 'Readiness: membranes', kind: 'readiness', suggested_after_tutorial_id: 1 })];
