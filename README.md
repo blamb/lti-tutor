@@ -87,7 +87,7 @@ The brief for one is built from three materials: the assignment description (mar
 
 ## Materials from open sources
 
-TRU Open Learning uses open educational resources only, so the materials view says so and links to the [BC Open Collection](https://collection.bccampus.ca/). Three ways in, all landing as plain text with `source_url`, `license` and `attribution` (`src/server/importers.ts`):
+The tool is for open educational resources, which TRU Open Learning uses wherever possible, so the materials view says so and links to the [BC Open Collection](https://collection.bccampus.ca/), [TRU Open Press](https://openpress.trubox.ca/) and the [Open Textbook Library](https://open.umn.edu/opentextbooks). Three ways in, all landing as plain text with `source_url`, `license` and `attribution` (`src/server/importers.ts`):
 
 - **Paste text**, as before.
 - **Import by URL.** The server fetches the page, strips navigation, headers, footers and scripts, keeps headings and lists, and reads a Creative Commons licence link if there is one. If the site is Pressbooks (BCcampus open textbooks are), the tool uses the Pressbooks REST API (`/wp-json/pressbooks/v2/`): a chapter URL imports that chapter with the book's title, authors and licence; ticking **whole book** imports every chapter as its own material (capped at 80). Only public http(s) URLs are fetched; private and local addresses are refused.
