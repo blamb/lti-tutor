@@ -90,6 +90,20 @@ TRU Open Learning uses open educational resources only, so the materials view sa
 - **Paste text**, as before.
 - **Import by URL.** The server fetches the page, strips navigation, headers, footers and scripts, keeps headings and lists, and reads a Creative Commons licence link if there is one. If the site is Pressbooks (BCcampus open textbooks are), the tool uses the Pressbooks REST API (`/wp-json/pressbooks/v2/`): a chapter URL imports that chapter with the book's title, authors and licence; ticking **whole book** imports every chapter as its own material (capped at 80). Only public http(s) URLs are fetched; private and local addresses are refused.
 - **Upload a file**: `.txt`, `.md`, `.html`, `.docx` (via mammoth) or `.pdf` (via unpdf, text layer only; scanned PDFs need OCR first). Text over the material limit is cut and the instructor is told how long the original was.
+- **Import the Moodle course** from a backup (`src/server/moodle-backup.ts`). See below.
+
+### Importing the course from a backup
+
+The course the tool lives in is usually the best source of materials, and Moodle's own backup carries all of it. The instructor makes a backup in Moodle (More → Course reuse → Backup, untick *Include enrolled users*, jump to the final step, download the `.mbz` from the backup area) and uploads it under **Import course backup**. The tool reads only course structure and content, never users, grades, submissions or posts, and deletes the file once read.
+
+What comes out, unit by unit (a unit is a Moodle section):
+
+- The unit's short labels merged into one **text** material and one **activities and study questions** material, sorted by a heuristic on their headings ("Activity", "Exercise", "Study questions", "Discussion questions", "Check your understanding" …).
+- Each **page**, **book** (chapter by chapter), **lesson** and **glossary** as a reading; each **resource** with the text of its attached PDF, Word or text file; each **URL** as a link with its description.
+- Each **assignment** with its opening and due dates, what it is marked out of, its description, and its rubric or marking guide rendered as text, marked as an *assignment description and criteria*.
+- Forum prompts as activities (never the posts). Quiz descriptions only (never the questions). Hidden items and sections are shown but unticked.
+
+The instructor reviews the preview, fixes any title or *what it is* guess, unticks what is not wanted, and imports. Imported materials carry their unit, so the editor's material checklist groups them by unit, and a stable `source_key`, so uploading a newer backup later **updates the same materials in place** instead of duplicating them. Links the tutor gives learners point at the item in the course (`original_wwwroot` from the backup). Backups up to 150 MB; gzip-tar (Moodle's default) and zip both work; attachments over 40 MB are listed but not read.
 
 Each material also says **what it is**: a reading, notes or transcript (the default); the course's own **activities and study questions**; an **assignment description and criteria**; or other. The tutor and the AI draft use a material for what it is: activities and study questions become probes before the model invents any (and are named, "Exercise 1.2"), and an assignment description is the task itself, quoted for its requirements and never answered. By hand the mark is a selector on the material; a course import will set it from the course's own structure.
 

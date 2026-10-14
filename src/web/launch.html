@@ -394,7 +394,7 @@
               <option value="recall">Recall — revisit earlier learning</option>
             </select></label>
           <label>Title <input type="text" name="title" maxlength="160" required></label>
-          <label>Course materials to ground it in <span class="hint">Lecture notes, transcripts or readings you've added under "Course materials". The tutor and the AI draft only see what's ticked.</span>
+          <label>Course materials to ground it in <span class="hint">Tick what this session should draw on: usually the unit\'s text and reading, plus its activities and study questions (the tutor uses those as probes). For an assignment start, tick the assignment too. Imported materials are grouped by unit.</span>
             <div class="check-list" id="tutorial-form-materials"></div></label>
           <label style="max-width:220px">Target length (minutes) <input type="number" name="target_minutes" min="5" max="60" value="15"></label>
           <label>Suggested after <span class="hint">Shown to learners as "suggested next" once they finish that session. Never enforced; use Moodle's restrict access if you need to lock.</span>
@@ -456,8 +456,10 @@
     <div class="tpane" role="tabpanel" id="tpane-materials" aria-labelledby="ttab-materials" data-tpane="materials" hidden>
       <div data-pane="list">
         <p class="muted" style="margin:.25rem 0 .5rem">
-          Paste text, import a web page or open-textbook chapter by URL, or upload a file. Materials ground the sessions you attach
-          them to and power the learners' debriefs; the tutor names the material it draws on so learners can find the passage. Up to about 200,000 characters each.
+          Paste text, import a web page or open-textbook chapter by URL, upload a file, or <strong>import your Moodle course</strong> from a backup so its units, readings,
+          activities and assignments arrive already organised. Materials ground the sessions you attach them to and power the learners' debriefs; the tutor names
+          the material it draws on so learners can find the passage. Up to about 200,000 characters each. Each material also says <em>what it is</em>: the course's own
+          activities and study questions become the tutor's probes, and an assignment description is treated as the task, never as a source.
         </p>
         <p class="muted" style="margin:0 0 .75rem">
           <strong>Open resources only.</strong> TRU Open Learning uses open educational resources, never publisher content. Find open textbooks in the
@@ -466,6 +468,7 @@
         </p>
         <div class="form-row" style="margin-bottom:.5rem">
           <button class="btn" id="material-new" type="button">+ Paste text</button>
+          <button class="btn" id="material-backup-btn" type="button">Import course backup</button>
           <input type="url" id="material-import-url" class="text-input" aria-label="URL to import" placeholder="https://… a web page or Pressbooks chapter" style="flex:1;min-width:240px">
           <label style="display:flex;align-items:center;gap:.3rem;font-size:.85rem;cursor:pointer"><input type="checkbox" id="material-import-book"> whole book</label>
           <button class="btn btn-ghost" id="material-import-btn" type="button">Import URL</button>
@@ -481,6 +484,47 @@
           <table class="tbl"><thead><tr><th scope="col">Title</th><th scope="col">Source</th><th scope="col" class="num">Size</th><th scope="col">Added</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead><tbody id="materials-tbody"></tbody></table>
         </div>
         <div class="err" id="materials-err" role="alert"></div>
+      </div>
+      <div data-pane="import" hidden>
+        <h3 id="backup-title" tabindex="-1" style="margin:.25rem 0 .5rem;font-size:.95rem">Import from a Moodle course backup</h3>
+        <p class="muted" style="margin:0 0 .5rem">
+          A backup brings the course in as it is: each unit's text, its activities and study questions, its pages, books and readings (including attached PDFs
+          and Word files), its links, and each assignment with its due date and rubric. Nothing about people is read: no users, grades, submissions or forum posts.
+          The file is deleted as soon as it has been read. You review everything below before anything is saved.
+        </p>
+        <details style="margin:0 0 .75rem">
+          <summary style="cursor:pointer;font-size:.9rem">How to make the backup in Moodle (about a minute)</summary>
+          <ol style="margin:.4rem 0 0 1.2rem;font-size:.9rem;line-height:1.5">
+            <li>In your course, open <strong>More → Course reuse → Backup</strong> (in older Moodles: the gear menu → Backup).</li>
+            <li>Untick <strong>Include enrolled users</strong>. The tool never uses user data, and the file is much smaller without it. Leave activities, blocks and files ticked.</li>
+            <li>Click <strong>Jump to final step</strong>, then <strong>Continue</strong> when it finishes.</li>
+            <li>In the <strong>Course backup area</strong>, click <strong>Download</strong> next to the newest file. It ends in <code>.mbz</code>.</li>
+            <li>Choose that file below.</li>
+          </ol>
+          <p class="muted" style="margin:.4rem 0 0;font-size:.85rem">Backups up to 150 MB are accepted. If yours is larger, make a backup without the course's video or audio files, or import the units you need by URL instead.</p>
+        </details>
+        <div class="form-row" style="margin-bottom:.5rem">
+          <label for="backup-file" class="visually-hidden">Backup file</label>
+          <input type="file" id="backup-file" accept=".mbz,.zip,.tgz,.gz,application/gzip,application/zip" style="font:inherit;font-size:.85rem">
+          <button class="btn" id="backup-read-btn" type="button">Read the backup</button>
+          <button class="btn btn-ghost" id="backup-cancel-btn" type="button">Back to materials</button>
+        </div>
+        <div class="muted" id="backup-status" role="status" aria-live="polite" style="margin-bottom:.5rem"></div>
+        <div id="backup-preview" hidden>
+          <div id="backup-course" style="margin:.25rem 0 .5rem;font-size:.9rem"></div>
+          <p class="muted" style="margin:0 0 .5rem;font-size:.85rem">
+            Tick what to import. Each unit's short labels have been merged into one <em>text</em> material and one <em>activities and study questions</em> material;
+            pages, readings and assignments are separate. Check the <em>what it is</em> column: it decides how the tutor uses each material, and a wrong guess is easy to fix here
+            or later in the materials list. Items marked <em>update</em> were imported before and will be refreshed in place rather than added again.
+          </p>
+          <div id="backup-units"></div>
+          <div id="backup-skipped" class="muted" style="font-size:.85rem;margin:.5rem 0"></div>
+          <div class="form-row" style="margin-top:.75rem">
+            <button class="btn" id="backup-commit-btn" type="button">Import selected</button>
+            <span class="muted" id="backup-count"></span>
+          </div>
+          <div class="err" id="backup-err" role="alert"></div>
+        </div>
       </div>
       <div data-pane="edit" hidden>
         <h3 id="material-edit-title" tabindex="-1" style="margin:.25rem 0 .75rem;font-size:.95rem">Add material</h3>
@@ -1516,7 +1560,8 @@
         const src = m.source_url ? `<a href="${escapeHtml(m.source_url)}" target="_blank" rel="noopener">${escapeHtml(truncate(m.source_url.replace(/^https?:\/\//, ''), 40))}</a>` : '<span class="muted">pasted</span>';
         const lic = m.license ? ` <span class="chip" title="${escapeHtml(m.attribution || '')}">${escapeHtml(m.license)}</span>` : '';
         const role = MATERIAL_ROLE_CHIP[m.role] ? ` <span class="chip">${MATERIAL_ROLE_CHIP[m.role]}</span>` : '';
-        tr.innerHTML = `<td>${escapeHtml(m.title)}${role}</td><td>${src}${lic}</td><td class="num">${(m.chars / 1000).toFixed(1)}k chars</td><td>${fmtTime(m.created_at)}</td><td></td>`;
+        const unit = m.unit ? `<div class="muted" style="font-size:.8rem">${escapeHtml(m.unit)}</div>` : '';
+        tr.innerHTML = `<td>${escapeHtml(m.title)}${role}${unit}</td><td>${src}${lic}</td><td class="num">${(m.chars / 1000).toFixed(1)}k chars</td><td>${fmtTime(m.created_at)}</td><td></td>`;
         const b = document.createElement('button'); b.className = 'link-btn'; b.type = 'button'; b.textContent = 'Edit';
         b.addEventListener('click', () => editMaterial(m));
         tr.lastElementChild.appendChild(b); tbody.appendChild(tr);
@@ -1592,12 +1637,101 @@
     } catch (e) { importStatus(friendlyError(e), true); } finally { btn.disabled = false; }
   });
 
+  // ─── Import a Moodle course backup ───
+  const ROLE_OPTIONS = [['reading', 'Reading, notes or transcript'], ['activities', 'Activities and study questions'], ['assignment', 'Assignment description and criteria'], ['other', 'Other']];
+  let backupPreview = null;
+  function backupStatus(msg, isError) { const el = $('#backup-status'); el.textContent = msg; el.style.color = isError ? 'var(--bad)' : ''; }
+  $('#material-backup-btn').addEventListener('click', () => {
+    backupPreview = null; $('#backup-preview').hidden = true; $('#backup-units').innerHTML = ''; backupStatus(''); $('#backup-err').textContent = '';
+    paneShow('materials', 'import');
+  });
+  $('#backup-cancel-btn').addEventListener('click', () => paneShow('materials', 'list'));
+  $('#backup-read-btn').addEventListener('click', async () => {
+    const input = $('#backup-file'); const btn = $('#backup-read-btn');
+    const file = input.files && input.files[0];
+    if (!file) { backupStatus('Choose the .mbz file first. The steps above say where to find it in Moodle.', true); return; }
+    btn.disabled = true; $('#backup-preview').hidden = true;
+    backupStatus(`Reading ${file.name} (${(file.size / 1048576).toFixed(1)} MB)… a large backup with PDFs can take a minute.`);
+    try {
+      const fd = new FormData(); fd.append('file', file);
+      const resp = await fetch(apiUrl('/api/teacher/materials/import-backup'), { method: 'POST', body: fd });
+      const d = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(d.error || 'Server returned ' + resp.status);
+      backupPreview = d; renderBackupPreview(d);
+      backupStatus(`Found ${d.stats.items} item${d.stats.items === 1 ? '' : 's'} in ${d.stats.units} unit${d.stats.units === 1 ? '' : 's'}.${d.stats.updates ? ` ${d.stats.updates} ${d.stats.updates === 1 ? 'was' : 'were'} imported before and will be updated.` : ''} Review below, then import.`);
+    } catch (e) { backupStatus(friendlyError(e), true); } finally { btn.disabled = false; }
+  });
+  function renderBackupPreview(d) {
+    const c = d.course;
+    const warn = [];
+    if (!c.same_site) warn.push('This backup comes from a different Moodle site, so the links the tutor gives learners will point there.');
+    else if (!c.same_course) warn.push(`This backup is from another course (id ${c.course_id}), not this one. Links will point to that course.`);
+    $('#backup-course').innerHTML = `<strong>${escapeHtml(c.fullname || c.shortname || 'Course')}</strong>${c.shortname ? ` <span class="muted">(${escapeHtml(c.shortname)})</span>` : ''}${c.backup_date ? ` <span class="muted">· backed up ${escapeHtml(c.backup_date)}</span>` : ''}` +
+      (warn.length ? `<div style="color:var(--bad);font-size:.85rem;margin-top:.2rem">${warn.map(escapeHtml).join(' ')}</div>` : '');
+    const box = $('#backup-units'); box.innerHTML = '';
+    d.units.forEach((u, ui) => {
+      const sec = document.createElement('section'); sec.style.cssText = 'margin:.5rem 0 .75rem';
+      const head = document.createElement('div'); head.style.cssText = 'display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.25rem';
+      head.innerHTML = `<strong>${escapeHtml(u.title)}</strong>${u.visible ? '' : ' <span class="chip">hidden section</span>'} <button class="link-btn" type="button" data-all="${ui}">all</button><button class="link-btn" type="button" data-none="${ui}">none</button>`;
+      sec.appendChild(head);
+      const tbl = document.createElement('div'); tbl.className = 'scroll-x';
+      tbl.innerHTML = `<table class="tbl"><thead><tr><th scope="col"><span class="visually-hidden">Include</span></th><th scope="col">Title</th><th scope="col">What it is</th><th scope="col" class="num">Size</th><th scope="col">Notes</th></tr></thead><tbody></tbody></table>`;
+      const tbody = tbl.querySelector('tbody');
+      u.items.forEach((it, ii) => {
+        const tr = document.createElement('tr'); tr.dataset.unit = ui; tr.dataset.item = ii;
+        const notes = [it.existing ? '<span class="chip">update</span>' : '', ...it.notes.map((n) => escapeHtml(n))].filter(Boolean).join(' · ');
+        tr.innerHTML = `<td><input type="checkbox" class="bk-include" aria-label="Include ${escapeHtml(it.title)}"${it.include ? ' checked' : ''}></td>` +
+          `<td><input type="text" class="text-input bk-title" value="${escapeHtml(it.title)}" maxlength="160" aria-label="Title" style="width:100%;min-width:200px"><div class="muted" style="font-size:.8rem">${escapeHtml(it.modname)}${it.source_url ? ` · <a href="${escapeHtml(it.source_url)}" target="_blank" rel="noopener">open in course</a>` : ''} · <details style="display:inline"><summary style="cursor:pointer;display:inline">preview</summary><div style="white-space:pre-wrap;margin:.3rem 0;max-height:12rem;overflow:auto;font-size:.8rem">${escapeHtml(it.text.slice(0, 1200))}${it.text.length > 1200 ? '…' : ''}</div></details></div></td>` +
+          `<td><select class="bk-role" aria-label="What it is">${ROLE_OPTIONS.map(([v, l]) => `<option value="${v}"${v === it.role ? ' selected' : ''}>${l}</option>`).join('')}</select></td>` +
+          `<td class="num">${(it.chars / 1000).toFixed(1)}k</td><td class="muted" style="font-size:.8rem">${notes || '—'}</td>`;
+        tbody.appendChild(tr);
+      });
+      sec.appendChild(tbl); box.appendChild(sec);
+    });
+    box.querySelectorAll('[data-all],[data-none]').forEach((b) => b.addEventListener('click', () => {
+      const ui = b.dataset.all ?? b.dataset.none; const on = b.dataset.all !== undefined;
+      box.querySelectorAll(`tr[data-unit="${ui}"] .bk-include`).forEach((cb) => { cb.checked = on; }); updateBackupCount();
+    }));
+    box.addEventListener('change', updateBackupCount);
+    const sk = $('#backup-skipped');
+    sk.textContent = d.skipped.length ? `Left out (${d.skipped.length}): ${d.skipped.slice(0, 12).map((s) => `${s.title} (${s.reason})`).join('; ')}${d.skipped.length > 12 ? '; …' : ''}.` : '';
+    $('#backup-preview').hidden = false; updateBackupCount();
+  }
+  function selectedBackupItems() {
+    const out = [];
+    $$('#backup-units tr[data-unit]').forEach((tr) => {
+      if (!tr.querySelector('.bk-include').checked) return;
+      const it = backupPreview.units[Number(tr.dataset.unit)].items[Number(tr.dataset.item)];
+      out.push({ key: it.key, title: tr.querySelector('.bk-title').value.trim() || it.title, role: tr.querySelector('.bk-role').value, text: it.text, unit: it.unit, unit_order: it.unit_order, source_url: it.source_url });
+    });
+    return out;
+  }
+  function updateBackupCount() { const n = selectedBackupItems().length; $('#backup-count').textContent = `${n} selected`; $('#backup-commit-btn').disabled = n === 0; }
+  $('#backup-commit-btn').addEventListener('click', async () => {
+    const items = selectedBackupItems(); const btn = $('#backup-commit-btn'); const err = $('#backup-err'); err.textContent = '';
+    if (!items.length) return;
+    btn.disabled = true; backupStatus(`Importing ${items.length} material${items.length === 1 ? '' : 's'}…`);
+    try {
+      const d = await api('/api/teacher/materials/import-backup/commit', { body: { items } });
+      await loadTeacherMaterials(); paneShow('materials', 'list');
+      importStatus(`Imported from the course backup: ${d.created} added${d.updated ? `, ${d.updated} updated` : ''}. Each material says what it is; edit one to change that. Next: create a session and tick the unit's materials, or pick "Assignment start" for an assignment.`);
+    } catch (e) { err.textContent = friendlyError(e); backupStatus(''); } finally { btn.disabled = false; }
+  });
+
   function renderMaterialChecks(selected = []) {
     const box = $('#tutorial-form-materials'); box.innerHTML = '';
-    if (!tm.materials.length) { box.innerHTML = '<span class="muted">No course materials yet — add some under the "Course materials" tab. Without any, the tutor relies on general knowledge.</span>'; return; }
+    if (!tm.materials.length) { box.innerHTML = '<span class="muted">No course materials yet — add some under the "Course materials" tab (paste, import by URL, upload, or import your Moodle course backup). Without any, the tutor relies on general knowledge.</span>'; return; }
+    const hasUnits = tm.materials.some((m) => m.unit);
+    let lastUnit = null;
     for (const m of tm.materials) {
+      if (hasUnits && (m.unit || '') !== lastUnit) {
+        lastUnit = m.unit || '';
+        const h = document.createElement('div'); h.className = 'muted'; h.style.cssText = 'font-size:.8rem;font-weight:600;margin:.4rem 0 .1rem';
+        h.textContent = lastUnit || 'Not in a unit'; box.appendChild(h);
+      }
       const label = document.createElement('label');
-      label.innerHTML = `<input type="checkbox" name="material_ids" value="${m.id}"${selected.includes(m.id) ? ' checked' : ''}> <span>${escapeHtml(m.title)} <span class="muted">(${(m.chars / 1000).toFixed(1)}k chars)</span></span>`;
+      const roleChip = MATERIAL_ROLE_CHIP[m.role] ? ` <span class="chip">${MATERIAL_ROLE_CHIP[m.role]}</span>` : '';
+      label.innerHTML = `<input type="checkbox" name="material_ids" value="${m.id}"${selected.includes(m.id) ? ' checked' : ''}> <span>${escapeHtml(m.title)}${roleChip} <span class="muted">(${(m.chars / 1000).toFixed(1)}k chars)</span></span>`;
       box.appendChild(label);
     }
   }

@@ -55,6 +55,11 @@ export interface Material {
   attribution: string;
   /** What the material is, so the tutor and the draft can use it for what it is (see MATERIAL_ROLES). */
   role: MaterialRole;
+  /** The course unit (section) it came from, for grouping; '' for hand-added materials. */
+  unit: string;
+  unit_order: number;
+  /** Stable identity for imported materials (e.g. "moodle_backup:page-412"), so a re-import updates in place. */
+  source_key: string;
   created_by: number | null;
   created_at: string;
   updated_at: string;
@@ -257,6 +262,9 @@ export const MaterialInput = z.object({
   license: z.string().trim().max(200).default(''),
   attribution: z.string().trim().max(500).default(''),
   role: z.enum(MATERIAL_ROLES).default('reading'),
+  unit: z.string().trim().max(200).default(''),
+  unit_order: z.number().int().min(0).max(10000).default(0),
+  source_key: z.string().trim().max(200).default(''),
 });
 export type MaterialInput = z.infer<typeof MaterialInput>;
 
@@ -294,7 +302,7 @@ export type ProfileInput = z.infer<typeof ProfileInput>;
 
 export async function listMaterials(ctx: CourseCtx): Promise<Material[]> {
   return query<Material>(
-    `select * from material where lti_iss = $1 and lti_context_id = $2 order by created_at`,
+    `select * from material where lti_iss = $1 and lti_context_id = $2 order by unit_order, created_at`,
     [ctx.iss, ctx.contextId]
   );
 }
@@ -312,18 +320,43 @@ export async function getMaterials(ids: number[], ctx: CourseCtx): Promise<Mater
 
 export async function createMaterial(ctx: CourseCtx, input: MaterialInput, createdBy: number): Promise<Material> {
   const rows = await query<Material>(
-    `insert into material (lti_iss, lti_context_id, title, body, source_url, license, attribution, role, created_by)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning *`,
-    [ctx.iss, ctx.contextId, input.title, input.body, input.source_url, input.license, input.attribution, input.role, createdBy]
+    `insert into material (lti_iss, lti_context_id, title, body, source_url, license, attribution, role, unit, unit_order, source_key, created_by)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *`,
+    [ctx.iss, ctx.contextId, input.title, input.body, input.source_url, input.license, input.attribution, input.role, input.unit, input.unit_order, input.source_key, createdBy]
   );
   return rows[0]!;
 }
 
+/** Create, or update in place when a material with the same source_key already exists in this course. */
+export async function upsertMaterialBySourceKey(ctx: CourseCtx, input: MaterialInput, createdBy: number): Promise<{ material: Material; updated: boolean }> {
+  if (input.source_key) {
+    const existing = await query<{ id: number }>(
+      `select id from material where lti_iss = $1 and lti_context_id = $2 and source_key = $3 order by id limit 1`,
+      [ctx.iss, ctx.contextId, input.source_key]
+    );
+    if (existing[0]) {
+      const material = await updateMaterial(existing[0].id, ctx, input);
+      if (material) return { material, updated: true };
+    }
+  }
+  return { material: await createMaterial(ctx, input, createdBy), updated: false };
+}
+
+/** Source keys already present in this course, so a preview can say which items will update rather than add. */
+export async function existingSourceKeys(ctx: CourseCtx): Promise<Set<string>> {
+  const rows = await query<{ source_key: string }>(
+    `select source_key from material where lti_iss = $1 and lti_context_id = $2 and source_key <> ''`,
+    [ctx.iss, ctx.contextId]
+  );
+  return new Set(rows.map((r) => r.source_key));
+}
+
 export async function updateMaterial(id: number, ctx: CourseCtx, input: MaterialInput): Promise<Material | null> {
   const rows = await query<Material>(
-    `update material set title = $4, body = $5, source_url = $6, license = $7, attribution = $8, role = $9, updated_at = now()
+    `update material set title = $4, body = $5, source_url = $6, license = $7, attribution = $8, role = $9, unit = $10, unit_order = $11,
+       source_key = case when $12 = '' then source_key else $12 end, updated_at = now()
      where id = $1 and lti_iss = $2 and lti_context_id = $3 returning *`,
-    [id, ctx.iss, ctx.contextId, input.title, input.body, input.source_url, input.license, input.attribution, input.role]
+    [id, ctx.iss, ctx.contextId, input.title, input.body, input.source_url, input.license, input.attribution, input.role, input.unit, input.unit_order, input.source_key]
   );
   return rows[0] ?? null;
 }

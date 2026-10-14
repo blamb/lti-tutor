@@ -25,6 +25,8 @@
  *   GET/POST   /api/teacher/materials, PUT/DELETE /api/teacher/materials/:id
  *   POST       /api/teacher/materials/import-url { url, whole_book? } -> { materials, truncated, pressbooks, book? }
  *   POST       /api/teacher/materials/upload     multipart 'file' -> { material, truncated, original_chars }
+ *   POST       /api/teacher/materials/import-backup         multipart 'file' (.mbz) -> preview { course, units, skipped }
+ *   POST       /api/teacher/materials/import-backup/commit  { items: [...] } -> { created, updated, materials }
  *   GET/POST   /api/teacher/tutorials, PUT/DELETE /api/teacher/tutorials/:id
  *   POST       /api/teacher/tutorials/draft      { material_ids, topic, pitch? } -> { draft }
  *   GET        /api/teacher/tutorials/:id/report -> TutorialReport (+ stored debrief, delivery state)
@@ -38,6 +40,9 @@
 import express from 'express';
 import type { Request, Response } from 'express';
 import multer from 'multer';
+import os from 'node:os';
+import fs from 'node:fs';
+import { parseMoodleBackup, BACKUP_MAX_BYTES } from './moodle-backup.js';
 import type { DeepLinkContentItem, IdToken } from 'ltijs';
 import { z } from 'zod';
 import { lti, mintFullscreenNonce } from './lti.js';
@@ -59,7 +64,7 @@ import {
   getTutorialSession, getSessionTurns, streamTutorialReply, completeTutorialSession,
   recordNps, recordPrep, recordGradeResult, getTutorialReport, generateGroupDebrief, debriefKindFor,
   draftTutorialBrief, getDebrief, generateDebrief, reportCsv,
-  getStoredDebrief, deliverDebrief, undeliverDebrief, listDeliveredNotes,
+  getStoredDebrief, deliverDebrief, undeliverDebrief, listDeliveredNotes, upsertMaterialBySourceKey, existingSourceKeys, MATERIAL_ROLES,
 } from './tutorials.js';
 import { buildHomeProgress } from './progress.js';
 import { postCompletionGrade, type GradeResult } from './grades.js';
@@ -567,6 +572,75 @@ lti.app.post('/api/teacher/materials/upload', upload.single('file'), async (req:
     res.json({ material: { ...material, chars: material.body.length }, truncated: fit.truncated, original_chars: fit.original_chars });
   } catch (e) {
     fail(res, e, 'POST /api/teacher/materials/upload');
+  }
+});
+
+// A course backup can be large (it carries the course's files), so it goes
+// to disk and is streamed from there, then deleted. Only course structure
+// and content are read: never users, grades, submissions or posts.
+const uploadBackup = multer({
+  storage: multer.diskStorage({ destination: os.tmpdir(), filename: (_req, _file, cb) => cb(null, `mbz-${Date.now()}-${Math.random().toString(36).slice(2)}`) }),
+  limits: { fileSize: BACKUP_MAX_BYTES, files: 1 },
+});
+
+lti.app.post('/api/teacher/materials/import-backup', uploadBackup.single('file'), async (req: Request, res: Response) => {
+  const file = (req as Request & { file?: { originalname: string; path: string; size: number } }).file;
+  try {
+    const t = await teacherCtx(res);
+    if (!t) return;
+    if (!file) return res.status(400).json({ error: 'No file received. Choose the .mbz file you downloaded from Moodle\'s Backup page.' });
+    const preview = await parseMoodleBackup(file.path);
+    const have = await existingSourceKeys(t.ctx);
+    const units = preview.units.map((u) => ({ ...u, items: u.items.map((i) => ({ ...i, existing: have.has(i.key) })) }));
+    const items = units.reduce((n, u) => n + u.items.length, 0);
+    res.json({
+      course: {
+        ...preview.course,
+        same_course: preview.course.course_id === t.ctx.contextId,
+        same_site: !preview.course.wwwroot || preview.course.wwwroot.replace(/\/+$/, '') === t.ctx.iss.replace(/\/+$/, ''),
+      },
+      units, skipped: preview.skipped, stats: { items, units: units.length, updates: units.reduce((n, u) => n + u.items.filter((i) => i.existing).length, 0) },
+    });
+  } catch (e) {
+    fail(res, e, 'POST /api/teacher/materials/import-backup');
+  } finally {
+    if (file) fs.promises.unlink(file.path).catch(() => {});
+  }
+});
+
+const BackupCommit = z.object({
+  items: z.array(z.object({
+    key: z.string().trim().min(1).max(200),
+    title: z.string().trim().min(1).max(160),
+    role: z.enum(MATERIAL_ROLES),
+    text: z.string().min(1),
+    unit: z.string().trim().max(200).default(''),
+    unit_order: z.number().int().min(0).max(10000).default(0),
+    source_url: z.string().trim().max(2000).default(''),
+  })).min(1).max(300),
+});
+
+lti.app.post('/api/teacher/materials/import-backup/commit', async (req: Request, res: Response) => {
+  try {
+    const t = await teacherCtx(res);
+    if (!t) return;
+    const { items } = BackupCommit.parse(req.body ?? {});
+    const me = await studentFromToken(t.token);
+    let created = 0;
+    let updated = 0;
+    const materials = [];
+    for (const it of items) {
+      const fit = fitMaterial(it.text.trim());
+      const r = await upsertMaterialBySourceKey(t.ctx, MaterialInput.parse({
+        title: it.title, body: fit.text, source_url: it.source_url, role: it.role, unit: it.unit, unit_order: it.unit_order, source_key: it.key,
+        attribution: `Imported from the course${it.unit ? `, ${it.unit}` : ''}`,
+      }), me.id);
+      if (r.updated) updated++; else created++;
+      materials.push({ id: r.material.id, title: r.material.title, updated: r.updated });
+    }
+    res.json({ created, updated, materials });
+  } catch (e) {
+    fail(res, e, 'POST /api/teacher/materials/import-backup/commit');
   }
 });
 
