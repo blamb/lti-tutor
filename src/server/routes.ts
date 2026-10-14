@@ -70,6 +70,10 @@ import { buildHomeProgress } from './progress.js';
 import { postCompletionGrade, type GradeResult } from './grades.js';
 import { query } from './db.js';
 
+// The course-import commit sends every selected material's text back in one
+// request (up to 300 materials of 200k characters), so it gets its own limit;
+// express.json skips a body another parser has already read.
+lti.app.use('/api/teacher/materials/import-backup/commit', express.json({ limit: '64mb' }));
 lti.app.use('/api', express.json({ limit: '2mb' }));
 
 async function ctxOf(res: Response): Promise<{ token: IdToken; ctx: CourseCtx }> {
@@ -882,4 +886,17 @@ lti.app.post('/api/deeplink', express.urlencoded({ extended: false }), async (re
     console.error('POST /api/deeplink failed:', e);
     res.status(500).type('text').send('Deep linking failed: ' + (e as Error).message);
   }
+});
+
+// Body-parser failures (too large, malformed JSON) would otherwise answer with
+// an HTML page the client can only report as "Server returned 413".
+lti.app.use('/api', (err: unknown, _req: Request, res: Response, next: express.NextFunction) => {
+  const e = err as { type?: string; status?: number; message?: string; limit?: number };
+  if (e?.type === 'entity.too.large') {
+    const mb = e.limit ? ` (the limit is ${Math.round(e.limit / 1048576)} MB)` : '';
+    res.status(413).json({ error: `That request was too large${mb}. Import fewer items at a time, or shorten very long materials.` });
+    return;
+  }
+  if (e?.type === 'entity.parse.failed') { res.status(400).json({ error: 'The request body was not valid JSON.' }); return; }
+  next(err);
 });
