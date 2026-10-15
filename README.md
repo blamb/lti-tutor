@@ -1,6 +1,6 @@
-# LTI Tools
+# LTI Tutor
 
-Two LTI 1.3 tools for Moodle (and other LTI Advantage platforms), built on one shared core and deployed separately:
+This repository holds two LTI 1.3 tools for Moodle (and other LTI Advantage platforms), built on one shared core and deployed separately:
 
 - **LTI Tutor**: instructor-designed one-on-one AI tutorials. Documented below.
 - **Persona Chat**: conversations with a persona an instructor designs, a thinker from history, a simulated client, a role-play partner, grounded in course materials, with a coach, a debrief and an instructor's report. Documented in [docs/PERSONA-CHAT.md](docs/PERSONA-CHAT.md).
@@ -9,7 +9,7 @@ They share `src/core` (LTI provider, materials and importers, Moodle course impo
 
 ---
 
-# LTI Tutor
+# The tutor
 
 > An LTI 1.3 tool for Moodle (and other LTI Advantage platforms) that runs instructor-designed one-on-one AI tutorials, the "Paski" pattern: faculty-written briefs, a staged Socratic conversation held by voice or text, placement in the course sequence via deep linking, gradebook passback, and debriefs for both the student and the instructor. One deployment serves scheduled, paced and self-paced courses, following TRU's TRUFlex delivery modes.
 
