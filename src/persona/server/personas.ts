@@ -18,6 +18,7 @@
 
 import type Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
+import { randomBytes, createHmac } from 'node:crypto';
 import { query } from '../../core/db.js';
 import { getAnthropic } from '../../core/anthropic.js';
 import { recordApiCall, MODEL_PRICES, type Attribution } from '../../core/costs.js';
@@ -44,6 +45,8 @@ export type { Scope };
 export type PersonaStatus = 'draft' | 'published' | 'archived';
 export type Opening = 'student' | 'persona';
 export const VOICE_PREFS = ['auto', 'feminine', 'masculine'] as const;
+export const VISIBILITIES = ['lti', 'passcode', 'public'] as const;
+export type Visibility = (typeof VISIBILITIES)[number];
 export type VoicePref = (typeof VOICE_PREFS)[number];
 
 export interface Persona {
@@ -76,6 +79,13 @@ export interface Persona {
   coach: 'on' | 'off';
   /** Post completion (1/1) to the gradebook when a live conversation ends. */
   gradebook: boolean;
+  /** Who may reach the persona beyond the course launch. */
+  visibility: Visibility;
+  public_slug: string;
+  /** HMAC of the passcode; '' when none is set. */
+  passcode_hash: string;
+  public_daily_usd: number;
+  public_max_turns: number;
   /** '' = the deployment default. */
   model: string;
   material_ids: number[];
@@ -137,11 +147,22 @@ export const PersonaInput = z.object({
   voice_pref: z.enum(VOICE_PREFS).default('auto'),
   coach: z.enum(['on', 'off']).default('on'),
   gradebook: z.boolean().default(false),
+  visibility: z.enum(VISIBILITIES).default('lti'),
+  /** Write-only: a new passcode to set; empty leaves the stored one. */
+  passcode: z.string().trim().max(80).default(''),
+  public_daily_usd: z.coerce.number().min(0).max(1000).default(2),
+  public_max_turns: z.coerce.number().int().min(4).max(200).default(40),
   model: z.string().trim().max(60).default('').refine((m) => m === '' || isKnownModel(m), 'unknown model'),
   material_ids: z.array(z.number().int().positive()).max(40).default([]),
   status: z.enum(['draft', 'published', 'archived']).default('draft'),
 });
 export type PersonaInput = z.infer<typeof PersonaInput>;
+
+/** What the designer sees: everything but the passcode hash, plus the public link and whether a passcode is set. */
+export function designerPersona(p: Persona) {
+  const { passcode_hash, ...rest } = p;
+  return { ...rest, has_passcode: !!passcode_hash, public_url: publicUrlFor(p) };
+}
 
 /** What a student may see of a persona: the card and the pre-brief, never the character or the hidden layer. */
 export function publicPersona(p: Persona) {
@@ -181,7 +202,7 @@ async function validMaterialIds(ids: number[], scope: Scope): Promise<number[]> 
 const COLUMNS = [
   'template', 'title', 'subtitle', 'summary', 'student_role', 'setting', 'student_brief', 'character', 'voice', 'behaviour',
   'hidden', 'guardrails', 'historical_cutoff', 'raw_instructions', 'objectives', 'debrief_guidance', 'opening', 'opening_line',
-  'response_length', 'voice_pref', 'coach', 'gradebook', 'model', 'material_ids', 'status',
+  'response_length', 'voice_pref', 'coach', 'gradebook', 'visibility', 'public_daily_usd', 'public_max_turns', 'model', 'material_ids', 'status',
 ] as const;
 
 export async function createPersona(scope: Scope, input: PersonaInput, createdBy: number | null): Promise<Persona> {
@@ -192,7 +213,30 @@ export async function createPersona(scope: Scope, input: PersonaInput, createdBy
      values ($1, $2, ${COLUMNS.map((_, i) => `$${i + 3}`).join(', ')}, $${COLUMNS.length + 3}) returning *`,
     [scope.iss, scope.contextId, ...params, createdBy]
   );
+  return applyAccess(rows[0]!, input);
+}
+
+/** A slug once the persona leaves the LMS, and the passcode's HMAC when one is given. Both survive later edits. */
+async function applyAccess(p: Persona, input: PersonaInput): Promise<Persona> {
+  const slug = p.public_slug || (p.visibility !== 'lti' ? randomBytes(9).toString('base64url') : '');
+  const hash = input.passcode ? passcodeHash(input.passcode) : p.passcode_hash;
+  if (slug === p.public_slug && hash === p.passcode_hash) return p;
+  const rows = await query<Persona>(`update persona set public_slug = $2, passcode_hash = $3 where id = $1 returning *`, [p.id, slug, hash]);
   return rows[0]!;
+}
+
+export function passcodeHash(passcode: string): string {
+  return createHmac('sha256', env.TOKEN_SECRET || env.LTI_COOKIE_SECRET).update(`passcode:${passcode.trim()}`).digest('base64url');
+}
+
+export function publicUrlFor(p: Pick<Persona, 'public_slug' | 'visibility'>): string {
+  return p.visibility !== 'lti' && p.public_slug ? `${env.LTI_TOOL_URL}/p/${p.public_slug}` : '';
+}
+
+export async function getPersonaBySlug(slug: string): Promise<Persona | null> {
+  if (!/^[A-Za-z0-9_-]{6,40}$/.test(slug)) return null;
+  const rows = await query<Persona>(`select * from persona where public_slug = $1 and visibility <> 'lti' and status = 'published'`, [slug]);
+  return rows[0] ?? null;
 }
 
 export async function updatePersona(id: number, scope: Scope, input: PersonaInput): Promise<Persona | null> {
@@ -203,7 +247,7 @@ export async function updatePersona(id: number, scope: Scope, input: PersonaInpu
      where id = $1 and lti_iss = $2 and lti_context_id = $3 returning *`,
     [id, scope.iss, scope.contextId, ...params]
   );
-  return rows[0] ?? null;
+  return rows[0] ? applyAccess(rows[0], input) : null;
 }
 
 export async function deletePersona(id: number, scope: Scope): Promise<boolean> {
@@ -244,12 +288,12 @@ export function sourcesIndexBlock(materials: Material[]): string {
 These sources are attached but too long to include whole:
 ${list}
 
-The passages from them that best match each turn are supplied with the student's message under "PASSAGES FROM THE SOURCES". Draw on those passages first; what is not in them you may know from general knowledge, but say so when it matters. Quote verbatim only from a supplied passage or wording you are certain of; otherwise paraphrase. Never cite a passage the student would not find in these sources.`;
+The passages from them that best match each turn are supplied with the student's message under "PASSAGES FROM THE SOURCES". They are notes for you alone: the student cannot see them, so never refer to passages, excerpts or notes, or to being given or pointed to anything; speak from them as from your own memory and reading. Draw on those passages first; what is not in them you may know from general knowledge, but say so when it matters. Quote verbatim only from a supplied passage or wording you are certain of; otherwise paraphrase. Never cite a passage the student would not find in these sources.`;
 }
 
 export function passagesBlock(passages: Passage[], titles: Map<number, string>): string {
   if (passages.length === 0) return '';
-  const parts = ['PASSAGES FROM THE SOURCES (retrieved for this turn; the student does not see them)'];
+  const parts = ['PASSAGES FROM THE SOURCES (notes for you alone, retrieved for this turn). The student cannot see them and does not know they exist: never mention passages, excerpts, notes, or being pointed to or given anything. Speak from them as from your own memory and reading.'];
   for (const p of passages) parts.push(`\n## ${titles.get(p.material_id) ?? 'Source'}\n${p.body}`);
   return parts.join('\n');
 }
@@ -717,6 +761,8 @@ export interface ReportRow {
   reflection: string;
   grade_posted_at: string | null;
   grade_error: string | null;
+  /** 'lti' for course launches, 'web' for visitors through the link. */
+  via: 'lti' | 'web';
 }
 
 export interface PersonaReport {
@@ -729,7 +775,7 @@ export interface PersonaReport {
 export async function getPersonaReport(persona: Persona): Promise<PersonaReport> {
   const rows = await query<ReportRow>(
     `select ps.id as session_id, ps.student_id, st.display_name, ps.status, ps.started_at::text, ps.ended_at::text,
-            ps.debrief, ps.reflection, ps.grade_posted_at::text, ps.grade_error,
+            ps.debrief, ps.reflection, ps.grade_posted_at::text, ps.grade_error, case when st.lti_iss = 'public' then 'web' else 'lti' end as via,
             (select count(*)::int from tutor_turn t where t.session_id = ps.session_id and t.role = 'user' and t.content not like $2) as turns,
             (select count(*)::int from tutor_turn t where ps.coach_session_id is not null and t.session_id = ps.coach_session_id and t.role = 'user') as coach_turns
      from persona_session ps join student st on st.id = ps.student_id
@@ -761,11 +807,11 @@ function csvCell(v: unknown): string {
 
 /** One row per conversation. */
 export function reportCsv(report: PersonaReport): string {
-  const head = ['session', 'student', 'status', 'started', 'ended', 'turns', 'coach_questions', 'debrief_overview', 'strengths', 'explore_further', 'reflection', 'grade'];
+  const head = ['session', 'student', 'via', 'status', 'started', 'ended', 'turns', 'coach_questions', 'debrief_overview', 'strengths', 'explore_further', 'reflection', 'grade'];
   const lines = [head.join(',')];
   for (const r of report.rows) {
     lines.push([
-      r.session_id, r.display_name, r.status, r.started_at, r.ended_at ?? '', r.turns, r.coach_turns,
+      r.session_id, r.display_name, r.via, r.status, r.started_at, r.ended_at ?? '', r.turns, r.coach_turns,
       r.debrief?.overview ?? '', (r.debrief?.strengths ?? []).join(' | '), (r.debrief?.explore_further ?? []).join(' | '),
       r.reflection, r.grade_posted_at ? 'posted' : (r.grade_error ?? ''),
     ].map(csvCell).join(','));
@@ -821,4 +867,31 @@ Write markdown of at most 500 words with exactly these headings:
     [persona.id, markdown, runs.length]
   );
   return rows[0]!;
+}
+
+// ─── Web visitors: spend and turn limits ────────────────────────────────────
+
+export const PUBLIC_ISS = 'public';
+export const PUBLIC_SESSIONS_PER_DAY = 5;
+
+/** USD spent in the last 24 hours on this persona's web conversations. */
+export async function publicSpendToday(personaId: number): Promise<number> {
+  const rows = await query<{ usd: string }>(
+    `select coalesce(sum(a.cost_usd), 0)::text as usd from api_call a
+     where a.ts > now() - interval '24 hours' and a.lti_iss = $2
+       and a.session_id in (select ps.session_id from persona_session ps where ps.persona_id = $1
+                            union select ps.coach_session_id from persona_session ps where ps.persona_id = $1 and ps.coach_session_id is not null)`,
+    [personaId, PUBLIC_ISS]
+  );
+  return parseFloat(rows[0]?.usd ?? '0');
+}
+
+export async function studentTurnCount(sessionId: number): Promise<number> {
+  const rows = await query<{ n: number }>(`select count(*)::int as n from tutor_turn where session_id = $1 and role = 'user' and content not like $2`, [sessionId, START_MARKER + '%']);
+  return rows[0]?.n ?? 0;
+}
+
+export async function visitorSessionsToday(personaId: number, studentId: number): Promise<number> {
+  const rows = await query<{ n: number }>(`select count(*)::int as n from persona_session where persona_id = $1 and student_id = $2 and started_at > now() - interval '24 hours'`, [personaId, studentId]);
+  return rows[0]?.n ?? 0;
 }

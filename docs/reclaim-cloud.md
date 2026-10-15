@@ -14,7 +14,7 @@ Environment name `lti-tutor` → `https://lti-tutor.ca.reclaim.cloud`.
 
 ## Deployment (done on 2026-10-13 for `lti-tutor`)
 
-1. **Deployment Manager → Git / SVN → Add Repo**: `https://github.com/blamb/lti-tutor.git`, branch `main` (the repository is public; no authentication). Deployed to the Node.js node's `ROOT` context. Reclaim runs `npm install` on deploy and on every restart (`UPDATE_PACKAGES_ON_RESTART=TRUE`), then `npm start` because the node is the `-npm` process-manager variant; the launcher (`/usr/local/sbin/nodejs`) detects whichever port the app listens on and redirects port 80 to it, so `PORT` can be any unprivileged port.
+1. **Deployment Manager → Git / SVN → Add Repo**: `https://github.com/blamb/lti-tools.git` (renamed from `lti-tutor` on 2026-10-15; GitHub redirects the old name), branch `main` (the repository is public; no authentication). Deployed to the Node.js node's `ROOT` context. Reclaim runs `npm install` on deploy and on every restart (`UPDATE_PACKAGES_ON_RESTART=TRUE`), then `npm start` because the node is the `-npm` process-manager variant; the launcher (`/usr/local/sbin/nodejs`) detects whichever port the app listens on and redirects port 80 to it, so `PORT` can be any unprivileged port.
 2. **Application Servers → ⚙ → Variables** holds the configuration. Already set:
 
 | Variable | Value |
@@ -66,5 +66,5 @@ A Moodle on another host (e.g. TRU's production Moodle) needs neither change.
 ## Logs and updates
 
 - Node.js logs: the Application Servers layer's **Log** icon → `nodejs.log`.
-- Redeploy after a push: Deployment Manager → Git / SVN → the `lti-tutor` repo → deploy icon → environment `lti-tutor`, or tick *Check and auto-deploy updates* in that dialog. `npm start` re-runs migrations, which are idempotent.
+- Redeploy after a push: Deployment Manager → Git / SVN → the repo (shown as `lti-tutor` until re-added under its new name) → deploy icon → environment `lti-tutor`, or tick *Check and auto-deploy updates* in that dialog. `npm start` re-runs migrations, which are idempotent.
 - The build runs on every start; it takes a few seconds on 4 cloudlets.

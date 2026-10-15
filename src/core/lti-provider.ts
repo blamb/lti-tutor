@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
 import { randomBytes } from 'node:crypto';
+import type { Express } from 'express';
 import ltijs, { type ProviderInstance } from 'ltijs';
 import Database from 'ltijs-sequelize';
 import { env, isProd } from './env.js';
@@ -63,6 +64,8 @@ export interface LtiToolOptions {
   /** Shown in the LMS's tool registration. */
   name: string;
   description: string;
+  /** Routes mounted before ltijs's session validator, for pages that live outside any LTI launch. */
+  addon?: (server: Express) => void;
 }
 
 /**
@@ -126,6 +129,8 @@ export function setupLti(opts: LtiToolOptions): ProviderInstance {
           res.setHeader('Cache-Control', 'public, max-age=86400');
           res.sendFile(path);
         });
+
+        opts.addon?.(server);
 
         // Operator-only cost summary (JSON). Not exposed inside the LMS.
         server.get('/admin/costs', async (req, res) => {

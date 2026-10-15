@@ -64,6 +64,14 @@ An instructor who already has a Custom GPT pastes its instructions and knowledge
 - **The report.** *Report* on a persona lists every live conversation: student, when, status, turns, questions to the coach, whether a debrief and a reflection exist, and the gradebook outcome. *Open* shows the transcript, the coach exchanges, the debrief and the reflection. *Download CSV* gives one row per conversation.
 - **The synthesis.** *Generate synthesis* reads every ended conversation's debrief and the students' reflections and writes, for the instructor, what students did well, where most left gaps by objective, three moves worth teaching before the next run, adjustments to the persona or the brief, and themes from the reflections. It never names students and is stored until regenerated.
 
+## Beyond the course: the link
+
+A persona's *Who can reach it* setting is *only through the course* by default. *Anyone with the link and a passcode* or *anyone with the link* gives it an unguessable address, `/p/<slug>`, shown in the designer once saved and stable afterwards; the link works once the persona is published and dies when it is unpublished or set back to course-only. The page at that address is the same student page with the course parts removed: a passcode step where one is set, an optional first name, the pre-brief with a disclosure, then the conversation, the coach, the debrief, the reflection and the export.
+
+Visitors need no account. A signed cookie names each browser, and each visitor becomes a student row with `lti_iss = 'public'` scoped to the persona, so everything else, including the instructor's report (where their rows are marked *web*), works unchanged. The passcode is stored only as an HMAC under the tool's secret and is checked once per browser. Three caps protect the spend: a per-persona daily cap in dollars on web conversations (default two dollars), a cap on messages per web conversation (default forty), and five new conversations per visitor per day. Web conversations never post to a gradebook.
+
+The routes live in `src/persona/server/public.ts`, mounted before ltijs's session validator through the provider's addon hook.
+
 ## Models and cost
 
 `PERSONA_MODEL` sets the deployment default (Haiku 5.5). The designer view offers a per-persona choice with list prices per million tokens: Haiku 5.5, Sonnet 5.5, Opus 5.5 and Haiku 4.5. Every call is recorded in `api_call` with its cost, as in the tutor; `/admin/costs?token=…` summarises it.
@@ -86,4 +94,4 @@ On the Materials tab, **Import a Moodle course backup** reads an `.mbz` file (up
 2. **Done.** Grounding from the Moodle course (backup import and live sync through web services, the same preview and in-place updates as the tutor), chunked retrieval for long sources, verified quotations.
 3. **Done.** Voice in and out, the step-out coach, the debrief as a separate call against the objectives, transcript export, a short reflection.
 4. **Done.** Completion passback to the gradebook and the instructor's report across conversations, with a synthesis.
-5. Visibility beyond the LMS: link with passcode, public, with spend caps.
+5. **Done.** Visibility beyond the LMS: link with passcode, or public, with spend caps.

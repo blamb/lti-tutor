@@ -1,3 +1,14 @@
+# LTI Tools
+
+Two LTI 1.3 tools for Moodle (and other LTI Advantage platforms), built on one shared core and deployed separately:
+
+- **LTI Tutor**: instructor-designed one-on-one AI tutorials. Documented below.
+- **Persona Chat**: conversations with a persona an instructor designs, a thinker from history, a simulated client, a role-play partner, grounded in course materials, with a coach, a debrief and an instructor's report. Documented in [docs/PERSONA-CHAT.md](docs/PERSONA-CHAT.md).
+
+They share `src/core` (LTI provider, materials and importers, Moodle course import and sync, retrieval, the model client, cost tracking, grade passback) and nothing else: each has its own registration, database and pages. `APP=tutor` (the default) or `APP=persona` picks which one a process runs. The repository layout is under [Architecture](#architecture).
+
+---
+
 # LTI Tutor
 
 > An LTI 1.3 tool for Moodle (and other LTI Advantage platforms) that runs instructor-designed one-on-one AI tutorials, the "Paski" pattern: faculty-written briefs, a staged Socratic conversation held by voice or text, placement in the course sequence via deep linking, gradebook passback, and debriefs for both the student and the instructor. One deployment serves scheduled, paced and self-paced courses, following TRU's TRUFlex delivery modes.
@@ -230,9 +241,10 @@ src/
     server/templates.ts    templates: standing rules, field hints, seeds
     server/routes.ts       /api/* (student + designer + deep-link response)
     server/course.ts       the course's Moodle web-service token
+    server/public.ts       the persona beyond the LMS: /p/<slug>, passcode, caps
     server/lti.ts, index.ts, env.ts
     fixtures/              the two reference personas (Melissa Chang, Tagore); seed.ts loads them
-    migrations/            001_personas.sql … 004_report.sql
+    migrations/            001_personas.sql … 005_public.sql
     web/launch.html
 ```
 

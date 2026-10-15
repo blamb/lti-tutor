@@ -11,7 +11,8 @@ const fixture = (name: string) => JSON.parse(readFileSync(join(HERE, '..', 'fixt
 
 function personaOf(input: unknown, id = 1): Persona {
   const parsed = PersonaInput.parse(input);
-  return { id, lti_iss: 'https://moodle.test', lti_context_id: '7', created_by: null, created_at: '', updated_at: '', ...parsed };
+  const { passcode, ...rest } = parsed;
+  return { id, lti_iss: 'https://moodle.test', lti_context_id: '7', created_by: null, created_at: '', updated_at: '', public_slug: '', passcode_hash: '', ...rest };
 }
 
 test('the two reference fixtures validate as persona input', () => {
@@ -122,13 +123,14 @@ test('the report CSV has one row per conversation and quotes commas and quotes',
   const { reportCsv } = await import('./personas.js');
   const csv = reportCsv({
     rows: [{ session_id: 3, student_id: 1, display_name: 'Lee, Jordan', status: 'ended', started_at: '2026-10-15', ended_at: '2026-10-15', turns: 4, coach_turns: 1,
-      debrief: { overview: 'Said "fine".', by_objective: [], strengths: ['a', 'b'], explore_further: [], one_question: '' }, reflection: '', grade_posted_at: null, grade_error: 'no column' }],
+      debrief: { overview: 'Said "fine".', by_objective: [], strengths: ['a', 'b'], explore_further: [], one_question: '' }, reflection: '', grade_posted_at: null, grade_error: 'no column', via: 'web' }],
     totals: { started: 1, ended: 1, with_debrief: 1, with_reflection: 0, avg_turns: 4, grade_posted: 0, students: 1 },
     synthesis: null,
   });
   const lines = csv.trim().split('\n');
   assert.equal(lines.length, 2);
-  assert.ok(lines[0]!.startsWith('session,student,status'));
+  assert.ok(lines[0]!.startsWith('session,student,via,status'));
+  assert.ok(lines[1]!.includes(',web,'));
   assert.ok(lines[1]!.includes('"Lee, Jordan"'));
   assert.ok(lines[1]!.includes('"Said ""fine""."'));
   assert.ok(lines[1]!.includes('a | b'));

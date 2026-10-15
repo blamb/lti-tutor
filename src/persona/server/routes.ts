@@ -56,7 +56,7 @@ import { getMoodleWsToken, setMoodleWsToken, clearMoodleWsToken, touchMoodleWs }
 import { importFromUrl, extractFromFile, fitMaterial, ImportError, MAX_BOOK_CHAPTERS } from '../../core/importers.js';
 import { templateCatalog, isPersonaTemplate } from './templates.js';
 import {
-  PersonaInput, PERSONA_MODELS, publicPersona, listPersonas, getPersona, createPersona, updatePersona, deletePersona, detachMaterial,
+  PersonaInput, PERSONA_MODELS, publicPersona, designerPersona, listPersonas, getPersona, createPersona, updatePersona, deletePersona, detachMaterial,
   startPersonaSession, getPersonaSession, endPersonaSession, getSessionTurns, visibleTurns, streamPersonaReply, draftPersona,
   latestSessionsForStudent, START_MARKER, DRAFT_MAX_CHARS, PERSONA_MATERIAL_MAX_CHARS, modelFor,
   getOrGenerateDebrief, streamCoachReply, coachTurnsFor, saveReflection, transcriptHtml, transcriptMarkdown,
@@ -332,7 +332,7 @@ lti.app.get('/api/teacher/personas', async (req: Request, res: Response) => {
       [personas.map((p) => p.id)]
     );
     const byId = new Map(counts.map((c) => [c.persona_id, c]));
-    res.json({ personas: personas.map((p) => ({ ...p, conversations: byId.get(p.id)?.live ?? 0, ended: byId.get(p.id)?.ended ?? 0 })) });
+    res.json({ personas: personas.map((p) => ({ ...designerPersona(p), conversations: byId.get(p.id)?.live ?? 0, ended: byId.get(p.id)?.ended ?? 0 })) });
   } catch (e) {
     fail(res, e, 'GET /api/teacher/personas');
   }
@@ -345,7 +345,7 @@ lti.app.get('/api/teacher/personas/:id', async (req: Request, res: Response) => 
     const id = idParam(req, 'id');
     const persona = id ? await getPersona(id, t.scope) : null;
     if (!persona) return res.status(404).json({ error: 'persona not found' });
-    res.json({ persona });
+    res.json({ persona: designerPersona(persona) });
   } catch (e) {
     fail(res, e, 'GET /api/teacher/personas/:id');
   }
@@ -356,7 +356,7 @@ lti.app.post('/api/teacher/personas', async (req: Request, res: Response) => {
     const t = await teacher(res);
     if (!t) return;
     const me = await studentFromToken(t.token);
-    res.json({ persona: await createPersona(t.scope, PersonaInput.parse(req.body ?? {}), me.id) });
+    res.json({ persona: designerPersona(await createPersona(t.scope, PersonaInput.parse(req.body ?? {}), me.id)) });
   } catch (e) {
     fail(res, e, 'POST /api/teacher/personas');
   }
@@ -369,7 +369,7 @@ lti.app.put('/api/teacher/personas/:id', async (req: Request, res: Response) => 
     const id = idParam(req, 'id');
     const persona = id ? await updatePersona(id, t.scope, PersonaInput.parse(req.body ?? {})) : null;
     if (!persona) return res.status(404).json({ error: 'persona not found' });
-    res.json({ persona });
+    res.json({ persona: designerPersona(persona) });
   } catch (e) {
     fail(res, e, 'PUT /api/teacher/personas/:id');
   }

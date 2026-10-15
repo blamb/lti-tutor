@@ -168,7 +168,7 @@
   }
 </style>
 </head>
-<body data-role="{{ROLE}}" data-return-url="{{RETURN_URL}}" data-persona-id="{{PERSONA_ID}}">
+<body data-role="{{ROLE}}" data-return-url="{{RETURN_URL}}" data-persona-id="{{PERSONA_ID}}" data-public-slug="{{PUBLIC_SLUG}}">
 <a href="#main" class="skip-link">Skip to main content</a>
 <div class="wrap">
   <header>
@@ -197,6 +197,21 @@
       </div>
     </section>
 
+    <!-- Open-web gate: passcode and name -->
+    <section class="view card" id="view-gate" aria-labelledby="gate-h">
+      <h2 id="gate-h"></h2>
+      <p class="muted" id="gate-sub"></p>
+      <form id="gate-pass-form" hidden class="form-grid" style="max-width:420px">
+        <label>Passcode<span class="hint">Given to you by whoever shared this link.</span><input type="password" name="passcode" class="text-input" autocomplete="off" style="width:100%"></label>
+        <div class="form-row"><button type="submit" class="btn">Continue</button></div>
+      </form>
+      <form id="gate-name-form" hidden class="form-grid" style="max-width:420px">
+        <label>What should the persona call you?<span class="hint">Optional. A first name is enough; it is only used in the conversation and your debrief.</span><input type="text" name="name" class="text-input" maxlength="40" autocomplete="given-name" style="width:100%"></label>
+        <div class="form-row"><button type="submit" class="btn">Continue</button><button type="button" class="link-btn" id="gate-skip">Skip</button></div>
+      </form>
+      <div class="err" id="gate-err" role="alert"></div>
+    </section>
+
     <!-- Pre-brief -->
     <section class="view card" id="view-brief" aria-labelledby="brief-h">
       <div class="view-header">
@@ -215,6 +230,7 @@
         <span class="muted" id="brief-status"></span>
       </div>
       <div class="err" id="brief-err" role="alert"></div>
+      <p class="muted" style="margin-top:1rem;font-size:.8rem" id="brief-disclosure">This persona is an AI playing a part for a learning activity. It can be wrong, and it is not the person it portrays. Conversations are stored so you can get a debrief afterwards, and the instructor who set the persona up can read them.</p>
     </section>
 
     <!-- Chat -->
@@ -344,6 +360,22 @@
                 <label>Materials the persona draws on<span class="hint">Readings, the figure's own writings, a case file. Add them under the Materials tab; the persona cites them as its sources.</span>
                   <div class="check-list" id="editor-materials"></div></label>
                 <label style="flex-direction:row;align-items:center;gap:.4rem"><input type="checkbox" name="gradebook"> Post completion to the course gradebook (1/1) when a conversation ends</label>
+                <fieldset class="sec" style="margin:.25rem 0 0">
+                  <legend>Beyond the course</legend>
+                  <p class="sec-blurb">By default a persona is reachable only through the course launch. A link lets anyone with it (and the passcode, if you set one) talk with the persona without an LMS account; those conversations appear in the report marked <em>web</em>, are stored like the others, and never post to a gradebook. Each day's spend on the link is capped.</p>
+                  <div class="form-grid">
+                    <div class="form-row">
+                      <label style="flex:1;min-width:200px">Who can reach it
+                        <select name="visibility"><option value="lti">Only through the course</option><option value="passcode">Anyone with the link and a passcode</option><option value="public">Anyone with the link</option></select></label>
+                      <label style="flex:1;min-width:200px">Passcode<span class="hint" id="passcode-hint">Leave empty to keep the current one.</span><input type="text" name="passcode" class="text-input" autocomplete="off" style="width:100%"></label>
+                    </div>
+                    <div class="form-row">
+                      <label style="flex:1;min-width:160px">Daily spend cap for the link (USD)<input type="number" name="public_daily_usd" min="0" max="1000" step="0.5" class="text-input" style="width:100%"></label>
+                      <label style="flex:1;min-width:160px">Messages per web conversation<input type="number" name="public_max_turns" min="4" max="200" step="1" class="text-input" style="width:100%"></label>
+                    </div>
+                    <div id="public-link" hidden><strong>Link:</strong> <a id="public-link-a" href="#" target="_blank" rel="noopener"></a> <button type="button" class="link-btn" id="public-link-copy">Copy</button> <span class="muted">Save after changing who can reach it; the link appears once saved and stays the same afterwards.</span></div>
+                  </div>
+                </fieldset>
                 <label>Status
                   <select name="status"><option value="draft">Draft (only you can see and try it)</option><option value="published">Published (students can start it)</option><option value="archived">Archived (hidden everywhere)</option></select></label>
               </div>
@@ -495,7 +527,17 @@
 <script type="module">
   const params = new URLSearchParams(location.search);
   const LTIK = params.get('ltik') || '';
-  const apiUrl = (path) => path + (path.includes('?') ? '&' : '?') + 'ltik=' + encodeURIComponent(LTIK);
+  // Open-web mode: the page came from /p/<slug>; the student endpoints map onto /api/public/<slug>/… and there is no launch token.
+  const PUBLIC = document.body.dataset.publicSlug || '';
+  function apiUrl(path) {
+    if (PUBLIC) {
+      return path
+        .replace(/^\/api\/personas\/\d+\/start/, `/api/public/${PUBLIC}/start`)
+        .replace(/^\/api\/personas\/session\//, `/api/public/${PUBLIC}/session/`)
+        .replace(/^\/api\/personas(\?|$)/, `/api/public/${PUBLIC}/personas$1`);
+    }
+    return path + (path.includes('?') ? '&' : '?') + 'ltik=' + encodeURIComponent(LTIK);
+  }
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
   const isTeacher = document.body.dataset.role === 'teacher';
@@ -542,7 +584,7 @@
   }).catch(() => {});
 
   // ─── Views ───
-  const views = { home: $('#view-home'), brief: $('#view-brief'), chat: $('#view-chat'), teacher: $('#view-teacher') };
+  const views = { home: $('#view-home'), gate: $('#view-gate'), brief: $('#view-brief'), chat: $('#view-chat'), teacher: $('#view-teacher') };
   function showView(name) {
     for (const [k, el] of Object.entries(views)) el.classList.toggle('active', k === name);
     $('#btn-home').setAttribute('aria-pressed', String(name === 'home' || name === 'brief' || name === 'chat'));
@@ -554,6 +596,7 @@
   $('#btn-teacher').addEventListener('click', () => { showView('teacher'); loadDesigner(); });
   const returnLink = $('#return-link');
   if (document.body.dataset.returnUrl) returnLink.hidden = false;
+  if (PUBLIC) { $('#btn-fullscreen').hidden = true; $('#btn-teacher').hidden = true; $('#brief-disclosure').textContent += ' This link was shared outside a course: no account is needed, and only what you type here is kept.'; }
   $('#btn-fullscreen').addEventListener('click', async () => {
     try { const d = await api('/api/fullscreen-init', { method: 'POST' }); window.open(d.url, '_blank', 'noopener'); }
     catch (e) { alert(friendlyError(e)); }
@@ -607,6 +650,7 @@
     showView('brief');
   }
   $('#brief-back').addEventListener('click', () => { if (current?.preview) { showView('teacher'); } else { showView('home'); loadHome(); } });
+  if (PUBLIC) { $('#brief-back').hidden = true; }
   $('#brief-start').addEventListener('click', () => startChat({ fresh: !!(current.persona.my_session && current.persona.my_session.status === 'ended') }));
   $('#brief-review').addEventListener('click', () => openSession(current.persona.my_session.id));
   $('#brief-restart').addEventListener('click', () => { if (confirm('Start this conversation over from the beginning? The earlier one is kept but will not continue.')) startChat({ fresh: true }); });
@@ -1003,6 +1047,11 @@
     out.gradebook = !!form.elements.gradebook.checked;
     return out;
   }
+  function showPublicLink(p) {
+    const box = $('#public-link'); const url = p && p.public_url;
+    box.hidden = !url; if (url) { const a = $('#public-link-a'); a.href = url; a.textContent = url; }
+  }
+  $('#public-link-copy').addEventListener('click', async () => { try { await navigator.clipboard.writeText($('#public-link-a').href); $('#editor-status').textContent = 'Link copied.'; } catch { $('#editor-status').textContent = 'Copy the link from the text above.'; } });
   function renderMaterialChecks(selected = []) {
     const host = $('#editor-materials'); host.innerHTML = '';
     if (!designerMaterials.length) { host.innerHTML = '<span class="muted">No materials yet. Add some under the Materials tab.</span>'; return; }
@@ -1022,8 +1071,11 @@
     const template = p ? p.template : 'thinker';
     form.querySelector(`input[name=template][value="${template}"]`).checked = true;
     applyTemplate(template, { seedEmpty: !p });
-    if (p) for (const [k, v] of Object.entries(p)) { const el = form.elements[k]; if (el && typeof v === 'string' && !(el instanceof RadioNodeList)) el.value = v; }
+    if (p) for (const [k, v] of Object.entries(p)) { const el = form.elements[k]; if (el && (typeof v === 'string' || typeof v === 'number') && !(el instanceof RadioNodeList) && el.type !== 'checkbox') el.value = v; }
     form.elements.gradebook.checked = !!(p && p.gradebook);
+    form.elements.passcode.value = '';
+    $('#passcode-hint').textContent = p && p.has_passcode ? 'A passcode is set. Leave empty to keep it, or type a new one.' : 'Needed only for "link and a passcode". Share it with students alongside the link.';
+    showPublicLink(p);
     if (!designerMaterials.length) try { await loadMaterials(); } catch {}
     renderMaterialChecks(p ? p.material_ids : []);
     $('#persona-try').hidden = !p; $('#persona-delete').hidden = !p;
@@ -1054,7 +1106,7 @@
       for (const r of d.rows) {
         const tr = document.createElement('tr');
         const grade = reportPersona.gradebook || r.grade_posted_at || r.grade_error ? (r.grade_posted_at ? '<span class="chip done">posted</span>' : r.grade_error ? `<span class="chip draft" title="${esc(r.grade_error)}">not posted</span>` : '—') : '—';
-        tr.innerHTML = `<td>${esc(r.display_name)}</td><td class="muted">${esc(new Date(r.started_at).toLocaleString())}</td>
+        tr.innerHTML = `<td>${esc(r.display_name)}${r.via === 'web' ? ' <span class="chip">web</span>' : ''}</td><td class="muted">${esc(new Date(r.started_at).toLocaleString())}</td>
           <td><span class="chip ${r.status === 'ended' ? 'done' : 'live'}">${r.status === 'ended' ? 'ended' : 'in progress'}</span></td>
           <td>${r.turns}</td><td>${r.coach_turns || ''}</td><td>${r.debrief ? '✓' : ''}</td><td>${r.reflection ? '✓' : ''}</td><td>${grade}</td>
           <td><button type="button" class="link-btn">Open</button></td>`;
@@ -1101,7 +1153,8 @@
     try {
       const d = editing ? await api(`/api/teacher/personas/${editing.id}`, { method: 'PUT', body: payload }) : await api('/api/teacher/personas', { body: payload });
       editing = d.persona; $('#editor-h').textContent = `Edit: ${editing.title}`; $('#persona-try').hidden = false; $('#persona-delete').hidden = false;
-      $('#editor-status').textContent = 'Saved.'; announce('Persona saved.');
+      form.elements.passcode.value = ''; $('#passcode-hint').textContent = editing.has_passcode ? 'A passcode is set. Leave empty to keep it, or type a new one.' : 'Needed only for "link and a passcode". Share it with students alongside the link.'; showPublicLink(editing);
+      $('#editor-status').textContent = editing.visibility !== 'lti' && editing.status !== 'published' ? 'Saved. The link works once the persona is published.' : 'Saved.'; announce('Persona saved.');
     } catch (err) { $('#editor-status').textContent = ''; $('#editor-err').textContent = friendlyError(err); }
   });
   $('#persona-try').addEventListener('click', () => { if (editing) openBrief(toPublic(editing), { preview: true }); });
@@ -1302,8 +1355,38 @@
     } catch (err) { $('#materials-status').textContent = ''; $('#materials-err').textContent = friendlyError(err); }
   });
 
+  // ─── Open-web gate ───
+  async function publicStart() {
+    let info;
+    try { const r = await fetch(`/api/public/${PUBLIC}/info`, { credentials: 'include' }); info = await r.json(); if (!r.ok) throw new Error(info.error || r.status); }
+    catch (e) { $('#home-err').textContent = friendlyError(e); return; }
+    $('#gate-h').textContent = info.persona.title; $('#gate-sub').textContent = info.persona.subtitle || '';
+    if (info.locked) { showView('gate'); $('#gate-pass-form').hidden = false; $('#gate-name-form').hidden = true; $('#gate-pass-form').passcode.focus(); return; }
+    if (!info.name) { showView('gate'); $('#gate-pass-form').hidden = true; $('#gate-name-form').hidden = false; $('#gate-name-form').name.focus(); return; }
+    homePersonas = [info.persona]; openBrief(info.persona);
+  }
+  $('#gate-pass-form').addEventListener('submit', async (e) => {
+    e.preventDefault(); $('#gate-err').textContent = '';
+    try {
+      const r = await fetch(`/api/public/${PUBLIC}/unlock`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ passcode: e.target.passcode.value }) });
+      const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || r.status);
+      await publicStart();
+    } catch (err) { $('#gate-err').textContent = friendlyError(err); }
+  });
+  async function saveName(name) {
+    const r = await fetch(`/api/public/${PUBLIC}/name`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ name }) });
+    const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || r.status);
+    document.querySelector('header .sub strong').textContent = d.name || 'there';
+  }
+  $('#gate-name-form').addEventListener('submit', async (e) => {
+    e.preventDefault(); $('#gate-err').textContent = '';
+    try { await saveName(e.target.name.value.trim() || 'Visitor'); await publicStart(); } catch (err) { $('#gate-err').textContent = friendlyError(err); }
+  });
+  $('#gate-skip').addEventListener('click', async () => { try { await saveName('there'); await publicStart(); } catch (err) { $('#gate-err').textContent = friendlyError(err); } });
+
   // ─── Start ───
   (async () => {
+    if (PUBLIC) { await publicStart(); return; }
     await loadHome();
     const placed = document.body.dataset.personaId;
     if (placed) { const p = homePersonas.find((x) => String(x.id) === placed); if (p) openBrief(p); }

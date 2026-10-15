@@ -14,6 +14,7 @@ import { isTeacher } from '../../core/auth.js';
 import { contextIdOf } from '../../core/reqctx.js';
 import { listPersonas } from './personas.js';
 import { TEMPLATES } from './templates.js';
+import { registerPublicRoutes } from './public.js';
 
 export { escapeHtml, mintFullscreenNonce };
 
@@ -23,6 +24,7 @@ const loadLaunchHtml = launchHtmlLoader(join(HERE, '..', 'web', 'launch.html'));
 const lti = setupLti({
   name: env.TOOL_NAME,
   description: 'Persona-based conversations for learning: historical thinkers, simulated clients and role-play partners, grounded in course materials',
+  addon: registerPublicRoutes,
 });
 
 /** Successful launch: ltijs validated the JWT and set the session cookie. */
@@ -45,6 +47,7 @@ lti.onConnect(async (token: IdToken, req, res) => {
 
   const html = loadLaunchHtml()
     .replaceAll('{{PERSONA_ID}}', personaId)
+    .replaceAll('{{PUBLIC_SLUG}}', '')
     .replaceAll('{{TOOL_NAME}}', escapeHtml(env.TOOL_NAME))
     .replaceAll('{{RETURN_URL}}', escapeHtml(returnUrl))
     .replaceAll('{{DISPLAY_NAME}}', escapeHtml(student.display_name))
