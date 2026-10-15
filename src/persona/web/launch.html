@@ -129,6 +129,13 @@
   .draft-card summary { cursor: pointer; font-weight: 600; }
   .draft-card textarea { width: 100%; min-height: 140px; font: inherit; padding: .5rem .6rem; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--fg); margin: .5rem 0; }
   .sticky-actions { position: sticky; bottom: 0; background: var(--card); padding: .6rem 0 0; border-top: 1px solid var(--border); margin-top: .5rem; display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+  .quotes { display: flex; flex-wrap: wrap; gap: .3rem; margin: .15rem 0 .4rem .2rem; }
+  .quotes .chip { cursor: help; max-width: 100%; white-space: normal; }
+  .quotes .chip.ok { background: var(--good-bg); border-color: var(--good-bg); color: var(--good); }
+  .quotes .chip.miss { background: var(--warn-bg); border-color: var(--warn-bg); color: var(--warn); }
+  .bk-unit { margin: .5rem 0 .75rem; }
+  .bk-unit .bk-head { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-bottom: .25rem; }
+  .bk-preview { white-space: pre-wrap; margin: .3rem 0; max-height: 12rem; overflow: auto; font-size: .8rem; }
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; } }
   @media print {
     body { padding: 0; background: #fff; color: #000; }
@@ -286,28 +293,102 @@
       </div>
 
       <div class="tpane" role="tabpanel" id="tpane-materials" aria-labelledby="ttab-materials">
-        <p class="muted">Materials ground a persona: a thinker's own writings and reliable scholarship, a case file, readings. Add them here, then tick them on the persona. Importing the Moodle course arrives in the next phase.</p>
-        <div class="scroll-x">
-          <table class="tbl" id="materials-table"><thead><tr><th>Title</th><th>Source</th><th>Size</th><th></th></tr></thead><tbody></tbody></table>
+        <div id="materials-list-pane">
+          <p class="muted">Materials ground a persona: a thinker's own writings and reliable scholarship, a case file, readings. Add them here, then tick them on the persona. Short sets go into the persona's prompt whole; long ones are searched each turn for the passages that fit, and quotations in replies are checked against them.</p>
+          <div class="scroll-x">
+            <table class="tbl" id="materials-table"><thead><tr><th>Title</th><th>Source</th><th>Size</th><th></th></tr></thead><tbody></tbody></table>
+          </div>
+          <div class="err" id="materials-err" role="alert"></div>
+          <div class="muted" id="materials-status" role="status" style="margin-top:.4rem"></div>
+          <h3>Add a material</h3>
+          <div class="form-grid" style="max-width:720px">
+            <div class="form-row">
+              <button type="button" class="btn-ghost btn" id="material-backup-btn">Import a Moodle course backup</button>
+              <button type="button" class="btn-ghost btn" id="material-sync-btn" disabled title="Connect the course to Moodle below first">Sync from Moodle</button>
+            </div>
+            <form id="mat-url-form" class="form-row">
+              <label style="flex:1;min-width:240px">Import from a web page or open textbook<input type="text" name="url" class="text-input" placeholder="https://…" style="width:100%"></label>
+              <label style="flex-direction:row;align-items:center;gap:.3rem;font-size:.85rem"><input type="checkbox" name="whole_book"> whole book (Pressbooks)</label>
+              <button type="submit" class="btn-ghost btn">Import</button>
+            </form>
+            <form id="mat-file-form" class="form-row">
+              <label style="flex:1;min-width:240px">Upload a file (.txt .md .html .docx .pdf)<input type="file" name="file" accept=".txt,.md,.html,.htm,.docx,.pdf"></label>
+              <button type="submit" class="btn-ghost btn">Upload</button>
+            </form>
+            <form id="mat-paste-form">
+              <label>Paste text<span class="hint">A title and the text.</span><input type="text" name="title" class="text-input" placeholder="Title" style="width:100%"></label>
+              <textarea name="body" placeholder="Text" style="width:100%;min-height:120px;margin:.4rem 0;padding:.5rem .6rem;border:1px solid var(--border);border-radius:6px;font:inherit;background:var(--card);color:var(--fg)"></textarea>
+              <button type="submit" class="btn-ghost btn">Add</button>
+            </form>
+          </div>
+
+          <section id="moodle-ws" style="max-width:640px;margin-top:1.5rem;padding-top:1rem;border-top:1px solid var(--border)">
+            <h3 style="margin:0 0 .35rem">Moodle connection (live course sync)</h3>
+            <p class="muted" style="margin:0 0 .5rem">With a web-service token the tool can read this course straight from Moodle: <strong>Sync from Moodle</strong> above brings in the units, readings, pages, books and attached files, and refreshes them later with one click. The token is stored encrypted, only ever used to read, and can be revoked in Moodle at any time. It never touches users, grades, submissions or posts.</p>
+            <div id="moodle-ws-status" role="status" style="margin:0 0 .5rem;font-size:.9rem"></div>
+            <details id="moodle-ws-how" style="margin:0 0 .6rem">
+              <summary style="cursor:pointer;font-size:.9rem">How to get a token</summary>
+              <ol style="margin:.4rem 0 0 1.2rem;font-size:.9rem;line-height:1.5">
+                <li>Your Moodle administrator enables web services and the REST protocol, and creates an external service (suggested name <em>Persona Chat course sync</em>) that allows only the read functions listed below. Most sites already have web services on for the Moodle app.</li>
+                <li>The administrator creates a token for your account on that service (<em>Site administration → Server → Web services → Manage tokens → Create token</em>), or, if they allow it, you create one yourself under <em>Preferences → User account → Security keys</em>.</li>
+                <li>Paste the token here and click <strong>Connect</strong>. The tool checks who it belongs to, that the service allows what it needs, and that the account can read this course.</li>
+              </ol>
+              <p class="muted" style="margin:.4rem 0 0;font-size:.85rem">Functions the service should allow: <code id="moodle-ws-functions"></code></p>
+            </details>
+            <form class="form-row" id="moodle-ws-form" autocomplete="off">
+              <label for="moodle-ws-token" class="visually-hidden">Moodle web-service token</label>
+              <input type="password" id="moodle-ws-token" class="text-input" placeholder="Paste the token from Moodle" autocomplete="off" style="flex:1;min-width:240px">
+              <button class="btn" type="submit" id="moodle-ws-connect">Connect</button>
+              <button class="btn btn-ghost" type="button" id="moodle-ws-disconnect" hidden>Disconnect</button>
+            </form>
+            <div class="err" id="moodle-ws-err" role="alert"></div>
+          </section>
         </div>
-        <div class="err" id="materials-err" role="alert"></div>
-        <h3>Add a material</h3>
-        <div class="form-grid" style="max-width:720px">
-          <form id="mat-url-form" class="form-row">
-            <label style="flex:1;min-width:240px">Import from a web page or open textbook<input type="text" name="url" class="text-input" placeholder="https://…" style="width:100%"></label>
-            <label style="flex-direction:row;align-items:center;gap:.3rem;font-size:.85rem"><input type="checkbox" name="whole_book"> whole book (Pressbooks)</label>
-            <button type="submit" class="btn-ghost btn">Import</button>
-          </form>
-          <form id="mat-file-form" class="form-row">
-            <label style="flex:1;min-width:240px">Upload a file (.txt .md .html .docx .pdf)<input type="file" name="file" accept=".txt,.md,.html,.htm,.docx,.pdf"></label>
-            <button type="submit" class="btn-ghost btn">Upload</button>
-          </form>
-          <form id="mat-paste-form">
-            <label>Paste text<span class="hint">A title and the text.</span><input type="text" name="title" class="text-input" placeholder="Title" style="width:100%"></label>
-            <textarea name="body" placeholder="Text" style="width:100%;min-height:120px;margin:.4rem 0;padding:.5rem .6rem;border:1px solid var(--border);border-radius:6px;font:inherit;background:var(--card);color:var(--fg)"></textarea>
-            <button type="submit" class="btn-ghost btn">Add</button>
-          </form>
-          <div class="muted" id="materials-status" role="status"></div>
+
+        <div id="materials-import-pane" hidden>
+          <h3 id="backup-title" tabindex="-1" style="margin:.25rem 0 .5rem">Import from a Moodle course backup</h3>
+          <p class="muted" id="sync-intro" hidden style="margin:0 0 .5rem">The course is read straight from Moodle through its web services, as it is right now: each unit's text, its pages, books and readings (including attached PDFs and Word files), its links, and each assignment's description. Nothing about people is read. Items imported before are refreshed in place; new ones are added. You review everything below before anything is saved.</p>
+          <p class="muted" id="backup-intro" style="margin:0 0 .5rem">A backup brings the course in as it is: each unit's text, its pages, books and readings (including attached PDFs and Word files), its links, and each assignment's description. Nothing about people is read: no users, grades, submissions or forum posts. The file is deleted as soon as it has been read. You review everything below before anything is saved.</p>
+          <details id="backup-how" style="margin:0 0 .75rem">
+            <summary style="cursor:pointer;font-size:.9rem">How to make the backup in Moodle (about a minute)</summary>
+            <ol style="margin:.4rem 0 0 1.2rem;font-size:.9rem;line-height:1.5">
+              <li>In your course, open <strong>More → Course reuse → Backup</strong> (in older Moodles: the gear menu → Backup).</li>
+              <li>Untick <strong>Include enrolled users</strong>. The tool never uses user data, and the file is much smaller without it. Leave activities, blocks and files ticked.</li>
+              <li>Click <strong>Jump to final step</strong>, then <strong>Continue</strong> when it finishes.</li>
+              <li>In the <strong>Course backup area</strong>, click <strong>Download</strong> next to the newest file. It ends in <code>.mbz</code>.</li>
+              <li>Choose that file below.</li>
+            </ol>
+            <p class="muted" style="margin:.4rem 0 0;font-size:.85rem">Backups up to 150 MB are accepted. If yours is larger, make a backup without the course's video or audio files, or import the units you need by URL instead.</p>
+          </details>
+          <div class="form-row" id="backup-file-row" style="margin-bottom:.5rem">
+            <label for="backup-file" class="visually-hidden">Backup file</label>
+            <input type="file" id="backup-file" accept=".mbz,.zip,.tgz,.gz,application/gzip,application/zip" style="font:inherit;font-size:.85rem">
+            <button class="btn" id="backup-read-btn" type="button">Read the backup</button>
+            <button class="btn btn-ghost" id="backup-cancel-btn" type="button">Back to materials</button>
+          </div>
+          <div class="form-row" id="sync-row" hidden style="margin-bottom:.5rem">
+            <button class="btn" id="sync-read-btn" type="button">↻ Read the course again</button>
+            <button class="btn btn-ghost" id="sync-cancel-btn" type="button">Back to materials</button>
+          </div>
+          <div class="muted" id="sync-notes" hidden style="margin-bottom:.5rem;font-size:.85rem"></div>
+          <div class="muted" id="backup-status" role="status" aria-live="polite" style="margin-bottom:.5rem"></div>
+          <div id="backup-preview" hidden>
+            <div id="backup-course" style="margin:.25rem 0 .5rem;font-size:.9rem"></div>
+            <p class="muted" style="margin:0 0 .5rem;font-size:.85rem">Tick what to import. Each unit's short labels have been merged into one <em>text</em> material and one <em>activities</em> material; pages, readings and assignments are separate. The <em>what it is</em> column is advisory for personas (a case file and a reading are both sources); fix it here if it is wrong. Items marked <em>update</em> were imported before and will be refreshed in place rather than added again.</p>
+            <div class="form-row" style="margin:0 0 .5rem;font-size:.9rem;align-items:center">
+              <span class="muted">Whole course:</span>
+              <button class="link-btn" type="button" id="backup-all">select all</button>
+              <button class="link-btn" type="button" id="backup-none">select none</button>
+              <button class="link-btn" type="button" id="backup-suggested" title="Visible items with text ticked; hidden items and empty ones unticked">back to suggested</button>
+            </div>
+            <div id="backup-units"></div>
+            <div class="muted" id="backup-skipped" style="font-size:.85rem;margin:.25rem 0 .5rem"></div>
+            <div class="form-row">
+              <button class="btn" id="backup-commit-btn" type="button" disabled>Import selected</button>
+              <span class="muted" id="backup-count"></span>
+            </div>
+            <div class="err" id="backup-err" role="alert"></div>
+          </div>
         </div>
       </div>
     </section>
@@ -447,7 +528,8 @@
       chat.session = data.session;
       $('#chat-h').textContent = p.title; $('#chat-sub').textContent = p.subtitle || '';
       $('#chat-setting').textContent = p.setting || '';
-      const mode = $('#chat-mode'); mode.hidden = !current.preview; mode.textContent = current.preview ? `Preview · ${data.persona.model || ''}` : '';
+      current.model = data.persona.model || '';
+      const mode = $('#chat-mode'); mode.hidden = !current.preview; mode.textContent = current.preview ? `Preview · ${current.model}` : '';
       chatTurns.innerHTML = ''; chatErr.textContent = '';
       for (const t of data.turns) appendTurn(t.role, t.content);
       setEnded(data.session.status === 'ended');
@@ -481,13 +563,30 @@
           const evt = parseSSE(buf.slice(0, idx)); buf = buf.slice(idx + 2);
           if (evt.event === 'chunk') { bubble._raw = (bubble._raw || '') + (evt.data.text || ''); setMd(bubble, bubble._raw); chatTurns.scrollTop = chatTurns.scrollHeight; }
           else if (evt.event === 'notice') { appendTurn('notice', evt.data.message || ''); }
-          else if (evt.event === 'done') { announce(`${current.persona.title}: ${bubble._raw || ''}`); }
+          else if (evt.event === 'quotes') { renderQuotes(bubble, evt.data); }
+          else if (evt.event === 'done') {
+            announce(`${current.persona.title}: ${bubble._raw || ''}`);
+            if (current.preview && evt.data.passages) $('#chat-mode').textContent = `Preview · ${current.model || ''} · ${evt.data.passages} passage${evt.data.passages === 1 ? '' : 's'} retrieved`;
+          }
           else if (evt.event === 'error') { chatErr.textContent = friendlyError(evt.data.message); }
         }
       }
       if (!bubble._raw) bubble.closest('.turn').remove();
     } catch (e) { chatErr.textContent = 'Send failed: ' + friendlyError(e); }
     finally { chat.busy = false; chatSend.disabled = false; chatInput.focus(); }
+  }
+  function renderQuotes(bubble, q) {
+    const turn = bubble.closest('.turn'); if (!turn) return;
+    const all = [...(q.verified || []).map((v) => ({ ok: true, v })), ...(q.unverified || []).map((u) => ({ ok: false, u }))];
+    if (!all.length) return;
+    const box = document.createElement('div'); box.className = 'quotes';
+    for (const item of all) {
+      const chip = document.createElement('span'); chip.className = 'chip ' + (item.ok ? 'ok' : 'miss');
+      if (item.ok) { chip.textContent = `✓ quoted from ${item.v.title}`; chip.title = item.v.context; }
+      else { chip.textContent = `not found in the sources: “${item.u.length > 60 ? item.u.slice(0, 60) + '…' : item.u}”`; chip.title = 'This quotation does not occur in the attached sources. It may be accurate from elsewhere, or paraphrased; treat it with care.'; }
+      box.appendChild(chip);
+    }
+    turn.insertAdjacentElement('afterend', box);
   }
   function parseSSE(raw) {
     let event = 'message', dataStr = '';
@@ -607,7 +706,10 @@
   function renderMaterialChecks(selected = []) {
     const host = $('#editor-materials'); host.innerHTML = '';
     if (!designerMaterials.length) { host.innerHTML = '<span class="muted">No materials yet. Add some under the Materials tab.</span>'; return; }
+    const hasUnits = designerMaterials.some((m) => m.unit);
+    let lastUnit = null;
     for (const m of designerMaterials) {
+      if (hasUnits && (m.unit || '') !== lastUnit) { lastUnit = m.unit || ''; host.insertAdjacentHTML('beforeend', `<div class="muted" style="font-weight:600;margin:.4rem 0 .1rem">${esc(lastUnit || 'Not in a unit')}</div>`); }
       host.insertAdjacentHTML('beforeend', `<label><input type="checkbox" name="material" value="${m.id}" ${selected.includes(m.id) ? 'checked' : ''}> ${esc(m.title)} <span class="muted">(${Math.round(m.chars / 1000)}k chars)</span></label>`);
     }
   }
@@ -662,6 +764,7 @@
   });
 
   // ─── Materials ───
+  const safeHost = (u) => { try { return new URL(u).hostname; } catch { return u; } };
   async function loadMaterials() {
     const tbody = $('#materials-table tbody'); $('#materials-err').textContent = '';
     try {
@@ -670,7 +773,7 @@
       for (const m of designerMaterials) {
         const tr = document.createElement('tr');
         tr.innerHTML = `<td><strong>${esc(m.title)}</strong>${m.attribution ? `<div class="muted">${esc(m.attribution)}</div>` : ''}</td>
-          <td class="muted">${m.source_url ? `<a href="${esc(m.source_url)}" target="_blank" rel="noopener">${esc(new URL(m.source_url).hostname)}</a>` : 'pasted or uploaded'}${m.license ? ` · ${esc(m.license)}` : ''}</td>
+          <td class="muted">${m.source_url ? `<a href="${esc(m.source_url)}" target="_blank" rel="noopener">${esc(safeHost(m.source_url))}</a>` : m.source_key ? 'Moodle course' : 'pasted or uploaded'}${m.unit ? ` · ${esc(m.unit)}` : ''}${m.license ? ` · ${esc(m.license)}` : ''}</td>
           <td>${Math.round(m.chars / 1000)}k chars</td><td><button type="button" class="link-btn">Delete</button></td>`;
         tr.querySelector('button').addEventListener('click', async () => {
           if (!confirm(`Delete "${m.title}"? Personas that use it will stop citing it.`)) return;
@@ -680,7 +783,135 @@
       }
       if (!$('#persona-editor').hidden) renderMaterialChecks($$('input[name=material]:checked').map((c) => Number(c.value)));
     } catch (e) { $('#materials-err').textContent = friendlyError(e); }
+    try { const c = await api('/api/teacher/course'); renderMoodleWs(c.moodle_ws); } catch {}
   }
+
+  // ─── Moodle connection and course import ───
+  function renderMoodleWs(ws) {
+    const st = $('#moodle-ws-status');
+    st.textContent = ws.connected ? `Connected as ${ws.user}${ws.checked_at ? ` (last used ${new Date(ws.checked_at).toLocaleString()})` : ''}.` : 'Not connected.';
+    $('#moodle-ws-disconnect').hidden = !ws.connected;
+    $('#moodle-ws-connect').textContent = ws.connected ? 'Replace token' : 'Connect';
+    $('#moodle-ws-functions').textContent = (ws.functions || []).join(', ');
+    $('#moodle-ws-how').open = !ws.connected;
+    const sync = $('#material-sync-btn'); sync.disabled = !ws.connected; sync.title = ws.connected ? '' : 'Connect the course to Moodle below first';
+  }
+  $('#moodle-ws-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const err = $('#moodle-ws-err'); err.textContent = ''; const btn = $('#moodle-ws-connect'); const input = $('#moodle-ws-token');
+    const token = input.value.trim(); if (!token) { err.textContent = 'Paste the token first.'; return; }
+    btn.disabled = true; $('#moodle-ws-status').textContent = 'Checking the token with Moodle…';
+    try {
+      const d = await api('/api/teacher/course/moodle-ws', { method: 'PUT', body: { token } });
+      input.value = ''; const c = await api('/api/teacher/course'); renderMoodleWs(c.moodle_ws);
+      $('#moodle-ws-status').insertAdjacentHTML('beforeend', `<div style="margin-top:.3rem">Connected as ${esc(d.fullname)} (${esc(d.sitename)}).${d.missing_optional && d.missing_optional.length ? ` The service does not allow ${esc(d.missing_optional.join(', '))}; the sync will skip what those cover.` : ''}</div>`);
+    } catch (e2) { err.textContent = friendlyError(e2); try { const c = await api('/api/teacher/course'); renderMoodleWs(c.moodle_ws); } catch {} }
+    finally { btn.disabled = false; }
+  });
+  $('#moodle-ws-disconnect').addEventListener('click', async () => {
+    const err = $('#moodle-ws-err'); err.textContent = '';
+    try { await api('/api/teacher/course/moodle-ws', { method: 'DELETE' }); const c = await api('/api/teacher/course'); renderMoodleWs(c.moodle_ws); $('#moodle-ws-status').insertAdjacentHTML('beforeend', '<div style="margin-top:.3rem">Token forgotten here. Revoke it in Moodle too if it is no longer needed.</div>'); }
+    catch (e2) { err.textContent = friendlyError(e2); }
+  });
+
+  let backupPreview = null, importMode = 'backup';
+  const ROLE_OPTIONS = [['reading', 'Reading, notes or transcript'], ['activities', 'Activities and study questions'], ['assignment', 'Assignment description and criteria'], ['other', 'Other']];
+  function showImportPane(on) { $('#materials-list-pane').hidden = on; $('#materials-import-pane').hidden = !on; if (on) $('#backup-title').focus(); }
+  function backupStatus(msg, isErr = false) { const el = $('#backup-status'); el.textContent = msg; el.style.color = isErr ? 'var(--bad)' : ''; }
+  function openImportPane(mode) {
+    importMode = mode; backupPreview = null;
+    $('#backup-preview').hidden = true; $('#backup-err').textContent = ''; backupStatus(''); $('#sync-notes').hidden = true;
+    $('#backup-title').textContent = mode === 'sync' ? 'Sync from Moodle' : 'Import from a Moodle course backup';
+    $('#backup-intro').hidden = mode === 'sync'; $('#sync-intro').hidden = mode !== 'sync';
+    $('#backup-how').hidden = mode === 'sync'; $('#backup-file-row').hidden = mode === 'sync'; $('#sync-row').hidden = mode !== 'sync';
+    showImportPane(true);
+  }
+  $('#material-backup-btn').addEventListener('click', () => openImportPane('backup'));
+  $('#material-sync-btn').addEventListener('click', () => { openImportPane('sync'); readCourseFromMoodle(); });
+  $('#sync-read-btn').addEventListener('click', readCourseFromMoodle);
+  $('#sync-cancel-btn').addEventListener('click', () => showImportPane(false));
+  $('#backup-cancel-btn').addEventListener('click', () => showImportPane(false));
+  async function readCourseFromMoodle() {
+    const btn = $('#sync-read-btn'); btn.disabled = true; $('#backup-preview').hidden = true;
+    backupStatus('Reading the course from Moodle… a course with many PDFs can take a minute.');
+    try {
+      const d = await api('/api/teacher/materials/sync-preview', { body: {} });
+      backupPreview = d; renderBackupPreview(d);
+      const notes = $('#sync-notes'); notes.hidden = !(d.notes && d.notes.length); notes.textContent = d.notes && d.notes.length ? d.notes.join(' ') : '';
+      backupStatus(`Read ${d.stats.items} item${d.stats.items === 1 ? '' : 's'} in ${d.stats.units} unit${d.stats.units === 1 ? '' : 's'} from Moodle.${d.stats.updates ? ` ${d.stats.updates} ${d.stats.updates === 1 ? 'was' : 'were'} imported before and will be refreshed.` : ''} Review below, then import.`);
+    } catch (e) { backupStatus(friendlyError(e), true); } finally { btn.disabled = false; }
+  }
+  $('#backup-read-btn').addEventListener('click', async () => {
+    const input = $('#backup-file'); const btn = $('#backup-read-btn');
+    const file = input.files && input.files[0];
+    if (!file) { backupStatus('Choose the .mbz file first. The steps above say where to find it in Moodle.', true); return; }
+    btn.disabled = true; $('#backup-preview').hidden = true;
+    backupStatus(`Reading ${file.name} (${(file.size / 1048576).toFixed(1)} MB)… a large backup with PDFs can take a minute.`);
+    try {
+      const fd = new FormData(); fd.append('file', file);
+      const d = await api('/api/teacher/materials/import-backup', { body: fd });
+      backupPreview = d; renderBackupPreview(d);
+      backupStatus(`Found ${d.stats.items} item${d.stats.items === 1 ? '' : 's'} in ${d.stats.units} unit${d.stats.units === 1 ? '' : 's'}.${d.stats.updates ? ` ${d.stats.updates} ${d.stats.updates === 1 ? 'was' : 'were'} imported before and will be updated.` : ''} Review below, then import.`);
+    } catch (e) { backupStatus(friendlyError(e), true); } finally { btn.disabled = false; }
+  });
+  function renderBackupPreview(d) {
+    const c = d.course; const warn = [];
+    if (!c.same_site) warn.push('This backup comes from a different Moodle site, so links will point there.');
+    else if (!c.same_course) warn.push(`This backup is from another course (id ${c.course_id}), not this one. Links will point to that course.`);
+    $('#backup-course').innerHTML = `<strong>${esc(c.fullname || c.shortname || 'Course')}</strong>${c.shortname ? ` <span class="muted">(${esc(c.shortname)})</span>` : ''}${c.backup_date ? ` <span class="muted">· backed up ${esc(c.backup_date)}</span>` : ''}` +
+      (warn.length ? `<div style="color:var(--bad);font-size:.85rem;margin-top:.2rem">${warn.map(esc).join(' ')}</div>` : '');
+    const box = $('#backup-units'); box.innerHTML = '';
+    d.units.forEach((u, ui) => {
+      const sec = document.createElement('section'); sec.className = 'bk-unit';
+      sec.innerHTML = `<div class="bk-head"><strong>${esc(u.title)}</strong>${u.visible ? '' : ' <span class="chip">hidden section</span>'} <button class="link-btn" type="button" data-all="${ui}">all</button><button class="link-btn" type="button" data-none="${ui}">none</button></div>
+        <div class="scroll-x"><table class="tbl"><thead><tr><th><span class="visually-hidden">Include</span></th><th>Title</th><th>What it is</th><th>Size</th><th>Notes</th></tr></thead><tbody></tbody></table></div>`;
+      const tbody = sec.querySelector('tbody');
+      u.items.forEach((it, ii) => {
+        const tr = document.createElement('tr'); tr.dataset.unit = ui; tr.dataset.item = ii;
+        const notes = [it.existing ? '<span class="chip">update</span>' : '', ...it.notes.map((n) => esc(n))].filter(Boolean).join(' · ');
+        tr.innerHTML = `<td><input type="checkbox" class="bk-include" aria-label="Include ${esc(it.title)}"${it.include ? ' checked' : ''}></td>` +
+          `<td><input type="text" class="text-input bk-title" value="${esc(it.title)}" maxlength="160" aria-label="Title" style="width:100%;min-width:200px"><div class="muted" style="font-size:.8rem">${esc(it.modname)}${it.source_url ? ` · <a href="${esc(it.source_url)}" target="_blank" rel="noopener">open in course</a>` : ''} · <details style="display:inline"><summary style="cursor:pointer;display:inline">preview</summary><div class="bk-preview">${esc(it.text.slice(0, 1200))}${it.text.length > 1200 ? '…' : ''}</div></details></div></td>` +
+          `<td><select class="bk-role" aria-label="What it is">${ROLE_OPTIONS.map(([v, l]) => `<option value="${v}"${v === it.role ? ' selected' : ''}>${l}</option>`).join('')}</select></td>` +
+          `<td>${(it.chars / 1000).toFixed(1)}k</td><td class="muted" style="font-size:.8rem">${notes || '—'}</td>`;
+        tbody.appendChild(tr);
+      });
+      box.appendChild(sec);
+    });
+    box.querySelectorAll('[data-all],[data-none]').forEach((b) => b.addEventListener('click', () => {
+      const ui = b.dataset.all ?? b.dataset.none; const on = b.dataset.all !== undefined;
+      box.querySelectorAll(`tr[data-unit="${ui}"] .bk-include`).forEach((cb) => { cb.checked = on; }); updateBackupCount();
+    }));
+    box.addEventListener('change', updateBackupCount);
+    $('#backup-all').onclick = () => { $$('#backup-units .bk-include').forEach((cb) => { cb.checked = true; }); updateBackupCount(); };
+    $('#backup-none').onclick = () => { $$('#backup-units .bk-include').forEach((cb) => { cb.checked = false; }); updateBackupCount(); };
+    $('#backup-suggested').onclick = () => {
+      $$('#backup-units tr[data-unit]').forEach((tr) => { const it = d.units[Number(tr.dataset.unit)].items[Number(tr.dataset.item)]; tr.querySelector('.bk-include').checked = !!it.include; });
+      updateBackupCount();
+    };
+    const sk = $('#backup-skipped');
+    sk.textContent = d.skipped.length ? `Left out (${d.skipped.length}): ${d.skipped.slice(0, 12).map((x) => `${x.title} (${x.reason})`).join('; ')}${d.skipped.length > 12 ? '; …' : ''}.` : '';
+    $('#backup-preview').hidden = false; updateBackupCount();
+  }
+  function selectedBackupItems() {
+    const out = [];
+    $$('#backup-units tr[data-unit]').forEach((tr) => {
+      if (!tr.querySelector('.bk-include').checked) return;
+      const it = backupPreview.units[Number(tr.dataset.unit)].items[Number(tr.dataset.item)];
+      out.push({ key: it.key, title: tr.querySelector('.bk-title').value.trim() || it.title, role: tr.querySelector('.bk-role').value, text: it.text, unit: it.unit, unit_order: it.unit_order, source_url: it.source_url });
+    });
+    return out;
+  }
+  function updateBackupCount() { const n = selectedBackupItems().length; $('#backup-count').textContent = `${n} selected`; $('#backup-commit-btn').disabled = n === 0; }
+  $('#backup-commit-btn').addEventListener('click', async () => {
+    const items = selectedBackupItems(); const btn = $('#backup-commit-btn'); const err = $('#backup-err'); err.textContent = '';
+    if (!items.length) return;
+    btn.disabled = true; backupStatus(`Importing ${items.length} material${items.length === 1 ? '' : 's'}…`);
+    try {
+      const d = await api('/api/teacher/materials/import-backup/commit', { body: { items } });
+      await loadMaterials(); showImportPane(false);
+      $('#materials-status').textContent = `${importMode === 'sync' ? 'Synced from Moodle' : 'Imported from the course backup'}: ${d.created} added${d.updated ? `, ${d.updated} updated` : ''}. Tick them on a persona to use them.`;
+    } catch (e) { err.textContent = friendlyError(e); backupStatus(''); } finally { btn.disabled = false; }
+  });
   $('#mat-url-form').addEventListener('submit', async (e) => {
     e.preventDefault(); const f = e.target; const url = f.url.value.trim(); if (!url) return;
     $('#materials-status').textContent = 'Importing…'; $('#materials-err').textContent = '';

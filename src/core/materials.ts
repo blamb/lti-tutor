@@ -7,7 +7,10 @@
 
 import { z } from 'zod';
 import { query } from './db.js';
-import { MATERIAL_MAX_CHARS } from './limits.js';
+import { rechunkMaterial } from './chunks.js';
+
+/** The longest body a material may hold; importers cut to their own limit first (fitMaterial). */
+export const MATERIAL_BODY_MAX_CHARS = 2_000_000;
 
 /** The course a request is for: platform issuer + LTI course id. */
 export interface Scope {
@@ -57,7 +60,7 @@ export interface Material {
 
 export const MaterialInput = z.object({
   title: z.string().trim().min(1).max(160),
-  body: z.string().trim().min(1).max(MATERIAL_MAX_CHARS),
+  body: z.string().trim().min(1).max(MATERIAL_BODY_MAX_CHARS),
   source_url: z.string().trim().max(2000).default(''),
   license: z.string().trim().max(200).default(''),
   attribution: z.string().trim().max(500).default(''),
@@ -92,6 +95,7 @@ export async function createMaterial(ctx: Scope, input: MaterialInput, createdBy
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *`,
     [ctx.iss, ctx.contextId, input.title, input.body, input.source_url, input.license, input.attribution, input.role, input.unit, input.unit_order, input.source_key, createdBy]
   );
+  await rechunkMaterial(rows[0]!.id, rows[0]!.body);
   return rows[0]!;
 }
 
@@ -128,6 +132,7 @@ export async function updateMaterial(id: number, ctx: Scope, input: MaterialInpu
      where id = $1 and lti_iss = $2 and lti_context_id = $3 returning *`,
     [id, ctx.iss, ctx.contextId, input.title, input.body, input.source_url, input.license, input.attribution, input.role, input.unit, input.unit_order, input.source_key]
   );
+  if (rows[0]) await rechunkMaterial(rows[0].id, rows[0].body);
   return rows[0] ?? null;
 }
 

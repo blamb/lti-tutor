@@ -205,8 +205,9 @@ src/
     moodle-backup.ts       .mbz parsing; moodle-ws.ts: Moodle web-services client; unit tests alongside
     anthropic.ts, llm.ts   SDK client; JSON calls with schema + retry
     costs.ts               price table + api_call recording + summary
+    chunks.ts              passages of each material and full-text retrieval; quotes.ts: quotation checking; unit tests alongside
     secrets.ts, outbound.ts, limits.ts, db.ts, migrate.ts
-    migrations/001_core.sql   student, material, session, tutor_turn, api_call
+    migrations/            001_core.sql (student, material, session, tutor_turn, api_call), 002_chunks.sql
   tutor/                   LTI Tutor
     server/index.ts        entry: env → LTI → routes → deploy
     server/lti.ts          launch page, deep-linking picker
@@ -226,9 +227,10 @@ src/
     server/personas.ts     the persona model, prompt assembly, conversations, the AI draft; unit tests alongside
     server/templates.ts    templates: standing rules, field hints, seeds
     server/routes.ts       /api/* (student + designer + deep-link response)
+    server/course.ts       the course's Moodle web-service token
     server/lti.ts, index.ts, env.ts
     fixtures/              the two reference personas (Melissa Chang, Tagore); seed.ts loads them
-    migrations/001_personas.sql
+    migrations/            001_personas.sql, 002_course_settings.sql
     web/launch.html
 ```
 

@@ -17,12 +17,19 @@
  *   GET/POST /api/teacher/materials, PUT/DELETE /api/teacher/materials/:id
  *   POST /api/teacher/materials/import-url       { url, whole_book? }
  *   POST /api/teacher/materials/upload           multipart 'file'
+ *   POST /api/teacher/materials/import-backup    multipart 'file' (.mbz) -> preview { course, units, skipped }
+ *   POST /api/teacher/materials/import-backup/commit  { items } -> { created, updated, materials }
+ *   POST /api/teacher/materials/sync-preview     -> the live course through Moodle web services, same preview shape
+ *   GET  /api/teacher/course                     -> { moodle_ws: status + wwwroot, course_id, functions }
+ *   PUT/DELETE /api/teacher/course/moodle-ws     { token } -> verify and store the web-service token / forget it
  *   POST /api/deeplink                           (form) -> auto-submitting deep-link form
  */
 
 import express from 'express';
-import type { Request, Response } from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import multer from 'multer';
+import os from 'node:os';
+import fs from 'node:fs';
 import type { DeepLinkContentItem, IdToken } from 'ltijs';
 import { z } from 'zod';
 import { lti, mintFullscreenNonce } from './lti.js';
@@ -31,16 +38,23 @@ import { env } from './env.js';
 import { tokenOf, studentFromToken, gateTeacher, contextIdOf, attr } from '../../core/reqctx.js';
 import { isTeacher } from '../../core/auth.js';
 import {
-  MaterialInput, listMaterials, createMaterial, updateMaterial, deleteMaterial, type Scope,
+  MaterialInput, MATERIAL_ROLES, listMaterials, createMaterial, updateMaterial, deleteMaterial, upsertMaterialBySourceKey, existingSourceKeys, type Scope,
 } from '../../core/materials.js';
+import { parseMoodleBackup, BACKUP_MAX_BYTES } from '../../core/moodle-backup.js';
+import { buildPreview } from '../../core/course-model.js';
+import { wsClient, checkConnection, fetchCourseModel, WS_FUNCTIONS, WsError } from '../../core/moodle-ws.js';
+import { getMoodleWsToken, setMoodleWsToken, clearMoodleWsToken, touchMoodleWs } from './course.js';
 import { importFromUrl, extractFromFile, fitMaterial, ImportError, MAX_BOOK_CHAPTERS } from '../../core/importers.js';
 import { templateCatalog, isPersonaTemplate } from './templates.js';
 import {
   PersonaInput, PERSONA_MODELS, publicPersona, listPersonas, getPersona, createPersona, updatePersona, deletePersona, detachMaterial,
   startPersonaSession, getPersonaSession, endPersonaSession, getSessionTurns, visibleTurns, streamPersonaReply, draftPersona,
-  latestSessionsForStudent, START_MARKER, DRAFT_MAX_CHARS, modelFor,
+  latestSessionsForStudent, START_MARKER, DRAFT_MAX_CHARS, PERSONA_MATERIAL_MAX_CHARS, modelFor,
 } from './personas.js';
 
+// The course-import commit sends every selected material's text back in one
+// request, so it gets its own limit; express.json skips a body another parser has already read.
+lti.app.use('/api/teacher/materials/import-backup/commit', express.json({ limit: '64mb' }));
 lti.app.use('/api', express.json({ limit: '2mb' }));
 
 function scopeOf(token: IdToken): Scope & { title: string } {
@@ -165,7 +179,8 @@ lti.app.post('/api/personas/session/:sid/turn', async (req: Request, res: Respon
       attribution: attr(token, me.id, session.session_id, 'persona.turn'),
     });
     if (out.refused) send('notice', { message: 'The persona declined to continue in that direction. Try a different question, or end the conversation.' });
-    send('done', {});
+    if (out.quotes) send('quotes', out.quotes);
+    send('done', { passages: out.passages });
     res.end();
   } catch (e) {
     console.error('POST /api/personas/session/:sid/turn failed:', e);
@@ -363,11 +378,155 @@ lti.app.post('/api/teacher/materials/upload', upload.single('file'), async (req:
     const me = await studentFromToken(t.token);
     const { title, text } = await extractFromFile(file.originalname, file.buffer);
     if (text.trim().length < 20) return res.status(400).json({ error: 'No readable text was found in that file (a scanned PDF needs OCR first).' });
-    const fit = fitMaterial(text.trim());
+    const fit = fitMaterial(text.trim(), PERSONA_MATERIAL_MAX_CHARS);
     const m = await createMaterial(t.scope, MaterialInput.parse({ title, body: fit.text, attribution: file.originalname.slice(0, 500) }), me.id);
     res.json({ material: { ...m, body: undefined, chars: m.body.length }, truncated: fit.truncated, original_chars: fit.original_chars });
   } catch (e) {
     fail(res, e, 'POST /api/teacher/materials/upload');
+  }
+});
+
+// ─── Instructor: the Moodle course ──────────────────────────────────────────
+
+lti.app.get('/api/teacher/course', async (req: Request, res: Response) => {
+  try {
+    const t = await teacher(res);
+    if (!t) return;
+    const ws = await getMoodleWsToken(t.scope);
+    res.json({ moodle_ws: { ...ws.status, wwwroot: t.scope.iss, course_id: t.scope.contextId, functions: WS_FUNCTIONS } });
+  } catch (e) {
+    fail(res, e, 'GET /api/teacher/course');
+  }
+});
+
+lti.app.put('/api/teacher/course/moodle-ws', async (req: Request, res: Response) => {
+  try {
+    const t = await teacher(res);
+    if (!t) return;
+    const token = String(req.body?.token ?? '').trim();
+    if (!/^[a-f0-9]{32}$/i.test(token)) return res.status(400).json({ error: 'That does not look like a Moodle web-service token (32 letters and digits). Copy it from Moodle without spaces.' });
+    const client = wsClient(t.scope.iss, token);
+    const check = await checkConnection(client);
+    if (check.missing.length) {
+      return res.status(400).json({ error: `The token works (${check.site.fullname}, ${check.site.sitename}) but its service does not allow: ${check.missing.join(', ')}. Ask the Moodle administrator to add those functions to the service, then try again.` });
+    }
+    try {
+      await client.call('core_course_get_contents', { courseid: Number(t.scope.contextId), options: [{ name: 'excludecontents', value: 1 }] });
+    } catch (e) {
+      if (e instanceof WsError) return res.status(400).json({ error: `The token belongs to ${check.site.fullname}, but that account cannot read this course (${e.code}). Use a token for an account enrolled in the course as a teacher.` });
+      throw e;
+    }
+    await setMoodleWsToken(t.scope, token, check.site.username);
+    res.json({ connected: true, user: check.site.username, fullname: check.site.fullname, sitename: check.site.sitename, missing_optional: check.missing_optional });
+  } catch (e) {
+    fail(res, e, 'PUT /api/teacher/course/moodle-ws');
+  }
+});
+
+lti.app.delete('/api/teacher/course/moodle-ws', async (req: Request, res: Response) => {
+  try {
+    const t = await teacher(res);
+    if (!t) return;
+    await clearMoodleWsToken(t.scope);
+    res.json({ connected: false });
+  } catch (e) {
+    fail(res, e, 'DELETE /api/teacher/course/moodle-ws');
+  }
+});
+
+/** The same preview shape for a backup and a live sync, with "update" flags for items imported before. */
+async function previewResponse(scope: Scope, preview: Awaited<ReturnType<typeof buildPreview>>, extra: { source: 'backup' | 'sync'; notes: string[]; same_course: boolean; same_site: boolean }) {
+  const have = await existingSourceKeys(scope);
+  const units = preview.units.map((u) => ({ ...u, items: u.items.map((i) => ({ ...i, existing: have.has(i.key) })) }));
+  const items = units.reduce((n, u) => n + u.items.length, 0);
+  return {
+    source: extra.source, notes: extra.notes,
+    course: { ...preview.course, same_course: extra.same_course, same_site: extra.same_site },
+    units, skipped: preview.skipped,
+    stats: { items, units: units.length, updates: units.reduce((n, u) => n + u.items.filter((i) => i.existing).length, 0) },
+  };
+}
+
+lti.app.post('/api/teacher/materials/sync-preview', async (req: Request, res: Response) => {
+  try {
+    const t = await teacher(res);
+    if (!t) return;
+    const ws = await getMoodleWsToken(t.scope);
+    if (!ws.token) return res.status(400).json({ error: 'This course is not connected to Moodle yet. Add a web-service token under Moodle connection on the Materials tab.' });
+    const client = wsClient(t.scope.iss, ws.token);
+    const { model, notes } = await fetchCourseModel(client, t.scope.contextId, { fullname: t.scope.title || '' });
+    const preview = await buildPreview(model);
+    await touchMoodleWs(t.scope);
+    res.json(await previewResponse(t.scope, preview, { source: 'sync', notes, same_course: true, same_site: true }));
+  } catch (e) {
+    if (e instanceof WsError && e.accessDenied) {
+      res.status(400).json({ error: `Moodle refused the request (${e.code}). The token may have been revoked or its service changed; reconnect under Moodle connection.` });
+      return;
+    }
+    fail(res, e, 'POST /api/teacher/materials/sync-preview');
+  }
+});
+
+// A course backup can be large (it carries the course's files), so it goes
+// to disk and is streamed from there, then deleted. Only course structure
+// and content are read: never users, grades, submissions or posts.
+const uploadBackup = multer({
+  storage: multer.diskStorage({ destination: os.tmpdir(), filename: (_req, _file, cb) => cb(null, `mbz-${Date.now()}-${Math.random().toString(36).slice(2)}`) }),
+  limits: { fileSize: BACKUP_MAX_BYTES, files: 1 },
+});
+
+lti.app.post('/api/teacher/materials/import-backup', uploadBackup.single('file'), async (req: Request, res: Response) => {
+  const file = (req as Request & { file?: { originalname: string; path: string; size: number } }).file;
+  try {
+    const t = await teacher(res);
+    if (!t) return;
+    if (!file) return res.status(400).json({ error: 'No file received. Choose the .mbz file you downloaded from Moodle\'s Backup page.' });
+    const preview = await parseMoodleBackup(file.path);
+    res.json(await previewResponse(t.scope, preview, {
+      source: 'backup', notes: [],
+      same_course: preview.course.course_id === t.scope.contextId,
+      same_site: !preview.course.wwwroot || preview.course.wwwroot.replace(/\/+$/, '') === t.scope.iss.replace(/\/+$/, ''),
+    }));
+  } catch (e) {
+    fail(res, e, 'POST /api/teacher/materials/import-backup');
+  } finally {
+    if (file) fs.promises.unlink(file.path).catch(() => {});
+  }
+});
+
+const BackupCommit = z.object({
+  items: z.array(z.object({
+    key: z.string().trim().min(1).max(200),
+    title: z.string().trim().min(1).max(160),
+    role: z.enum(MATERIAL_ROLES),
+    text: z.string().min(1),
+    unit: z.string().trim().max(200).default(''),
+    unit_order: z.number().int().min(0).max(10000).default(0),
+    source_url: z.string().trim().max(2000).default(''),
+  })).min(1).max(300),
+});
+
+lti.app.post('/api/teacher/materials/import-backup/commit', async (req: Request, res: Response) => {
+  try {
+    const t = await teacher(res);
+    if (!t) return;
+    const { items } = BackupCommit.parse(req.body ?? {});
+    const me = await studentFromToken(t.token);
+    let created = 0;
+    let updated = 0;
+    const materials = [];
+    for (const it of items) {
+      const fit = fitMaterial(it.text.trim(), PERSONA_MATERIAL_MAX_CHARS);
+      const r = await upsertMaterialBySourceKey(t.scope, MaterialInput.parse({
+        title: it.title, body: fit.text, source_url: it.source_url, role: it.role, unit: it.unit, unit_order: it.unit_order, source_key: it.key,
+        attribution: `Imported from the course${it.unit ? `, ${it.unit}` : ''}`,
+      }), me.id);
+      if (r.updated) updated++; else created++;
+      materials.push({ id: r.material.id, title: r.material.title, updated: r.updated });
+    }
+    res.json({ created, updated, materials });
+  } catch (e) {
+    fail(res, e, 'POST /api/teacher/materials/import-backup/commit');
   }
 });
 
@@ -402,4 +561,20 @@ lti.app.post('/api/deeplink', express.urlencoded({ extended: false }), async (re
   } catch (e) {
     fail(res, e, 'POST /api/deeplink');
   }
+});
+
+// ─── Upload errors as JSON ──────────────────────────────────────────────────
+// Multer rejects an oversized file before the route runs; without this the
+// client gets an HTML stack trace instead of a message it can show.
+lti.app.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
+  if (err instanceof multer.MulterError) {
+    const limitMb = req.path.includes('import-backup') ? Math.round(BACKUP_MAX_BYTES / 1048576) : 25;
+    res.status(413).json({
+      error: err.code === 'LIMIT_FILE_SIZE'
+        ? `That file is too large: the limit is ${limitMb} MB. For a course backup, make one without the course's video and audio files, or import the units you need by URL instead.`
+        : `Upload failed: ${err.message}`,
+    });
+    return;
+  }
+  next(err);
 });

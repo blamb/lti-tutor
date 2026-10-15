@@ -40,7 +40,11 @@ The common rules, in every template: stay in character; describe non-verbal cues
 [transcript]                the conversation so far; the tail is cached
 ```
 
-Materials are included whole up to the grounding limit. Chunked retrieval for long sources (the Tagore set runs to about 1,200 pages) is the next phase.
+Short material sets (up to about 80,000 characters in total) go into the cached sources block whole. Longer sets, such as a thinker's collected works, are handled by retrieval: the sources block then lists only the titles, and each turn searches the materials for the passages that match what the student just said (and, if that finds little, the persona's last reply too). The passages ride inside that turn's user message, so the cached prefix and the earlier transcript are untouched. Materials are split on paragraph boundaries into chunks of about a thousand characters and indexed with Postgres full-text search (`material_chunk`, `core/chunks.ts`), so nothing beyond Postgres itself is needed on the server. Neighbouring hits are merged back into contiguous passages, up to about 14,000 characters a turn.
+
+### Verified quotations
+
+After each reply, every quoted span of five words or more is looked for in the attached sources, with quote marks, dashes, case and spacing normalised (`core/quotes.ts`). The page shows a chip under the reply for each one: *quoted from \<source\>* with the surrounding text on hover, or *not found in the sources* for a quotation the sources do not contain, which may still be accurate from elsewhere or a paraphrase, but is worth knowing about. In a live test the persona quoted the student's own paraphrase back and the chip flagged it, which is the intended behaviour.
 
 ### Drafting from existing instructions
 
@@ -58,10 +62,14 @@ APP=persona npx tsx src/persona/seed.ts --iss <platform issuer> --context <LTI c
 
 The issuer and course id are what the LTI launch carries (the `student` table shows them after one launch). The sources folder's PDFs and documents become materials attached to Tagore.
 
+## Grounding from the Moodle course
+
+On the Materials tab, **Import a Moodle course backup** reads an `.mbz` file (up to 150 MB; make it without enrolled users) and **Sync from Moodle** reads the live course once a web-service token is connected under **Moodle connection**. Both show the same preview: every unit's text, pages, books, readings with attached PDFs and Word files, links and assignment descriptions, each with a tick box, a title and a role. Nothing about people is read. Items carry a stable source key, so a later import or sync refreshes them in place. The code is shared with the tutor (`core/moodle-backup.ts`, `core/moodle-ws.ts`, `core/course-model.ts`); the token lives in `persona_course_settings`, encrypted.
+
 ## Phases
 
 1. **Done.** Persona model, templates, designer authoring with the draft, materials by paste, URL and upload, the student gallery, pre-brief and streamed conversation, preview as a student, deep linking of single personas.
-2. Grounding from the Moodle course (backup import and live sync, as in the tutor), chunked retrieval with verified quotations.
+2. **Done.** Grounding from the Moodle course (backup import and live sync through web services, the same preview and in-place updates as the tutor), chunked retrieval for long sources, verified quotations.
 3. Student experience: voice, an out-of-character channel for asking "what should I have asked?", the debrief as a separate call against the objectives, transcript export, a short reflection.
 4. Completion passback to the gradebook and the instructor's report across conversations.
 5. Visibility beyond the LMS: link with passcode, public, with spend caps.

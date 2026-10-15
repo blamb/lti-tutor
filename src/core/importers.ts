@@ -152,10 +152,10 @@ export function detectLicense(html: string): string {
   return '';
 }
 
-export function fitMaterial(text: string): { text: string; truncated: boolean; original_chars: number } {
+export function fitMaterial(text: string, max = MATERIAL_MAX_CHARS): { text: string; truncated: boolean; original_chars: number } {
   const original = text.length;
-  if (original <= MATERIAL_MAX_CHARS) return { text, truncated: false, original_chars: original };
-  return { text: text.slice(0, MATERIAL_MAX_CHARS - 40).trimEnd() + '\n\n[truncated: material limit reached]', truncated: true, original_chars: original };
+  if (original <= max) return { text, truncated: false, original_chars: original };
+  return { text: text.slice(0, max - 40).trimEnd() + '\n\n[truncated: material limit reached]', truncated: true, original_chars: original };
 }
 
 // ─── Pressbooks ─────────────────────────────────────────────────────────────

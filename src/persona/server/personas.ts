@@ -7,6 +7,13 @@
  * Prompt order, for caching: template rules (one fixed string) → sources
  * (cached) → persona + student (cached) → nothing volatile. A turn
  * mid-conversation re-reads everything but the transcript tail from cache.
+ *
+ * Grounding: when the attached materials are short they go into the cached
+ * sources block whole. When they are long (a thinker's collected works),
+ * only their titles go there, and each turn retrieves the passages that
+ * match what the student just said (core/chunks.ts) and places them in
+ * that turn's user message, so the cached prefix is untouched. Quotations in
+ * the reply are then checked against the full sources (core/quotes.ts).
  */
 
 import type Anthropic from '@anthropic-ai/sdk';
@@ -18,6 +25,8 @@ import { jsonCall } from '../../core/llm.js';
 import { getMaterials, type Material, type Scope } from '../../core/materials.js';
 import { appendTurn, getSessionTurns, createSession, endSession, type Turn } from '../../core/conversations.js';
 import { GROUNDING_MAX_CHARS } from '../../core/limits.js';
+import { searchPassages, ensureChunks, type Passage } from '../../core/chunks.js';
+import { checkQuotes, type QuoteCheck } from '../../core/quotes.js';
 import { env } from './env.js';
 import {
   TEMPLATES, PERSONA_TEMPLATES, RESPONSE_LENGTHS, RESPONSE_LENGTH_NOTES, PERSONA_FIELD_KEYS,
@@ -78,6 +87,17 @@ export function isKnownModel(id: string): boolean {
 
 export function modelFor(p: Pick<Persona, 'model'>): string {
   return p.model || env.PERSONA_MODEL;
+}
+
+/**
+ * Output budget for one reply. The 5.x models think before answering and
+ * that thinking counts against max_tokens, so the cap is well above the
+ * length of any reply; low effort keeps the thinking short for conversation.
+ */
+export const TURN_MAX_TOKENS = 4096;
+
+export function turnOptionsFor(model: string): { output_config?: { effort: 'low' } } {
+  return /-5(-\d+)?$/.test(model) ? { output_config: { effort: 'low' } } : {};
 }
 
 const text = (max: number) => z.string().trim().max(max).default('');
@@ -187,6 +207,38 @@ export async function detachMaterial(materialId: number, scope: Scope): Promise<
 
 // ─── The prompt ─────────────────────────────────────────────────────────────
 
+/** Materials up to this many characters in total go into the prompt whole; beyond it, passages are retrieved per turn. */
+export const STUFF_MAX_CHARS = 80_000;
+/** The character budget for retrieved passages in one turn. */
+export const PASSAGE_BUDGET_CHARS = 14_000;
+/** The longest body a persona material may hold (uploads, course imports); retrieval makes long sources usable. */
+export const PERSONA_MATERIAL_MAX_CHARS = 1_500_000;
+
+export type GroundingMode = 'none' | 'stuff' | 'retrieve';
+
+export function groundingModeFor(materials: Pick<Material, 'body'>[]): GroundingMode {
+  if (materials.length === 0) return 'none';
+  const total = materials.reduce((n, m) => n + m.body.length, 0);
+  return total <= STUFF_MAX_CHARS ? 'stuff' : 'retrieve';
+}
+
+/** When retrieving, the cached sources block lists what exists and says how passages arrive. */
+export function sourcesIndexBlock(materials: Material[]): string {
+  const list = materials.map((m) => `- ${m.title}${m.license ? ` (licence: ${m.license})` : ''}`).join('\n');
+  return `# SOURCES (provided by the instructor)
+These sources are attached but too long to include whole:
+${list}
+
+The passages from them that best match each turn are supplied with the student's message under "PASSAGES FROM THE SOURCES". Draw on those passages first; what is not in them you may know from general knowledge, but say so when it matters. Quote verbatim only from a supplied passage or wording you are certain of; otherwise paraphrase. Never cite a passage the student would not find in these sources.`;
+}
+
+export function passagesBlock(passages: Passage[], titles: Map<number, string>): string {
+  if (passages.length === 0) return '';
+  const parts = ['PASSAGES FROM THE SOURCES (retrieved for this turn; the student does not see them)'];
+  for (const p of passages) parts.push(`\n## ${titles.get(p.material_id) ?? 'Source'}\n${p.body}`);
+  return parts.join('\n');
+}
+
 export function sourcesBlock(materials: Material[]): string | null {
   if (materials.length === 0) return null;
   let total = 0;
@@ -233,9 +285,9 @@ export function personaBlock(p: Persona, studentName: string): string {
   return head + body + conv;
 }
 
-export function personaSystem(p: Persona, materials: Material[], studentName: string): Anthropic.TextBlockParam[] {
+export function personaSystem(p: Persona, materials: Material[], studentName: string, mode: GroundingMode = groundingModeFor(materials)): Anthropic.TextBlockParam[] {
   const system: Anthropic.TextBlockParam[] = [{ type: 'text', text: TEMPLATES[p.template].rules }];
-  const sources = sourcesBlock(materials);
+  const sources = mode === 'retrieve' ? sourcesIndexBlock(materials) : mode === 'stuff' ? sourcesBlock(materials) : null;
   if (sources) system.push({ type: 'text', text: sources, cache_control: { type: 'ephemeral' } });
   system.push({ type: 'text', text: personaBlock(p, studentName), cache_control: { type: 'ephemeral' } });
   return system;
@@ -316,12 +368,27 @@ export async function streamPersonaReply(params: {
   userMessage: string;
   onChunk: (text: string) => void;
   attribution: Attribution;
-}): Promise<{ assistantText: string; refused: boolean }> {
+}): Promise<{ assistantText: string; refused: boolean; quotes: QuoteCheck | null; passages: number }> {
   const { persona, scope, session, studentName, userMessage, onChunk, attribution } = params;
   const sessionId = session.session_id;
 
   await appendTurn(sessionId, 'user', userMessage);
   const turns = await getSessionTurns(sessionId);
+  const materials = await getMaterials(persona.material_ids, scope);
+  const mode = groundingModeFor(materials);
+
+  // Retrieval: the passages that match this turn, on the student's words
+  // first and, if that finds little, on the persona's last reply as well.
+  let passages: Passage[] = [];
+  if (mode === 'retrieve' && !userMessage.startsWith(START_MARKER)) {
+    const ids = materials.map((m) => m.id);
+    await ensureChunks(ids);
+    passages = await searchPassages(ids, userMessage, { budgetChars: PASSAGE_BUDGET_CHARS });
+    if (passages.length < 2) {
+      const lastReply = [...turns].reverse().find((t) => t.role === 'assistant')?.content ?? '';
+      if (lastReply) passages = await searchPassages(ids, `${userMessage}\n${lastReply}`, { budgetChars: PASSAGE_BUDGET_CHARS });
+    }
+  }
 
   // Merge consecutive same-role turns (the API requires alternation).
   const messages: Anthropic.MessageParam[] = [];
@@ -330,19 +397,22 @@ export async function streamPersonaReply(params: {
     if (prev && prev.role === t.role && typeof prev.content === 'string') prev.content = `${prev.content}\n\n${t.content}`;
     else messages.push({ role: t.role, content: t.content });
   }
-  // Cache the transcript prefix so the next turn re-reads it from cache.
+  // Retrieved passages ride in this turn's user message only, so earlier
+  // turns keep their exact text and the cached prefix holds. Then cache the
+  // transcript prefix so the next turn re-reads it from cache.
   const last = messages[messages.length - 1];
   if (last && typeof last.content === 'string') {
-    last.content = [{ type: 'text', text: last.content, cache_control: { type: 'ephemeral' } }];
+    const titles = new Map(materials.map((m) => [m.id, m.title]));
+    const text = passages.length > 0 ? `${passagesBlock(passages, titles)}\n\n---\nThe student says:\n${last.content}` : last.content;
+    last.content = [{ type: 'text', text, cache_control: { type: 'ephemeral' } }];
   }
 
-  const materials = await getMaterials(persona.material_ids, scope);
-  const system = personaSystem(persona, materials, studentName);
+  const system = personaSystem(persona, materials, studentName, mode);
   const model = modelFor(persona);
 
   const client = getAnthropic();
   const t0 = Date.now();
-  const stream = client.messages.stream({ model, max_tokens: 1024, system, messages });
+  const stream = client.messages.stream({ model, max_tokens: TURN_MAX_TOKENS, system, messages, ...turnOptionsFor(model) });
 
   let assistantText = '';
   for await (const event of stream) {
@@ -361,7 +431,8 @@ export async function streamPersonaReply(params: {
   } catch {
     // stream errored mid-flight; the partial reply is already persisted
   }
-  return { assistantText, refused };
+  const quotes = materials.length > 0 && assistantText ? checkQuotes(assistantText, materials) : null;
+  return { assistantText, refused, quotes, passages: passages.length };
 }
 
 // ─── Draft from existing instructions ───────────────────────────────────────
