@@ -8,7 +8,7 @@ import { query } from './db.js';
 
 // USD per 1M tokens: input, output, cache read, cache write.
 // Update when Anthropic's pricing changes; unknown models record cost 0.
-const MODEL_PRICES: Record<string, { input: number; output: number; cacheRead: number; cacheWrite: number }> = {
+export const MODEL_PRICES: Record<string, { input: number; output: number; cacheRead: number; cacheWrite: number }> = {
   'claude-opus-5-5':   { input: 4,    output: 20,   cacheRead: 0.2,   cacheWrite: 5 },
   'claude-opus-5':     { input: 5,    output: 25,   cacheRead: 0.5,   cacheWrite: 6.25 },
   'claude-opus-4-8':   { input: 5,    output: 25,   cacheRead: 0.5,   cacheWrite: 6.25 },

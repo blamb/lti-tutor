@@ -183,7 +183,7 @@ Per-course settings also hold a course level (ABE, undergraduate, graduate), a d
 ## Architecture
 
 - **LTI 1.3** via [`ltijs`](https://github.com/Cvmcosta/ltijs) (Express-based), Postgres-backed. Dynamic registration, deep linking, Assignment & Grade Services.
-- **Two tools, one core.** This repository builds two LTI tools: **LTI Tutor** (this document) and **Persona Chat** (persona-based conversations: historical thinkers, simulated clients, role-play partners). They share `src/core` (LTI provider, materials and importers, Moodle course import and sync, model client, cost tracking) and are deployed separately, each with its own database and tool registration; `APP=tutor` (default) or `APP=persona` picks which one a process runs.
+- **Two tools, one core.** This repository builds two LTI tools: **LTI Tutor** (this document) and **Persona Chat** (persona-based conversations: historical thinkers, simulated clients, role-play partners). Persona Chat is documented in [docs/PERSONA-CHAT.md](docs/PERSONA-CHAT.md). They share `src/core` (LTI provider, materials and importers, Moodle course import and sync, model client, cost tracking) and are deployed separately, each with its own database and tool registration; `APP=tutor` (default) or `APP=persona` picks which one a process runs.
 - **Backend** TypeScript + Node 20+, Postgres for app data. Migrations: `src/core/migrations` then the app's own (`src/tutor/migrations`), applied in that order by `npm run db:migrate`.
 - **Frontend** one HTML file served by the launch handler; no build step. Markdown via marked + DOMPurify, served from the tool itself at `/vendor/…` and loaded lazily.
 - **AI** Anthropic Claude through the official SDK, at api.anthropic.com or any Anthropic-compatible endpoint (`ANTHROPIC_BASE_URL`). Models per function from env. System prompt order is rules (one fixed string per delivery variant) → materials (cached) → brief + profile (cached) → progress note, so a turn mid-tutorial re-reads the materials from cache.
@@ -222,9 +222,13 @@ src/
     server/grades.ts       AGS completion passback
     migrations/001_init.sql … 010_moodle_ws.sql
     web/launch.html        the single-page frontend
-  persona/                 Persona Chat (scaffold; authoring and conversations are the next phases)
-    server/index.ts, lti.ts, routes.ts, env.ts
-    migrations/
+  persona/                 Persona Chat: see docs/PERSONA-CHAT.md
+    server/personas.ts     the persona model, prompt assembly, conversations, the AI draft; unit tests alongside
+    server/templates.ts    templates: standing rules, field hints, seeds
+    server/routes.ts       /api/* (student + designer + deep-link response)
+    server/lti.ts, index.ts, env.ts
+    fixtures/              the two reference personas (Melissa Chang, Tagore); seed.ts loads them
+    migrations/001_personas.sql
     web/launch.html
 ```
 

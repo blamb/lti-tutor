@@ -9,7 +9,7 @@
     "db:migrate:persona": "APP=persona tsx src/migrate.ts",
     "dev": "tsx watch src/tutor/server/index.ts",
     "dev:persona": "APP=persona tsx watch src/persona/server/index.ts",
-    "build": "rm -rf dist && tsc -p tsconfig.build.json && cp -r src/core/migrations dist/core/migrations && cp -r src/tutor/migrations dist/tutor/migrations && cp -r src/tutor/web dist/tutor/web && cp -r src/persona/migrations dist/persona/migrations && cp -r src/persona/web dist/persona/web",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && cp -r src/core/migrations dist/core/migrations && cp -r src/tutor/migrations dist/tutor/migrations && cp -r src/tutor/web dist/tutor/web && cp -r src/persona/migrations dist/persona/migrations && cp -r src/persona/web dist/persona/web && cp -r src/persona/fixtures dist/persona/fixtures",
     "start": "npm run build && node dist/start.js",
     "start:persona": "APP=persona npm start",
     "test": "LTI_TOOL_URL=http://localhost:3000 LTI_COOKIE_SECRET=test DATABASE_URL=postgres://localhost:5432/unused tsx --test \"src/**/*.test.ts\"",

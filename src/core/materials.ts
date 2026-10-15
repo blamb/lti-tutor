@@ -86,7 +86,7 @@ export async function getMaterials(ids: number[], ctx: Scope): Promise<Material[
   return ids.map((id) => byId.get(id)).filter((m): m is Material => !!m);
 }
 
-export async function createMaterial(ctx: Scope, input: MaterialInput, createdBy: number): Promise<Material> {
+export async function createMaterial(ctx: Scope, input: MaterialInput, createdBy: number | null): Promise<Material> {
   const rows = await query<Material>(
     `insert into material (lti_iss, lti_context_id, title, body, source_url, license, attribution, role, unit, unit_order, source_key, created_by)
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *`,
