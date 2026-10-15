@@ -10,7 +10,7 @@
  *     name that Moodle re-sends on every launch anyway.
  */
 
-import { query } from './db.js';
+import { query } from '../../core/db.js';
 import { env } from './env.js';
 import type { CourseCtx } from './courses.js';
 

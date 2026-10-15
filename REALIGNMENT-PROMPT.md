@@ -1,3 +1,5 @@
+> Historical: the brief the realignment was built from (October 2026). Paths below predate the split into `src/core`, `src/tutor` and `src/persona`; `src/server/x.ts` is now `src/tutor/server/x.ts` or `src/core/x.ts`, and `src/web/launch.html` is `src/tutor/web/launch.html`.
+
 # Realign LTI Tutor for TRU: one tool across the TRUFlex delivery modes
 
 You are working in the LTI Tutor repository (TypeScript, Node 20, Express via ltijs, Postgres, single-page frontend in `src/web/launch.html`, Anthropic SDK). Read `README.md`, `src/server/tutorials.ts`, `src/server/routes.ts`, `src/server/migrations/001_init.sql` and `src/web/launch.html` before changing anything.

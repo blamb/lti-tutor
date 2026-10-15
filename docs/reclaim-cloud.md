@@ -40,11 +40,25 @@ Environment name `lti-tutor` → `https://lti-tutor.ca.reclaim.cloud`.
 3. After adding the two secrets, **Apply** in the Variables dialog, then **Restart** the Application Servers layer. (Done 2026-10-13; `/healthz` answered `{"status":"ok","env":"production"}`.) Note that with `NODE_ENV=production` npm skips devDependencies, which is why `typescript`, `tsx` and the `@types/*` packages live in `dependencies`. `npm start` builds, applies the migrations and starts; `https://lti-tutor.ca.reclaim.cloud/healthz` should answer `{"status":"ok"}` within a minute. The node's **Log** (`nodejs.log`) shows the install, build and start output.
 4. Register the tool in Moodle: *Site administration → Plugins → External tool → Manage tools → Dynamic registration* with `https://lti-tutor.ca.reclaim.cloud/register`.
 
+## A second environment for Persona Chat
+
+The repository also builds Persona Chat. It deploys exactly like the tutor, from the same GitHub repository and branch, as its own environment (`persona-chat` → `https://persona-chat.ca.reclaim.cloud`) with its own PostgreSQL node, so the two tools never share data or a registration. The only differences in the Variables dialog:
+
+| Variable | Value |
+|---|---|
+| `APP` | `persona` (what `npm start` runs; unset means the tutor) |
+| `LTI_TOOL_URL` | `https://persona-chat.ca.reclaim.cloud` |
+| `TOOL_NAME` | `Persona Chat` |
+| `DATABASE_URL` | that environment's PostgreSQL node |
+| `PERSONA_MODEL` | optional; the default model for new personas (instructors choose per persona) |
+
+`TUTOR_MODEL` is not read by Persona Chat. Register it in Moodle as a second tool with `https://persona-chat.ca.reclaim.cloud/register`, and apply the same private-network routing below if Moodle is on the same account.
+
 ## Moodle on the same Reclaim account: private-network routing
 
 Reclaim's containers cannot reach the shared load balancer's public addresses ("no route to host"), and inside the account every `*.ca.reclaim.cloud` name resolves to the node's private address, where only plain HTTP is served (TLS ends at the load balancer). Two consequences for an LMS hosted on the same account, and their fixes:
 
-1. **Tool → Moodle** (OpenID configuration, dynamic registration, keyset, token and grade endpoints): set the variable `PLATFORM_HTTP_HOSTS=moodbox.ca.reclaim.cloud` on the application layer. `src/server/outbound.ts` then sends server-side requests to that host over internal HTTP, keeping the hostname, path and Host header. Done for `lti-tutor`.
+1. **Tool → Moodle** (OpenID configuration, dynamic registration, keyset, token and grade endpoints): set the variable `PLATFORM_HTTP_HOSTS=moodbox.ca.reclaim.cloud` on the application layer. `src/core/outbound.ts` then sends server-side requests to that host over internal HTTP, keeping the hostname, path and Host header. Done for `lti-tutor`.
 2. **Moodle → tool** (Moodle fetches the tool's public keyset to validate deep-linking responses and token requests): after dynamic registration, edit the tool in Moodle (*Manage tools → the tool → Edit*) and change **Public keyset** from `https://lti-tutor.ca.reclaim.cloud/keys` to `http://lti-tutor.ca.reclaim.cloud/keys`. Moodle then reaches the tool node over internal HTTP; the launcher redirects port 80 to the app. Everything the learner's browser touches stays HTTPS.
 
 A Moodle on another host (e.g. TRU's production Moodle) needs neither change.

@@ -3,7 +3,7 @@
 -- One row per course (platform issuer + LTI course id). A course with no row
 -- behaves as TRUFlex 3 (on campus, scheduled), which is what the tool did
 -- before this table existed. The raw number is interpreted only by
--- deliveryOf() in src/server/delivery.ts.
+-- deliveryOf() in src/tutor/server/delivery.ts.
 
 create table if not exists course_settings (
   lti_iss         text        not null,

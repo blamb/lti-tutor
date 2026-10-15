@@ -12,7 +12,7 @@
  */
 
 import { fitMaterial, extractFromFile } from './importers.js';
-import type { MaterialRole } from './tutorials.js';
+import type { MaterialRole } from './materials.js';
 
 /** Attached files larger than this are listed in the preview but not read. */
 export const ATTACHMENT_MAX_BYTES = 40 * 1024 * 1024;

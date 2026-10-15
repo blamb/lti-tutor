@@ -27,43 +27,33 @@
 
 import type Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
-import { query } from './db.js';
-import { getAnthropic, GEN_MODEL, TUTOR_MODEL } from './anthropic.js';
-import { recordApiCall, type Attribution } from './costs.js';
-import type { Student } from './students.js';
+import { query } from '../../core/db.js';
+import { getAnthropic, GEN_MODEL } from '../../core/anthropic.js';
+import { env } from './env.js';
+import { appendTurn, getSessionTurns, type Turn } from '../../core/conversations.js';
+import {
+  type Material, type MaterialRole, type Scope,
+  MaterialInput, MATERIAL_ROLES, MATERIAL_ROLE_LABELS,
+  listMaterials, getMaterials, createMaterial, upsertMaterialBySourceKey, existingSourceKeys, updateMaterial,
+  deleteMaterial as deleteMaterialRow,
+} from '../../core/materials.js';
+import { recordApiCall, type Attribution } from '../../core/costs.js';
+import type { Student } from '../../core/students.js';
 import { COURSE_LEVEL_LABELS, type CourseCtx } from './courses.js';
 import type { Delivery } from './delivery.js';
 import { KINDS, TUTORIAL_KINDS, stageFor, type TutorialKind } from './kinds.js';
-import { jsonCall, textOf } from './llm.js';
+import { jsonCall, textOf } from '../../core/llm.js';
 import { listLearnerModel, learnerModelBlock, recallCandidates, recallCandidatesBlock, updateLearnerModelFromSummary } from './learner.js';
 
 export type { CourseCtx } from './courses.js';
+// Materials live in core (both apps store them the same way); re-exported so
+// the tutor's routes and prompts keep one import.
+export type { Material, MaterialRole };
+export { MaterialInput, MATERIAL_ROLES, MATERIAL_ROLE_LABELS, listMaterials, getMaterials, createMaterial, upsertMaterialBySourceKey, existingSourceKeys, updateMaterial, getSessionTurns };
+
+const TUTOR_MODEL = env.TUTOR_MODEL;
 
 // ─── Types ──────────────────────────────────────────────────────────────────
-
-export interface Material {
-  id: number;
-  lti_iss: string;
-  lti_context_id: string;
-  title: string;
-  body: string;
-  /** Where it came from (URL import or upload); empty for pasted text. */
-  source_url: string;
-  /** e.g. "CC BY 4.0"; empty if unknown. */
-  license: string;
-  /** Who to credit, e.g. "Concepts of Biology by …, CC BY 4.0". */
-  attribution: string;
-  /** What the material is, so the tutor and the draft can use it for what it is (see MATERIAL_ROLES). */
-  role: MaterialRole;
-  /** The course unit (section) it came from, for grouping; '' for hand-added materials. */
-  unit: string;
-  unit_order: number;
-  /** Stable identity for imported materials (e.g. "moodle_backup:page-412"), so a re-import updates in place. */
-  source_key: string;
-  created_by: number | null;
-  created_at: string;
-  updated_at: string;
-}
 
 export type TutorialStatus = 'draft' | 'published' | 'archived';
 
@@ -217,56 +207,20 @@ export interface TutorialSession {
   grade_error: string | null;
 }
 
-interface Turn {
-  id: number;
-  role: 'user' | 'assistant';
-  content: string;
-  ts: string;
-}
-
 /** Hidden user turn that opens a tutorial (the API needs a user turn first). */
 export const START_MARKER = '[Tutorial start]';
 
 // ─── Validation ─────────────────────────────────────────────────────────────
 
-import { MATERIAL_MAX_CHARS, GROUNDING_MAX_CHARS } from './limits.js';
+import { MATERIAL_MAX_CHARS, GROUNDING_MAX_CHARS } from '../../core/limits.js';
 export { MATERIAL_MAX_CHARS, GROUNDING_MAX_CHARS };
 
-/**
- * What a material is. Readings are the default; the other roles tell the
- * tutor and the AI draft to use the material for what it is: the course's
- * own activities and study questions become probes before the model invents
- * any, and an assignment description is the task itself, never a source.
- * A course import sets the role from the course structure; by hand it is a
- * selector on the material.
- */
-export const MATERIAL_ROLES = ['reading', 'activities', 'assignment', 'other'] as const;
-export type MaterialRole = (typeof MATERIAL_ROLES)[number];
-export const MATERIAL_ROLE_LABELS: Record<MaterialRole, string> = {
-  reading: 'Reading, notes or transcript',
-  activities: 'Activities and study questions',
-  assignment: 'Assignment description and criteria',
-  other: 'Other',
-};
 const MATERIAL_ROLE_NOTES: Record<MaterialRole, string> = {
   reading: '',
   activities: "the course's own activities and study questions: use these as probes, adapted as needed, before inventing your own, and say which one you are drawing on",
   assignment: 'the assignment description and its criteria: this is the task the student must do themselves, not a source to teach from, and nothing you say may be submittable as part of it',
   other: '',
 };
-
-export const MaterialInput = z.object({
-  title: z.string().trim().min(1).max(160),
-  body: z.string().trim().min(1).max(MATERIAL_MAX_CHARS),
-  source_url: z.string().trim().max(2000).default(''),
-  license: z.string().trim().max(200).default(''),
-  attribution: z.string().trim().max(500).default(''),
-  role: z.enum(MATERIAL_ROLES).default('reading'),
-  unit: z.string().trim().max(200).default(''),
-  unit_order: z.number().int().min(0).max(10000).default(0),
-  source_key: z.string().trim().max(200).default(''),
-});
-export type MaterialInput = z.infer<typeof MaterialInput>;
 
 export const TutorialInput = z.object({
   title: z.string().trim().min(1).max(160),
@@ -300,82 +254,17 @@ export type ProfileInput = z.infer<typeof ProfileInput>;
 
 // ─── Materials ──────────────────────────────────────────────────────────────
 
-export async function listMaterials(ctx: CourseCtx): Promise<Material[]> {
-  return query<Material>(
-    `select * from material where lti_iss = $1 and lti_context_id = $2 order by unit_order, created_at`,
-    [ctx.iss, ctx.contextId]
-  );
-}
-
-export async function getMaterials(ids: number[], ctx: CourseCtx): Promise<Material[]> {
-  if (ids.length === 0) return [];
-  const rows = await query<Material>(
-    `select * from material where id = any($1::bigint[]) and lti_iss = $2 and lti_context_id = $3`,
-    [ids, ctx.iss, ctx.contextId]
-  );
-  // Preserve the tutorial's ordering.
-  const byId = new Map(rows.map((m) => [m.id, m]));
-  return ids.map((id) => byId.get(id)).filter((m): m is Material => !!m);
-}
-
-export async function createMaterial(ctx: CourseCtx, input: MaterialInput, createdBy: number): Promise<Material> {
-  const rows = await query<Material>(
-    `insert into material (lti_iss, lti_context_id, title, body, source_url, license, attribution, role, unit, unit_order, source_key, created_by)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *`,
-    [ctx.iss, ctx.contextId, input.title, input.body, input.source_url, input.license, input.attribution, input.role, input.unit, input.unit_order, input.source_key, createdBy]
-  );
-  return rows[0]!;
-}
-
-/** Create, or update in place when a material with the same source_key already exists in this course. */
-export async function upsertMaterialBySourceKey(ctx: CourseCtx, input: MaterialInput, createdBy: number): Promise<{ material: Material; updated: boolean }> {
-  if (input.source_key) {
-    // Keys were "moodle_backup:…" before the live sync existed; match those too.
-    const keys = [input.source_key, ...(input.source_key.startsWith('moodle:') ? [input.source_key.replace(/^moodle:/, 'moodle_backup:')] : [])];
-    const existing = await query<{ id: number }>(
-      `select id from material where lti_iss = $1 and lti_context_id = $2 and source_key = any($3::text[]) order by id limit 1`,
-      [ctx.iss, ctx.contextId, keys]
-    );
-    if (existing[0]) {
-      const material = await updateMaterial(existing[0].id, ctx, input);
-      if (material) return { material, updated: true };
-    }
-  }
-  return { material: await createMaterial(ctx, input, createdBy), updated: false };
-}
-
-/** Source keys already present in this course, so a preview can say which items will update rather than add. */
-export async function existingSourceKeys(ctx: CourseCtx): Promise<Set<string>> {
-  const rows = await query<{ source_key: string }>(
-    `select source_key from material where lti_iss = $1 and lti_context_id = $2 and source_key <> ''`,
-    [ctx.iss, ctx.contextId]
-  );
-  return new Set(rows.map((r) => r.source_key.replace(/^moodle_backup:/, 'moodle:')));
-}
-
-export async function updateMaterial(id: number, ctx: CourseCtx, input: MaterialInput): Promise<Material | null> {
-  const rows = await query<Material>(
-    `update material set title = $4, body = $5, source_url = $6, license = $7, attribution = $8, role = $9, unit = $10, unit_order = $11,
-       source_key = case when $12 = '' then source_key else $12 end, updated_at = now()
-     where id = $1 and lti_iss = $2 and lti_context_id = $3 returning *`,
-    [id, ctx.iss, ctx.contextId, input.title, input.body, input.source_url, input.license, input.attribution, input.role, input.unit, input.unit_order, input.source_key]
-  );
-  return rows[0] ?? null;
-}
-
-export async function deleteMaterial(id: number, ctx: CourseCtx): Promise<boolean> {
-  const rows = await query<{ id: number }>(
-    `delete from material where id = $1 and lti_iss = $2 and lti_context_id = $3 returning id`,
-    [id, ctx.iss, ctx.contextId]
-  );
-  if (rows.length) {
+/** Delete a material and drop it from every tutorial in the course that attached it. */
+export async function deleteMaterial(id: number, ctx: Scope): Promise<boolean> {
+  const deleted = await deleteMaterialRow(id, ctx);
+  if (deleted) {
     await query(
       `update tutorial set material_ids = array_remove(material_ids, $1::bigint)
        where lti_iss = $2 and lti_context_id = $3 and $1 = any(material_ids)`,
       [id, ctx.iss, ctx.contextId]
     );
   }
-  return rows.length > 0;
+  return deleted;
 }
 
 /** The one-line note under a material's heading for roles the model must treat specially. */
@@ -568,17 +457,6 @@ export async function startTutorialSession(
     [tutorial.id, studentId, sess[0]!.id]
   );
   return rows[0]!;
-}
-
-export async function getSessionTurns(sessionId: number): Promise<Turn[]> {
-  return query<Turn>(
-    `select id, role, content, ts from tutor_turn where session_id = $1 order by ts asc, id asc`,
-    [sessionId]
-  );
-}
-
-async function appendTurn(sessionId: number, role: 'user' | 'assistant', content: string) {
-  await query(`insert into tutor_turn (session_id, role, content) values ($1,$2,$3)`, [sessionId, role, content]);
 }
 
 // ─── The tutorial conversation ──────────────────────────────────────────────

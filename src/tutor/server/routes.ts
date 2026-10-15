@@ -44,22 +44,22 @@ import type { Request, Response } from 'express';
 import multer from 'multer';
 import os from 'node:os';
 import fs from 'node:fs';
-import { parseMoodleBackup, BACKUP_MAX_BYTES } from './moodle-backup.js';
-import { buildPreview } from './course-model.js';
-import { wsClient, checkConnection, fetchCourseModel, WS_FUNCTIONS, WsError } from './moodle-ws.js';
+import { parseMoodleBackup, BACKUP_MAX_BYTES } from '../../core/moodle-backup.js';
+import { buildPreview } from '../../core/course-model.js';
+import { wsClient, checkConnection, fetchCourseModel, WS_FUNCTIONS, WsError } from '../../core/moodle-ws.js';
 import type { DeepLinkContentItem, IdToken } from 'ltijs';
 import { z } from 'zod';
 import { lti, mintFullscreenNonce } from './lti.js';
 import { env } from './env.js';
-import { isTeacher } from './auth.js';
-import { tokenOf, studentFromToken, attr, gateTeacher } from './reqctx.js';
+import { isTeacher } from '../../core/auth.js';
+import { tokenOf, studentFromToken, attr, gateTeacher } from '../../core/reqctx.js';
 import { courseCtxFromToken, CourseSettingsInput, upsertCourseSettings, courseCtxFromSettings, COURSE_LEVEL_LABELS, defaultAiDisclosure, type CourseCtx, getMoodleWsToken, setMoodleWsToken, clearMoodleWsToken, touchMoodleWs,
 } from './courses.js';
 import { deleteMyData } from './retention.js';
 import { TRUFLEX_MODES, deliveryLabels } from './delivery.js';
 import { isTutorialKind, kindCatalog, titledForKind, KINDS } from './kinds.js';
 import { listLearnerModel, deleteLearnerEntry, courseConceptReport, courseConceptsByWeek } from './learner.js';
-import { importFromUrl, extractFromFile, fitMaterial, ImportError, MAX_BOOK_CHAPTERS } from './importers.js';
+import { importFromUrl, extractFromFile, fitMaterial, ImportError, MAX_BOOK_CHAPTERS } from '../../core/importers.js';
 import { ensurePrintScript, printScriptHtml, personalDebriefHtml, buildCoursePack } from './print.js';
 import {
   TutorialInput, ProfileInput, MaterialInput, START_MARKER,
@@ -73,7 +73,7 @@ import {
 } from './tutorials.js';
 import { buildHomeProgress } from './progress.js';
 import { postCompletionGrade, type GradeResult } from './grades.js';
-import { query } from './db.js';
+import { query } from '../../core/db.js';
 
 // The course-import commit sends every selected material's text back in one
 // request (up to 300 materials of 200k characters), so it gets its own limit;

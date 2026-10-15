@@ -12,7 +12,7 @@ let client: Anthropic | null = null;
 
 export function getAnthropic(): Anthropic {
   if (!env.ANTHROPIC_API_KEY) {
-    throw new Error('ANTHROPIC_API_KEY is not set. Add it to .env to use the tutor.');
+    throw new Error('ANTHROPIC_API_KEY is not set. Add it to .env to use the model.');
   }
   if (!client) {
     client = new Anthropic({
@@ -26,5 +26,5 @@ export function getAnthropic(): Anthropic {
   return client;
 }
 
-export const TUTOR_MODEL = env.TUTOR_MODEL;
+/** Summaries, drafts, debriefs and other structured calls. Conversation models are per app. */
 export const GEN_MODEL = env.GEN_MODEL;

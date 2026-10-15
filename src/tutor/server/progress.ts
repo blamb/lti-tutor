@@ -12,7 +12,7 @@
  * Everything keys on the delivery booleans, never on the TRUFlex number.
  */
 
-import { query } from './db.js';
+import { query } from '../../core/db.js';
 import type { CourseCtx } from './courses.js';
 import type { Tutorial, TutorialSession } from './tutorials.js';
 

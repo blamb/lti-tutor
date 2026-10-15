@@ -1,6 +1,6 @@
 # Alignment with TRU's delivery modes
 
-How LTI Tutor serves the three pacing categories that TRU's ten TRUFlex modes collapse into (`src/server/delivery.ts`). In all three: the tool never grades an assessment (practice sessions give feedback and refuse marks; gradebook passback is completion only, 1/1) and never generates a course (materials come from the instructor; the AI drafts a brief the instructor edits).
+How LTI Tutor serves the three pacing categories that TRU's ten TRUFlex modes collapse into (`src/tutor/server/delivery.ts`). In all three: the tool never grades an assessment (practice sessions give feedback and refuse marks; gradebook passback is completion only, 1/1) and never generates a course (materials come from the instructor; the AI drafts a brief the instructor edits).
 
 ## Self-paced (TRUFlex 9)
 
@@ -48,7 +48,7 @@ The Paski sequence as built: live lecture, one-on-one tutorial, group debrief ru
 
 ## Every behaviour that differs by mode
 
-The raw TRUFlex number is interpreted only in `deliveryOf()` (`src/server/delivery.ts:70`). Everything else keys on `pacing` or the four booleans. Line numbers are as of the Phase 8 commit.
+The raw TRUFlex number is interpreted only in `deliveryOf()` (`src/tutor/server/delivery.ts:70`). Everything else keys on `pacing` or the four booleans. Line numbers are as of the Phase 8 commit.
 
 | Switch | Behaviour | Where |
 |---|---|---|

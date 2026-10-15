@@ -1,6 +1,6 @@
 # Local dev stack: a Moodle to launch from, and Postgres for the tool.
 #   moodle    → http://localhost:8080   (admin: user / bitnami)
-#   postgres  → localhost:5432          (postgres / postgres, db lti_tutor)
+#   postgres  → localhost:5432          (postgres / postgres, dbs lti_tutor and persona_chat)
 # The tool itself runs on the host (npm run dev) and is exposed to Moodle via
 # an ngrok static domain (LTI_TOOL_URL in .env).
 #
@@ -62,6 +62,8 @@ services:
       - "5432:5432"
     volumes:
       - app_db_data:/var/lib/postgresql/data
+      # Creates the second tool's database on first start (fresh volume only).
+      - ./docker/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]

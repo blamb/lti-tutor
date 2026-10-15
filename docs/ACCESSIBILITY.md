@@ -1,4 +1,4 @@
-# Accessibility audit: `src/web/launch.html`
+# Accessibility audit: `src/tutor/web/launch.html`
 
 Audited against WCAG 2.1 AA and the [BCcampus Accessibility Toolkit](https://opentextbc.ca/accessibilitytoolkit/) (2nd edition) in Phase 6 of the TRU realignment, October 2026. The goal set in the brief is an experience that needs few or no accommodations, because self-paced Open Learning learners may have no one to ask.
 

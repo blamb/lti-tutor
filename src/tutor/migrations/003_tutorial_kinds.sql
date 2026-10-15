@@ -1,5 +1,5 @@
 -- Phase 2: tutorial kinds. The original behaviour is 'concept'; the other
--- five map to TRU's engagement types (see src/server/kinds.ts).
+-- five map to TRU's engagement types (see src/tutor/server/kinds.ts).
 
 alter table tutorial add column if not exists kind text not null default 'concept'
   check (kind in ('readiness', 'preparation_check', 'concept', 'practice', 'reflection', 'recall'));

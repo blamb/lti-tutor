@@ -1,13 +1,14 @@
 /**
- * Server entry. Loads env, wires LTI handlers and routes, deploys ltijs
- * (which owns the Express app). Migrations run via `npm run db:migrate`
- * (and before `npm start` in production).
+ * The tutor's server entry. Loads env, wires LTI handlers and routes,
+ * deploys ltijs (which owns the Express app). Migrations run via
+ * `npm run db:migrate` (and in src/start.ts before `npm start` serves).
  */
 
-import './outbound.js'; // first: routes listed platform hosts over internal HTTP before any client loads
+import '../../core/outbound.js'; // first: routes listed platform hosts over internal HTTP before any client loads
 import { env } from './env.js';
 import { lti } from './lti.js';
-import { pool } from './db.js';
+import { pool } from '../../core/db.js';
+import { startupBanner } from '../../core/lti-provider.js';
 import './routes.js'; // side-effect: registers /api/* routes on lti.app
 import { scheduleRetention } from './retention.js';
 
@@ -29,11 +30,7 @@ async function main(): Promise<void> {
       `  ADMIN_TOKEN=${env.ADMIN_TOKEN ? 'set' : 'MISSING'}  NODE_ENV=${env.NODE_ENV}` +
       `  TUTOR_MODEL=${env.TUTOR_MODEL}  GEN_MODEL=${env.GEN_MODEL}  DATA_RETENTION_DAYS=${env.DATA_RETENTION_DAYS}`
   );
-  console.log(`\n${env.TOOL_NAME} is live`);
-  console.log(`  Local:     http://localhost:${env.PORT}`);
-  console.log(`  Public:    ${env.LTI_TOOL_URL}`);
-  console.log(`  Register:  ${env.LTI_TOOL_URL}/register   (Moodle: Manage tools → Dynamic registration)`);
-  console.log(`  Keyset:    ${env.LTI_TOOL_URL}/keys\n`);
+  console.log(startupBanner(env.TOOL_NAME));
 }
 
 main().catch((e) => {

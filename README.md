@@ -75,7 +75,7 @@ Every tutorial has a **kind**, chosen in the editor. The kind sets the stage tem
 | Recall | 8 | retrieve → connect → wrap-up | 6–24 exchanges |
 | Assignment start | 4, 9 | unpack → connect → plan → first step → wrap-up | 6–24 exchanges |
 
-Every summary carries `mastery`, `understood`, `sticking_points`, `next_step` and `student_note`, so the report and the learner model treat all kinds alike; each kind adds its own fields (readiness: prior knowledge and misconceptions found; practice: strengths, what to improve, whether they revised; recall: retained and faded; assignment start: understanding of the task, the plan and the first step in the learner's words, and the sources they drew on). The definitions live in `src/server/kinds.ts`.
+Every summary carries `mastery`, `understood`, `sticking_points`, `next_step` and `student_note`, so the report and the learner model treat all kinds alike; each kind adds its own fields (readiness: prior knowledge and misconceptions found; practice: strengths, what to improve, whether they revised; recall: retained and faded; assignment start: understanding of the task, the plan and the first step in the learner's words, and the sources they drew on). The definitions live in `src/tutor/server/kinds.ts`.
 
 ### Starting an assignment
 
@@ -87,12 +87,12 @@ The brief for one is built from three materials: the assignment description (mar
 
 ## Materials from open sources
 
-The tool is for open educational resources, which TRU Open Learning uses wherever possible, so the materials view says so and links to the [BC Open Collection](https://collection.bccampus.ca/), [TRU Open Press](https://openpress.trubox.ca/) and the [Open Textbook Library](https://open.umn.edu/opentextbooks). Three ways in, all landing as plain text with `source_url`, `license` and `attribution` (`src/server/importers.ts`):
+The tool is for open educational resources, which TRU Open Learning uses wherever possible, so the materials view says so and links to the [BC Open Collection](https://collection.bccampus.ca/), [TRU Open Press](https://openpress.trubox.ca/) and the [Open Textbook Library](https://open.umn.edu/opentextbooks). Three ways in, all landing as plain text with `source_url`, `license` and `attribution` (`src/core/importers.ts`):
 
 - **Paste text**, as before.
 - **Import by URL.** The server fetches the page, strips navigation, headers, footers and scripts, keeps headings and lists, and reads a Creative Commons licence link if there is one. If the site is Pressbooks (BCcampus open textbooks are), the tool uses the Pressbooks REST API (`/wp-json/pressbooks/v2/`): a chapter URL imports that chapter with the book's title, authors and licence; ticking **whole book** imports every chapter as its own material (capped at 80). Only public http(s) URLs are fetched; private and local addresses are refused.
 - **Upload a file**: `.txt`, `.md`, `.html`, `.docx` (via mammoth) or `.pdf` (via unpdf, text layer only; scanned PDFs need OCR first). Text over the material limit is cut and the instructor is told how long the original was.
-- **Import the Moodle course** from a backup (`src/server/moodle-backup.ts`), or **sync it live** through Moodle web services (`src/server/moodle-ws.ts`). See below.
+- **Import the Moodle course** from a backup (`src/core/moodle-backup.ts`), or **sync it live** through Moodle web services (`src/core/moodle-ws.ts`). See below.
 
 ### Importing the course from a backup
 
@@ -109,7 +109,7 @@ The instructor reviews the preview, fixes any title or *what it is* guess, untic
 
 ### Live sync through Moodle web services
 
-Where the Moodle site allows it, a course can be connected directly. Under **Course settings → Moodle connection** the instructor pastes a web-service token; the tool checks who it belongs to (`core_webservice_get_site_info`), that its service allows the functions it needs, and that the account can read this course, then stores it encrypted (AES-256-GCM under `TOKEN_SECRET`, falling back to `LTI_COOKIE_SECRET`; `src/server/secrets.ts`). **Sync from Moodle** on the materials tab then reads the course as it is right now and shows the same preview as the backup import, built from the same model (`src/server/course-model.ts`), so the two paths produce identical materials and update each other's.
+Where the Moodle site allows it, a course can be connected directly. Under **Course settings → Moodle connection** the instructor pastes a web-service token; the tool checks who it belongs to (`core_webservice_get_site_info`), that its service allows the functions it needs, and that the account can read this course, then stores it encrypted (AES-256-GCM under `TOKEN_SECRET`, falling back to `LTI_COOKIE_SECRET`; `src/core/secrets.ts`). **Sync from Moodle** on the materials tab then reads the course as it is right now and shows the same preview as the backup import, built from the same model (`src/core/course-model.ts`), so the two paths produce identical materials and update each other's.
 
 What the sync reads: sections and modules (`core_course_get_contents`), pages, resources with their files, URLs, assignments with dates and rubric (`mod_assign_get_assignments`, `core_grading_get_definitions`), books (chapters through the file endpoint), forum prompts, lesson descriptions, glossaries with entries. Files come through `webservice/pluginfile.php` with the token. Only read functions are used; nothing touches users, grades, submissions or posts, and nothing writes to Moodle. A function the token's service does not allow is skipped with a note in the preview rather than failing the sync.
 
@@ -123,7 +123,7 @@ The tutor's rules ask it to name the material it is drawing on (title and, where
 
 ## Offline and low-bandwidth
 
-Nothing conversational works without a connection. What the tool can do is turn the same briefs into printable, self-contained artifacts so an offline learner gets the same learning design on paper (`src/server/print.ts`):
+Nothing conversational works without a connection. What the tool can do is turn the same briefs into printable, self-contained artifacts so an offline learner gets the same learning design on paper (`src/tutor/server/print.ts`):
 
 - **Paper version of every session.** One model call turns the brief into a sheet the learner works through alone with a pen, following the same stages: for a tutorial, the opening question, the probes rewritten as questions with ruled space, the misconceptions as "check yourself" prompts, a written teach-back, and the success criteria as a checklist; equivalent structures for readiness and preparation checks, practice (feedback checklist, revise, one more), reflection and recall. Stored in `tutorial_print`, keyed by a hash of the brief, so it regenerates when the brief changes (recorded as `tutorial.print_script`). Learners open it from the **📄 Paper** button on each session; instructors from the editor.
 - **Debriefs as files.** A learner's own debrief downloads as a single HTML file with inline CSS and no JavaScript, and prints cleanly. For the course pack, each material also gets a non-personalised debrief template with space to "make it yours" (`material_debrief_template`, `tutorial.debrief_template`).
@@ -150,7 +150,7 @@ The page is built to need few or no accommodations (WCAG 2.1 AA, BCcampus Access
 
 ## The learner model
 
-After every completed session, one small model call maps the summary onto concept entries for that learner in that course: a short concept name, a status (`secure`, `developing`, `fragile`, `misconception`) and one sentence of evidence (`learner_model` table, `src/server/learner.ts`, recorded in `api_call` as `tutorial.learner_model`). The most recent 40 entries go into every tutorial's system prompt after the profile, inside the cached block, so the tutor knows what this learner has already shown; recall sessions are additionally told which concepts to prioritise (fragile or misconceived first, then longest unseen).
+After every completed session, one small model call maps the summary onto concept entries for that learner in that course: a short concept name, a status (`secure`, `developing`, `fragile`, `misconception`) and one sentence of evidence (`learner_model` table, `src/tutor/server/learner.ts`, recorded in `api_call` as `tutorial.learner_model`). The most recent 40 entries go into every tutorial's system prompt after the profile, inside the cached block, so the tutor knows what this learner has already shown; recall sessions are additionally told which concepts to prioritise (fragile or misconceived first, then longest unseen).
 
 - **Learners** see it as **My learning**: what they have shown they understand, what is still developing, what is worth revisiting, and a mix-up the tutor noticed, each with the date. Plain language throughout, and any entry can be removed.
 - **Instructors** see **Concepts**: counts per concept across the course, no names, with the most fragile or misconceived concepts first. Where the course has fixed dates and a start date (Course settings, or the launch custom parameter `course_start=$CourseSection.timeFrame.begin`), the same data is broken down by week of the course, so the instructor can see what the class is carrying forward.
@@ -161,7 +161,7 @@ After every completed session, one small model call maps the summary onto concep
 
 Every course has a TRUFlex number (1 to 10) in `course_settings`, set by the instructor under **Instructor view → Course settings** (each option shows TRU's one-line description of the mode) or seeded on first launch by an LTI custom parameter `truflex=9` on the activity or course template. New courses default to Flex 3 (on campus, scheduled), which is the behaviour the tool had before modes existed.
 
-The raw number is interpreted in exactly one place, `deliveryOf()` in `src/server/delivery.ts`, which returns three pacing categories and four booleans. Everything else in the codebase keys on the booleans, so a future TRUFlex revision is a one-line change.
+The raw number is interpreted in exactly one place, `deliveryOf()` in `src/tutor/server/delivery.ts`, which returns three pacing categories and four booleans. Everything else in the codebase keys on the booleans, so a future TRUFlex revision is a one-line change.
 
 | pacing | TRUFlex | hasCohort | hasFixedDates | hasLiveSessions | inPerson |
 |---|---|---|---|---|---|
@@ -183,34 +183,49 @@ Per-course settings also hold a course level (ABE, undergraduate, graduate), a d
 ## Architecture
 
 - **LTI 1.3** via [`ltijs`](https://github.com/Cvmcosta/ltijs) (Express-based), Postgres-backed. Dynamic registration, deep linking, Assignment & Grade Services.
-- **Backend** TypeScript + Node 20+, Postgres for app data. Migrations in `src/server/migrations`.
+- **Two tools, one core.** This repository builds two LTI tools: **LTI Tutor** (this document) and **Persona Chat** (persona-based conversations: historical thinkers, simulated clients, role-play partners). They share `src/core` (LTI provider, materials and importers, Moodle course import and sync, model client, cost tracking) and are deployed separately, each with its own database and tool registration; `APP=tutor` (default) or `APP=persona` picks which one a process runs.
+- **Backend** TypeScript + Node 20+, Postgres for app data. Migrations: `src/core/migrations` then the app's own (`src/tutor/migrations`), applied in that order by `npm run db:migrate`.
 - **Frontend** one HTML file served by the launch handler; no build step. Markdown via marked + DOMPurify, served from the tool itself at `/vendor/…` and loaded lazily.
 - **AI** Anthropic Claude through the official SDK, at api.anthropic.com or any Anthropic-compatible endpoint (`ANTHROPIC_BASE_URL`). Models per function from env. System prompt order is rules (one fixed string per delivery variant) → materials (cached) → brief + profile (cached) → progress note, so a turn mid-tutorial re-reads the materials from cache.
 - **Cost tracking** every call writes model, tokens and USD to `api_call`; `/admin/costs?token=…` returns a JSON summary.
 
 ```
-src/server/
-  index.ts        entry: env → LTI → routes → deploy
-  lti.ts          ltijs setup, launch, deep-linking picker, /healthz, /fullscreen, /admin/costs
-  routes.ts       /api/* (student + instructor + deep-link response)
-  delivery.ts     TRUFlex → { pacing, hasCohort, hasFixedDates, hasLiveSessions, inPerson }; unit tests alongside
-  kinds.ts        the six session kinds: stages, rules, summary fields, draft guidance; unit tests alongside
-  courses.ts      course_settings CRUD and the per-request CourseCtx
-  learner.ts      the learner model: update after each session, prompt block, recall candidates, course report
-  progress.ts     the home view's grouping, "suggested next" and nudges, per mode; unit tests alongside
-  retention.ts    nightly transcript pruning (DATA_RETENTION_DAYS) and the learner's delete-my-data action
-  importers.ts    materials by URL (readable text, Pressbooks API) and by file (.txt .md .html .docx .pdf); unit tests alongside
-  print.ts        paper versions of sessions, debrief templates, standalone HTML, the course pack zip
-  llm.ts          shared model-call helpers (JSON calls with schema + retry)
-  tutorials.ts    materials, briefs, profiles, the staged dialogue, summaries, debriefs, AI draft
-  grades.ts       AGS completion passback
-  reqctx.ts       token / student / attribution / instructor gate helpers
-  auth.ts         role detection from LTI claims
-  anthropic.ts    SDK client + model selection
-  costs.ts        price table + api_call recording + summary
-  db.ts, migrate.ts, students.ts
-  migrations/001_init.sql … 007_progression.sql
-src/web/launch.html
+src/
+  start.ts                 `npm start`: migrate, then run the app named by APP (tutor | persona)
+  migrate.ts               `npm run db:migrate`
+  core/                    shared by both tools
+    env.ts                 shared variables, .env / .env.<app> loading; each app adds its own
+    lti-provider.ts        ltijs setup, cookies, /healthz, /fullscreen, /vendor, /admin/costs
+    auth.ts, reqctx.ts     role detection from LTI claims; token / student / attribution helpers
+    students.ts            who launched
+    materials.ts           grounding materials: types, roles, validation, CRUD
+    conversations.ts       session containers and turns
+    importers.ts           materials by URL (readable text, Pressbooks API) and by file (.txt .md .html .docx .pdf); unit tests alongside
+    course-model.ts        one model of a Moodle course from a backup or a live sync, and its preview
+    moodle-backup.ts       .mbz parsing; moodle-ws.ts: Moodle web-services client; unit tests alongside
+    anthropic.ts, llm.ts   SDK client; JSON calls with schema + retry
+    costs.ts               price table + api_call recording + summary
+    secrets.ts, outbound.ts, limits.ts, db.ts, migrate.ts
+    migrations/001_core.sql   student, material, session, tutor_turn, api_call
+  tutor/                   LTI Tutor
+    server/index.ts        entry: env → LTI → routes → deploy
+    server/lti.ts          launch page, deep-linking picker
+    server/routes.ts       /api/* (student + instructor + deep-link response)
+    server/delivery.ts     TRUFlex → { pacing, hasCohort, hasFixedDates, hasLiveSessions, inPerson }; unit tests alongside
+    server/kinds.ts        the seven session kinds: stages, rules, summary fields, draft guidance; unit tests alongside
+    server/courses.ts      course_settings CRUD and the per-request CourseCtx
+    server/learner.ts      the learner model: update after each session, prompt block, recall candidates, course report
+    server/progress.ts     the home view's grouping, "suggested next" and nudges, per mode; unit tests alongside
+    server/retention.ts    nightly transcript pruning (DATA_RETENTION_DAYS) and the learner's delete-my-data action
+    server/print.ts        paper versions of sessions, debrief templates, standalone HTML, the course pack zip
+    server/tutorials.ts    briefs, profiles, the staged dialogue, summaries, debriefs, AI draft
+    server/grades.ts       AGS completion passback
+    migrations/001_init.sql … 010_moodle_ws.sql
+    web/launch.html        the single-page frontend
+  persona/                 Persona Chat (scaffold; authoring and conversations are the next phases)
+    server/index.ts, lti.ts, routes.ts, env.ts
+    migrations/
+    web/launch.html
 ```
 
 ---
@@ -224,7 +239,11 @@ npm install
 cp .env.example .env     # set LTI_COOKIE_SECRET (openssl rand -hex 32), ANTHROPIC_API_KEY, LTI_TOOL_URL
 docker compose up -d     # Moodle (localhost:8080, user/bitnami) + Postgres
 npm run db:migrate
-npm run dev              # the tool, on PORT (default 3000)
+npm run dev              # LTI Tutor, on PORT (default 3000)
+# Persona Chat alongside: copy .env.persona.example to .env.persona (its PORT,
+# DATABASE_URL and LTI_TOOL_URL), then
+npm run db:migrate:persona
+npm run dev:persona
 ngrok http --domain=<your-static-domain> 3000   # or any HTTPS tunnel; LTI_TOOL_URL must match
 ```
 
@@ -246,11 +265,11 @@ Register the tool in Moodle: *Site administration → Plugins → External tool 
 
 ### Deploying
 
-Any Node host with Postgres works. A `railpack.json` is included for Railway. Set `LTI_TOOL_URL`, `DATABASE_URL`, `LTI_COOKIE_SECRET`, `ANTHROPIC_API_KEY`, `NODE_ENV=production` and optionally `ANTHROPIC_BASE_URL` (a sovereign or institutional Anthropic-compatible endpoint), `DATA_RETENTION_DAYS`, `ADMIN_TOKEN`, `TOOL_NAME`, `TUTOR_MODEL`, `GEN_MODEL`. `npm start` runs migrations then the server; `GET /healthz` is an unauthenticated liveness probe.
+Any Node host with Postgres works. A `railpack.json` is included for Railway. Set `LTI_TOOL_URL`, `DATABASE_URL`, `LTI_COOKIE_SECRET`, `ANTHROPIC_API_KEY`, `NODE_ENV=production` and optionally `ANTHROPIC_BASE_URL` (a sovereign or institutional Anthropic-compatible endpoint), `DATA_RETENTION_DAYS`, `ADMIN_TOKEN`, `TOOL_NAME`, `TUTOR_MODEL`, `GEN_MODEL`. `npm start` runs migrations then the server; `GET /healthz` is an unauthenticated liveness probe. A Persona Chat deployment is the same with `APP=persona` set (and its own `DATABASE_URL`, `LTI_TOOL_URL` and `TOOL_NAME`).
 
 ### Models and cost
 
-Defaults are `claude-haiku-4-5` for both functions, the cheapest option that works well at class scale; set `TUTOR_MODEL=claude-sonnet-5-5` or `claude-opus-5-5` for a stronger tutor. Prices for current models are in `src/server/costs.ts`. Materials are prompt-cached, so the marginal cost of a turn is dominated by the transcript, not the course content.
+Defaults are `claude-haiku-4-5` for both functions, the cheapest option that works well at class scale; set `TUTOR_MODEL=claude-sonnet-5-5` or `claude-opus-5-5` for a stronger tutor. Prices for current models are in `src/core/costs.ts`. Materials are prompt-cached, so the marginal cost of a turn is dominated by the transcript, not the course content.
 
 ---
 

@@ -16,10 +16,10 @@
 import { createHash } from 'node:crypto';
 import { marked } from 'marked';
 import { zipSync, strToU8 } from 'fflate';
-import { query } from './db.js';
-import { getAnthropic, GEN_MODEL } from './anthropic.js';
-import { recordApiCall, type Attribution } from './costs.js';
-import { textOf } from './llm.js';
+import { query } from '../../core/db.js';
+import { getAnthropic, GEN_MODEL } from '../../core/anthropic.js';
+import { recordApiCall, type Attribution } from '../../core/costs.js';
+import { textOf } from '../../core/llm.js';
 import { KINDS, type TutorialKind } from './kinds.js';
 import { briefFor, listTutorials, listMaterials, effectivePitch, type Tutorial, type Material, type CourseCtx } from './tutorials.js';
 import { deliveryLabels } from './delivery.js';

@@ -7,10 +7,10 @@
 
 import type { IdToken } from 'ltijs';
 import { z } from 'zod';
-import { query } from './db.js';
-import { contextIdOf } from './reqctx.js';
+import { query } from '../../core/db.js';
+import { contextIdOf } from '../../core/reqctx.js';
 import { deliveryOf, DEFAULT_TRUFLEX, parseTruFlex, type Delivery } from './delivery.js';
-import { encryptSecret, decryptSecret } from './secrets.js';
+import { encryptSecret, decryptSecret } from '../../core/secrets.js';
 
 export type CourseLevel = 'abe' | 'undergraduate' | 'graduate';
 

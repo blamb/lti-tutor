@@ -15,11 +15,11 @@
  */
 
 import { z } from 'zod';
-import { query } from './db.js';
-import { jsonCall } from './llm.js';
-import type { Attribution } from './costs.js';
+import { query } from '../../core/db.js';
+import { jsonCall } from '../../core/llm.js';
+import type { Attribution } from '../../core/costs.js';
 import type { CourseCtx } from './courses.js';
-import type { Student } from './students.js';
+import type { Student } from '../../core/students.js';
 import type { Tutorial, TutorialSummary } from './tutorials.js';
 
 export type ConceptStatus = 'secure' | 'developing' | 'fragile' | 'misconception';
