@@ -2,7 +2,7 @@
 
 LTI Tutor runs short one-on-one conversations between a learner and an AI tutor, inside your Moodle course, following a brief you write. The tutor asks; the learner does the thinking. It never grades, never writes a learner's assignment, and never invents a course: everything it draws on comes from materials you put in.
 
-This guide covers what you need to set one up and read what comes back. It is deliberately short. The README in the repository has the full detail.
+This guide covers what you need to set one up and read what comes back. It is deliberately short. The README in the repository has the full detail. A companion tool, Persona Chat, lets students talk with a persona you design; it has [its own guide](PERSONA-CHAT-USER-GUIDE.md).
 
 ---
 

@@ -3,7 +3,7 @@
 This repository holds two LTI 1.3 tools for Moodle (and other LTI Advantage platforms), built on one shared core and deployed separately:
 
 - **LTI Tutor**: instructor-designed one-on-one AI tutorials. Documented below.
-- **Persona Chat**: conversations with a persona an instructor designs, a thinker from history, a simulated client, a role-play partner, grounded in course materials, with a coach, a debrief and an instructor's report. Documented in [docs/PERSONA-CHAT.md](docs/PERSONA-CHAT.md).
+- **Persona Chat**: conversations with a persona an instructor designs, a thinker from history, a simulated client, a role-play partner, grounded in course materials, with a coach, a debrief and an instructor's report. Designers start with [its user guide](docs/PERSONA-CHAT-USER-GUIDE.md); the technical description is [docs/PERSONA-CHAT.md](docs/PERSONA-CHAT.md).
 
 They share `src/core` (LTI provider, materials and importers, Moodle course import and sync, retrieval, the model client, cost tracking, grade passback) and nothing else: each has its own registration, database and pages. `APP=tutor` (the default) or `APP=persona` picks which one a process runs. The repository layout is under [Architecture](#architecture).
 
@@ -17,7 +17,7 @@ Subject-agnostic: instructors paste their own course materials (lecture notes, t
 
 ---
 
-> **Instructors:** start with the short [user guide](docs/USER-GUIDE.md). This README is the full reference.
+> **Instructors:** start with the short [user guide](docs/USER-GUIDE.md) (for Persona Chat, [its own guide](docs/PERSONA-CHAT-USER-GUIDE.md)). This README is the tutor's full reference.
 
 ## The idea
 
@@ -236,7 +236,7 @@ src/
     server/grades.ts       AGS completion passback
     migrations/001_init.sql … 010_moodle_ws.sql
     web/launch.html        the single-page frontend
-  persona/                 Persona Chat: see docs/PERSONA-CHAT.md
+  persona/                 Persona Chat: docs/PERSONA-CHAT-USER-GUIDE.md and docs/PERSONA-CHAT.md
     server/personas.ts     the persona model, prompt assembly, conversations, the AI draft; unit tests alongside
     server/templates.ts    templates: standing rules, field hints, seeds
     server/routes.ts       /api/* (student + designer + deep-link response)

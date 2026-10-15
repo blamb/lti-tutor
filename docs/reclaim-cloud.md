@@ -40,9 +40,11 @@ Environment name `lti-tutor` → `https://lti-tutor.ca.reclaim.cloud`.
 3. After adding the two secrets, **Apply** in the Variables dialog, then **Restart** the Application Servers layer. (Done 2026-10-13; `/healthz` answered `{"status":"ok","env":"production"}`.) Note that with `NODE_ENV=production` npm skips devDependencies, which is why `typescript`, `tsx` and the `@types/*` packages live in `dependencies`. `npm start` builds, applies the migrations and starts; `https://lti-tutor.ca.reclaim.cloud/healthz` should answer `{"status":"ok"}` within a minute. The node's **Log** (`nodejs.log`) shows the install, build and start output.
 4. Register the tool in Moodle: *Site administration → Plugins → External tool → Manage tools → Dynamic registration* with `https://lti-tutor.ca.reclaim.cloud/register`.
 
-## A second environment for Persona Chat
+moodbox web services: enabled, REST protocol on, external service **LTI Tutor course sync** with all twelve functions in `src/core/moodle-ws.ts`; one token per instructor on that service serves both tools.
 
-Persona Chat deploys from the same repository and branch as its own environment with its own PostgreSQL node, so the two tools never share data or a registration. Checklist, in order:
+## A second environment for Persona Chat (done 2026-10-15)
+
+Persona Chat deploys from the same repository and branch as its own environment with its own PostgreSQL node, so the two tools never share data or a registration. Environment `persona-chat` (Node.js 22.23.2 npm, node 17694; PostgreSQL 17.10, node 17695) is live at https://persona-chat.ca.reclaim.cloud, registered in moodbox and connected to a course through the shared web-service token. The checklist that was followed, for the next environment:
 
 ### 1. Create the environment (Reclaim dashboard)
 
@@ -91,6 +93,8 @@ Persona Chat deploys from the same repository and branch as its own environment 
 Launch the home activity as a teacher → **Designer view** → **New persona** → choose the template → **Start from existing instructions** and paste the existing Custom GPT instructions and profile (the Melissa Chang and Tagore files are the reference cases) → **Draft the fields** → check each section, the hidden layer above all → tick materials → **Published** → **Save** → **Try it as a student**. Materials: upload the PDFs, import by URL, import the course backup, or connect the course under **Moodle connection** on the Materials tab (the same web-service setup the tutor uses; one service and token can serve both tools since both read with the same functions).
 
 ### 6. What to test in Moodle that the local harness could not
+
+Done so far: the teacher launch, the Designer view, and the live sync. Still to try:
 
 - A student launch of the home activity and of a persona placed on its own.
 - Ending a conversation with a persona placed as an activity with the gradebook on: the column appears in the gradebook with 1/1, and the report shows *posted*.

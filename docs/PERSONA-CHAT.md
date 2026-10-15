@@ -4,6 +4,12 @@ Persona Chat is the second tool in this repository: an LTI 1.3 tool in which stu
 
 It shares `src/core` with LTI Tutor (LTI provider, materials and importers, the Moodle course model, the model client and cost tracking) and is deployed as its own tool with its own database (`APP=persona`). See the README for the layout and docs/reclaim-cloud.md for the deployment.
 
+> **Instructors and designers:** start with the [user guide](PERSONA-CHAT-USER-GUIDE.md). This document is the technical description.
+
+## Status
+
+As of 2026-10-15 all five planned phases are built, and the tool is deployed on Reclaim Cloud as `persona-chat` (https://persona-chat.ca.reclaim.cloud), registered in moodbox, placed in a course, and reading that course live through the shared web-service token. Tested through a local harness and in moodbox: launch, Designer view, materials by every route including the live sync. Not yet exercised in Moodle: a student launch of a persona placed as its own activity, the gradebook posting, and a public link opened from outside.
+
 ## The persona model
 
 A persona is authored in sections, each a field in the designer view. The split is the point: it is what a single prompt cannot do.
@@ -15,8 +21,8 @@ A persona is authored in sections, each a field in the designer view. The split 
 | The character | who they are, how they talk, how they engage | the model, openly |
 | What the persona holds back | the hidden layer: cues, follow-up layers with their reveal conditions, hidden facts | the model only, with the instruction never to volunteer it |
 | Boundaries | additional rules, historical cutoff, verbatim instructions | the model |
-| Debrief | learning objectives (one per line), debrief guidance | the debrief writer (next phase); objectives also show in the pre-brief |
-| Conduct | who speaks first, opening line, reply length, model, materials, status | the model and the tool |
+| Debrief | learning objectives (one per line), debrief guidance | the debrief writer; objectives also show in the pre-brief |
+| Conduct | who speaks first, opening line, reply length, voice leaning, coach on/off, model, gradebook, visibility and caps, materials, status | the model and the tool |
 
 The hidden layer never reaches a student's browser: the student-facing API returns only the card, the pre-brief, the objectives and the opening.
 
@@ -76,6 +82,10 @@ The routes live in `src/persona/server/public.ts`, mounted before ltijs's sessio
 
 `PERSONA_MODEL` sets the deployment default (Haiku 5.5). The designer view offers a per-persona choice with list prices per million tokens: Haiku 5.5, Sonnet 5.5, Opus 5.5 and Haiku 4.5. Every call is recorded in `api_call` with its cost, as in the tutor; `/admin/costs?token=…` summarises it.
 
+## Testing without Moodle
+
+Unit tests (`npm test`) cover templates, prompt assembly, validation, chunking, quotation checking, exports and the CSV. For end-to-end checks without an LTI launch, a small harness can import `dist/persona/server/routes.js` and copy the routes registered on `lti.app` onto a plain Express app with a fake token in `res.locals` (ltijs attaches its session validator at setup, so `lti.app` itself cannot be mounted); the public routes come along since they are registered on the same app. That is how every phase was exercised against the persona dev database before Moodle was involved.
+
 ## Seeding the reference personas
 
 ```bash
@@ -88,7 +98,7 @@ The issuer and course id are what the LTI launch carries (the `student` table sh
 
 On the Materials tab, **Import a Moodle course backup** reads an `.mbz` file (up to 150 MB; make it without enrolled users) and **Sync from Moodle** reads the live course once a web-service token is connected under **Moodle connection**. Both show the same preview: every unit's text, pages, books, readings with attached PDFs and Word files, links and assignment descriptions, each with a tick box, a title and a role. Nothing about people is read. Items carry a stable source key, so a later import or sync refreshes them in place. The code is shared with the tutor (`core/moodle-backup.ts`, `core/moodle-ws.ts`, `core/course-model.ts`); the token lives in `persona_course_settings`, encrypted.
 
-## Phases
+## What was built, in order
 
 1. **Done.** Persona model, templates, designer authoring with the draft, materials by paste, URL and upload, the student gallery, pre-brief and streamed conversation, preview as a student, deep linking of single personas.
 2. **Done.** Grounding from the Moodle course (backup import and live sync through web services, the same preview and in-place updates as the tutor), chunked retrieval for long sources, verified quotations.
