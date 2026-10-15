@@ -42,17 +42,60 @@ Environment name `lti-tutor` → `https://lti-tutor.ca.reclaim.cloud`.
 
 ## A second environment for Persona Chat
 
-The repository also builds Persona Chat. It deploys exactly like the tutor, from the same GitHub repository and branch, as its own environment (`persona-chat` → `https://persona-chat.ca.reclaim.cloud`) with its own PostgreSQL node, so the two tools never share data or a registration. The only differences in the Variables dialog:
+Persona Chat deploys from the same repository and branch as its own environment with its own PostgreSQL node, so the two tools never share data or a registration. Checklist, in order:
+
+### 1. Create the environment (Reclaim dashboard)
+
+1. **New Environment** → Node.js, version **22**, the **npm** process-manager tag (`22.x-npm`); add a **PostgreSQL 17** node; **Built-in SSL** on; region **Canada**; name **`persona-chat`**. Cloudlets 4 reserved / 8 max on the Node.js node, as for the tutor. Result: `https://persona-chat.ca.reclaim.cloud`.
+2. The PostgreSQL credentials (`webadmin` and a password) arrive by email and sit under the node's **Config** / **Reset password** menu. The default `postgres` database works; for a named one, open the node's web admin (its *Open in browser* icon) and create `persona_chat`.
+3. **Deployment Manager → Git / SVN**: the `lti-tutor` repository entry already exists; click its deploy icon, choose environment **`persona-chat`**, context **ROOT**, branch `main`. Reclaim runs `npm install` and then `npm start`, which builds, applies the migrations (core, then the persona app's own) and starts the server.
+
+### 2. Variables (Application Servers layer → ⚙ → Variables)
 
 | Variable | Value |
 |---|---|
-| `APP` | `persona` (what `npm start` runs; unset means the tutor) |
+| `NODE_ENV` | `production` |
+| `APP` | `persona` |
 | `LTI_TOOL_URL` | `https://persona-chat.ca.reclaim.cloud` |
+| `PORT` | `8080` |
 | `TOOL_NAME` | `Persona Chat` |
-| `DATABASE_URL` | that environment's PostgreSQL node |
-| `PERSONA_MODEL` | optional; the default model for new personas (instructors choose per persona) |
+| `LTI_COOKIE_SECRET` | a new random value (`openssl rand -hex 32`); not the tutor's |
+| `DATABASE_URL` | `postgres://webadmin:<password>@<the PostgreSQL node's host>:5432/postgres` (or `/persona_chat`) |
+| `ANTHROPIC_API_KEY` | the key for this deployment's Console workspace (a separate key keeps the two tools' spend apart) |
+| `PLATFORM_HTTP_HOSTS` | `moodbox.ca.reclaim.cloud` (Moodle on the same account; see the next section) |
+| `PERSONA_MODEL` | optional; `claude-haiku-5-5` is the default for new personas |
+| `GEN_MODEL` | optional; drafts, debriefs and syntheses; `claude-haiku-4-5` by default |
+| `DATA_RETENTION_DAYS` | `0` |
+| `TOKEN_SECRET`, `ADMIN_TOKEN`, `ANTHROPIC_BASE_URL` | optional, as for the tutor |
 
-`TUTOR_MODEL` is not read by Persona Chat. Register it in Moodle as a second tool with `https://persona-chat.ca.reclaim.cloud/register`, and apply the same private-network routing below if Moodle is on the same account.
+`TUTOR_MODEL` is not read by Persona Chat. The Variables editor needs **Save** twice; then **Restart** the Application Servers layer.
+
+### 3. Check it
+
+- `https://persona-chat.ca.reclaim.cloud/healthz` answers `{"status":"ok","app":"persona",…}` within a minute.
+- The node's **Log** (`nodejs.log`) shows `apply core/001_core.sql` … `apply 005_public.sql` on the first start.
+
+### 4. Register it in Moodle (moodbox)
+
+1. *Site administration → Plugins → Activity modules → External tool → Manage tools → Dynamic registration* with `https://persona-chat.ca.reclaim.cloud/register` → **Add LTI Advantage** → **Activate**.
+2. Edit the tool (*Manage tools → Persona Chat → Edit*):
+   - **Public keyset**: `http://persona-chat.ca.reclaim.cloud/keys` (plain HTTP, because Moodle on the same account reaches the node over the private network; see the next section).
+   - **Supports Deep Linking (Content-Item Message)**: on.
+   - **IMS LTI Assignment and Grade Services**: *Use this service for grade sync and column management* (needed for completion passback).
+   - **Default launch container**: *New window* (voice needs the full window; inside Moodle's iframe the microphone is blocked and the page offers Full screen instead).
+   - **Tool configuration usage**: *Show in activity chooser and as a preconfigured tool*.
+3. In a course: *Add an activity → External tool → Persona Chat → Select content* → tick **Persona Chat home** → add. The same picker lists each persona as its own activity once personas exist; a persona with *Post completion to the gradebook* on carries a gradebook column with it.
+
+### 5. First personas
+
+Launch the home activity as a teacher → **Designer view** → **New persona** → choose the template → **Start from existing instructions** and paste the existing Custom GPT instructions and profile (the Melissa Chang and Tagore files are the reference cases) → **Draft the fields** → check each section, the hidden layer above all → tick materials → **Published** → **Save** → **Try it as a student**. Materials: upload the PDFs, import by URL, import the course backup, or connect the course under **Moodle connection** on the Materials tab (the same web-service setup the tutor uses; one service and token can serve both tools since both read with the same functions).
+
+### 6. What to test in Moodle that the local harness could not
+
+- A student launch of the home activity and of a persona placed on its own.
+- Ending a conversation with a persona placed as an activity with the gradebook on: the column appears in the gradebook with 1/1, and the report shows *posted*.
+- A persona set to *Anyone with the link*: open the link in a private window.
+- The live sync, once a token is connected.
 
 ## Moodle on the same Reclaim account: private-network routing
 
