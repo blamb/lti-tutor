@@ -96,7 +96,7 @@ test('the transcript export carries the conversation, the debrief and the reflec
   const debrief = PersonaDebrief.parse({ overview: 'You listened well.', by_objective: [{ objective: 'Therapeutic communication', observation: 'You asked consent before sleep.' }], strengths: 'Open questions\nWarm tone', explore_further: ['Caffeine'], one_question: 'What would you ask first next time?' });
   assert.equal(debrief.strengths.length, 2, 'lines become a list');
   const p = personaOf(fixture('melissa-chang'));
-  const session = { id: 9, persona_id: 1, student_id: 1, session_id: 1, mode: 'live' as const, status: 'ended' as const, started_at: '2026-10-15T20:00:00Z', ended_at: null, debrief, coach_session_id: null, debrief_generated_at: null, reflection: 'Ask more open questions.', reflection_at: null };
+  const session = { id: 9, persona_id: 1, student_id: 1, session_id: 1, mode: 'live' as const, status: 'ended' as const, started_at: '2026-10-15T20:00:00Z', ended_at: null, debrief, coach_session_id: null, debrief_generated_at: null, reflection: 'Ask more open questions.', reflection_at: null, grade_posted_at: null, grade_error: null };
   const turns = [
     { id: 1, role: 'user' as const, content: 'Hi Melissa', ts: '' },
     { id: 2, role: 'assistant' as const, content: 'Hi Jordan.', ts: '' },
@@ -116,4 +116,21 @@ test('the student view carries the voice leaning and coach switch but still noth
   assert.equal(pub.voice_pref, 'masculine');
   assert.equal(pub.coach, 'off');
   assert.ok(!('hidden' in pub));
+});
+
+test('the report CSV has one row per conversation and quotes commas and quotes', async () => {
+  const { reportCsv } = await import('./personas.js');
+  const csv = reportCsv({
+    rows: [{ session_id: 3, student_id: 1, display_name: 'Lee, Jordan', status: 'ended', started_at: '2026-10-15', ended_at: '2026-10-15', turns: 4, coach_turns: 1,
+      debrief: { overview: 'Said "fine".', by_objective: [], strengths: ['a', 'b'], explore_further: [], one_question: '' }, reflection: '', grade_posted_at: null, grade_error: 'no column' }],
+    totals: { started: 1, ended: 1, with_debrief: 1, with_reflection: 0, avg_turns: 4, grade_posted: 0, students: 1 },
+    synthesis: null,
+  });
+  const lines = csv.trim().split('\n');
+  assert.equal(lines.length, 2);
+  assert.ok(lines[0]!.startsWith('session,student,status'));
+  assert.ok(lines[1]!.includes('"Lee, Jordan"'));
+  assert.ok(lines[1]!.includes('"Said ""fine""."'));
+  assert.ok(lines[1]!.includes('a | b'));
+  assert.ok(lines[1]!.endsWith('no column'));
 });

@@ -9,7 +9,7 @@
  *   POST /api/personas/:id/start                 { fresh?, preview? } -> { persona, session, turns }
  *   POST /api/personas/session/:sid/turn         { message } | { begin: true } -> SSE chunk | notice | quotes | done | error
  *   GET  /api/personas/session/:sid              -> { persona, session, turns, coach_turns }   (reopen, including an ended one)
- *   POST /api/personas/session/:sid/end          -> { session }
+ *   POST /api/personas/session/:sid/end          -> { session, grade }   (posts completion to the gradebook where set up)
  *   POST /api/personas/session/:sid/debrief      -> { debrief }   (generated once the conversation has ended)
  *   POST /api/personas/session/:sid/coach        { question } -> SSE chunk | done | error   (step out and ask the coach)
  *   POST /api/personas/session/:sid/reflection   { text } -> { ok }
@@ -19,6 +19,10 @@
  *   GET  /api/teacher/catalog                    -> { templates, models, model_default }
  *   GET/POST /api/teacher/personas, GET/PUT/DELETE /api/teacher/personas/:id
  *   POST /api/teacher/personas/draft             { text, template } -> { draft }
+ *   GET  /api/teacher/personas/:id/report        -> { rows, totals, synthesis }   (live conversations, debriefs, reflections)
+ *   GET  /api/teacher/personas/:id/report.csv
+ *   GET  /api/teacher/personas/:id/conversations/:sid -> { session, display_name, turns, coach_turns }
+ *   POST /api/teacher/personas/:id/synthesis     -> { synthesis }   (across the ended conversations' debriefs)
  *   GET/POST /api/teacher/materials, PUT/DELETE /api/teacher/materials/:id
  *   POST /api/teacher/materials/import-url       { url, whole_book? }
  *   POST /api/teacher/materials/upload           multipart 'file'
@@ -56,7 +60,9 @@ import {
   startPersonaSession, getPersonaSession, endPersonaSession, getSessionTurns, visibleTurns, streamPersonaReply, draftPersona,
   latestSessionsForStudent, START_MARKER, DRAFT_MAX_CHARS, PERSONA_MATERIAL_MAX_CHARS, modelFor,
   getOrGenerateDebrief, streamCoachReply, coachTurnsFor, saveReflection, transcriptHtml, transcriptMarkdown,
+  recordGradeResult, getPersonaReport, reportCsv, instructorConversation, generatePersonaSynthesis,
 } from './personas.js';
+import { postCompletion, type GradeResult } from '../../core/grades.js';
 
 // The course-import commit sends every selected material's text back in one
 // request, so it gets its own limit; express.json skips a body another parser has already read.
@@ -217,8 +223,22 @@ lti.app.post('/api/personas/session/:sid/end', async (req: Request, res: Respons
   try {
     const owned = await ownedSession(req, res);
     if (!owned) return res.status(404).json({ error: 'conversation not found' });
-    const session = owned.session.status === 'ended' ? owned.session : await endPersonaSession(owned.session);
-    res.json({ session });
+    const { token, persona } = owned;
+    const wasEnded = owned.session.status === 'ended';
+    const session = wasEnded ? owned.session : await endPersonaSession(owned.session);
+    let grade: GradeResult | null = null;
+    // Completion counts once, for live conversations, where a column exists or is wanted.
+    const deepLinked = String(token.platformContext.custom?.persona_id ?? '') === String(persona.id);
+    if (!wasEnded && session.mode === 'live' && (persona.gradebook || deepLinked)) {
+      grade = await postCompletion(lti, token, {
+        customKey: 'persona_id', itemId: persona.id, wantsColumn: persona.gradebook, resourceId: `persona-${persona.id}`,
+        label: persona.title, tag: 'persona', comment: `Completed a conversation with ${persona.title} in ${env.TOOL_NAME}.`,
+      });
+      await recordGradeResult(session.id, grade);
+      session.grade_posted_at = grade.posted ? new Date().toISOString() : session.grade_posted_at;
+      session.grade_error = grade.posted ? null : (grade.error ?? null);
+    }
+    res.json({ session, grade });
   } catch (e) {
     fail(res, e, 'POST /api/personas/session/:sid/end');
   }
@@ -380,6 +400,67 @@ lti.app.post('/api/teacher/personas/draft', async (req: Request, res: Response) 
     res.json({ draft });
   } catch (e) {
     fail(res, e, 'POST /api/teacher/personas/draft');
+  }
+});
+
+// ─── Instructor: the report ─────────────────────────────────────────────────
+
+async function teacherPersona(req: Request, res: Response) {
+  const t = await teacher(res);
+  if (!t) return null;
+  const id = idParam(req, 'id');
+  const persona = id ? await getPersona(id, t.scope) : null;
+  if (!persona) { res.status(404).json({ error: 'persona not found' }); return null; }
+  return { ...t, persona };
+}
+
+lti.app.get('/api/teacher/personas/:id/report', async (req: Request, res: Response) => {
+  try {
+    const t = await teacherPersona(req, res);
+    if (!t) return;
+    const report = await getPersonaReport(t.persona);
+    res.json({ persona: { id: t.persona.id, title: t.persona.title, subtitle: t.persona.subtitle, objectives: t.persona.objectives, gradebook: t.persona.gradebook, status: t.persona.status }, ...report });
+  } catch (e) {
+    fail(res, e, 'GET /api/teacher/personas/:id/report');
+  }
+});
+
+lti.app.get('/api/teacher/personas/:id/report.csv', async (req: Request, res: Response) => {
+  try {
+    const t = await teacherPersona(req, res);
+    if (!t) return;
+    const report = await getPersonaReport(t.persona);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="persona-${t.persona.id}-report.csv"`);
+    res.send(reportCsv(report));
+  } catch (e) {
+    fail(res, e, 'GET /api/teacher/personas/:id/report.csv');
+  }
+});
+
+lti.app.get('/api/teacher/personas/:id/conversations/:sid', async (req: Request, res: Response) => {
+  try {
+    const t = await teacherPersona(req, res);
+    if (!t) return;
+    const sid = idParam(req, 'sid');
+    const conv = sid ? await instructorConversation(t.persona, sid) : null;
+    if (!conv) return res.status(404).json({ error: 'conversation not found' });
+    res.json(conv);
+  } catch (e) {
+    fail(res, e, 'GET /api/teacher/personas/:id/conversations/:sid');
+  }
+});
+
+lti.app.post('/api/teacher/personas/:id/synthesis', async (req: Request, res: Response) => {
+  try {
+    const t = await teacherPersona(req, res);
+    if (!t) return;
+    const me = await studentFromToken(t.token);
+    const synthesis = await generatePersonaSynthesis(t.persona, attr(t.token, me.id, null, 'persona.synthesis'));
+    res.json({ synthesis });
+  } catch (e) {
+    if ((e as Error).message?.startsWith('No ended conversations')) return res.status(400).json({ error: (e as Error).message });
+    fail(res, e, 'POST /api/teacher/personas/:id/synthesis');
   }
 });
 
@@ -638,10 +719,12 @@ lti.app.post('/api/deeplink', express.urlencoded({ extended: false }), async (re
     for (const id of ids) {
       const persona = await getPersona(id, t.scope);
       if (!persona) continue;
-      items.push({
+      const item: DeepLinkContentItem = {
         type: 'ltiResourceLink', title: persona.title, text: persona.summary || persona.subtitle, url: env.LTI_TOOL_URL,
         custom: { persona_id: String(persona.id) },
-      });
+      };
+      if (persona.gradebook) item.lineItem = { scoreMaximum: 1, label: persona.title, resourceId: `persona-${persona.id}`, tag: 'persona' };
+      items.push(item);
     }
     if (items.length === 0) {
       res.status(400).type('html').send('<p>Nothing selected. Go back and tick at least one item.</p>');

@@ -21,6 +21,9 @@ import { z } from 'zod';
 import { query } from '../../core/db.js';
 import { getAnthropic } from '../../core/anthropic.js';
 import { recordApiCall, MODEL_PRICES, type Attribution } from '../../core/costs.js';
+import { GEN_MODEL } from '../../core/anthropic.js';
+import { textOf } from '../../core/llm.js';
+import type { GradeResult } from '../../core/grades.js';
 import { jsonCall } from '../../core/llm.js';
 import { standaloneHtml } from '../../core/document.js';
 import { getMaterials, type Material, type Scope } from '../../core/materials.js';
@@ -71,6 +74,8 @@ export interface Persona {
   voice_pref: VoicePref;
   /** Whether students may step out and ask the coach mid-conversation. */
   coach: 'on' | 'off';
+  /** Post completion (1/1) to the gradebook when a live conversation ends. */
+  gradebook: boolean;
   /** '' = the deployment default. */
   model: string;
   material_ids: number[];
@@ -131,6 +136,7 @@ export const PersonaInput = z.object({
   response_length: z.enum(RESPONSE_LENGTHS).default('medium'),
   voice_pref: z.enum(VOICE_PREFS).default('auto'),
   coach: z.enum(['on', 'off']).default('on'),
+  gradebook: z.boolean().default(false),
   model: z.string().trim().max(60).default('').refine((m) => m === '' || isKnownModel(m), 'unknown model'),
   material_ids: z.array(z.number().int().positive()).max(40).default([]),
   status: z.enum(['draft', 'published', 'archived']).default('draft'),
@@ -175,7 +181,7 @@ async function validMaterialIds(ids: number[], scope: Scope): Promise<number[]> 
 const COLUMNS = [
   'template', 'title', 'subtitle', 'summary', 'student_role', 'setting', 'student_brief', 'character', 'voice', 'behaviour',
   'hidden', 'guardrails', 'historical_cutoff', 'raw_instructions', 'objectives', 'debrief_guidance', 'opening', 'opening_line',
-  'response_length', 'voice_pref', 'coach', 'model', 'material_ids', 'status',
+  'response_length', 'voice_pref', 'coach', 'gradebook', 'model', 'material_ids', 'status',
 ] as const;
 
 export async function createPersona(scope: Scope, input: PersonaInput, createdBy: number | null): Promise<Persona> {
@@ -320,6 +326,8 @@ export interface PersonaSession {
   debrief_generated_at: string | null;
   reflection: string;
   reflection_at: string | null;
+  grade_posted_at: string | null;
+  grade_error: string | null;
 }
 
 /** Hidden user turn that opens a conversation the persona starts (the API needs a user turn first). */
@@ -687,4 +695,130 @@ export function transcriptHtml(p: Persona, ps: PersonaSession, turns: Turn[], st
     markdown: transcriptMarkdown(p, ps, turns, studentName),
     footer: `Exported from ${toolName}. The persona is an AI playing a part for a learning activity; check anything you rely on against the course's sources.`,
   });
+}
+
+// ─── Completion and the instructor's report ─────────────────────────────────
+
+export async function recordGradeResult(sessionId: number, result: GradeResult): Promise<void> {
+  await query(`update persona_session set grade_posted_at = case when $2 then now() else grade_posted_at end, grade_error = $3 where id = $1`,
+    [sessionId, result.posted, result.posted ? null : (result.error ?? null)]);
+}
+
+export interface ReportRow {
+  session_id: number;
+  student_id: number;
+  display_name: string;
+  status: 'in_progress' | 'ended';
+  started_at: string;
+  ended_at: string | null;
+  turns: number;
+  coach_turns: number;
+  debrief: PersonaDebrief | null;
+  reflection: string;
+  grade_posted_at: string | null;
+  grade_error: string | null;
+}
+
+export interface PersonaReport {
+  rows: ReportRow[];
+  totals: { started: number; ended: number; with_debrief: number; with_reflection: number; avg_turns: number | null; grade_posted: number; students: number };
+  synthesis: { markdown: string; runs: number; generated_at: string } | null;
+}
+
+/** Every live conversation with this persona (previews never count), newest first. */
+export async function getPersonaReport(persona: Persona): Promise<PersonaReport> {
+  const rows = await query<ReportRow>(
+    `select ps.id as session_id, ps.student_id, st.display_name, ps.status, ps.started_at::text, ps.ended_at::text,
+            ps.debrief, ps.reflection, ps.grade_posted_at::text, ps.grade_error,
+            (select count(*)::int from tutor_turn t where t.session_id = ps.session_id and t.role = 'user' and t.content not like $2) as turns,
+            (select count(*)::int from tutor_turn t where ps.coach_session_id is not null and t.session_id = ps.coach_session_id and t.role = 'user') as coach_turns
+     from persona_session ps join student st on st.id = ps.student_id
+     where ps.persona_id = $1 and ps.mode = 'live'
+     order by ps.started_at desc`,
+    [persona.id, START_MARKER + '%']
+  );
+  const ended = rows.filter((r) => r.status === 'ended');
+  const synth = await query<{ markdown: string; runs: number; generated_at: string }>(`select markdown, runs, generated_at::text from persona_report where persona_id = $1`, [persona.id]);
+  return {
+    rows,
+    totals: {
+      started: rows.length,
+      ended: ended.length,
+      with_debrief: rows.filter((r) => r.debrief).length,
+      with_reflection: rows.filter((r) => r.reflection).length,
+      avg_turns: rows.length ? Math.round((rows.reduce((n, r) => n + r.turns, 0) / rows.length) * 10) / 10 : null,
+      grade_posted: rows.filter((r) => r.grade_posted_at).length,
+      students: new Set(rows.map((r) => r.student_id)).size,
+    },
+    synthesis: synth[0] ?? null,
+  };
+}
+
+function csvCell(v: unknown): string {
+  const s = String(v ?? '');
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+/** One row per conversation. */
+export function reportCsv(report: PersonaReport): string {
+  const head = ['session', 'student', 'status', 'started', 'ended', 'turns', 'coach_questions', 'debrief_overview', 'strengths', 'explore_further', 'reflection', 'grade'];
+  const lines = [head.join(',')];
+  for (const r of report.rows) {
+    lines.push([
+      r.session_id, r.display_name, r.status, r.started_at, r.ended_at ?? '', r.turns, r.coach_turns,
+      r.debrief?.overview ?? '', (r.debrief?.strengths ?? []).join(' | '), (r.debrief?.explore_further ?? []).join(' | '),
+      r.reflection, r.grade_posted_at ? 'posted' : (r.grade_error ?? ''),
+    ].map(csvCell).join(','));
+  }
+  return lines.join('\n') + '\n';
+}
+
+export async function instructorConversation(persona: Persona, sessionId: number): Promise<{ session: PersonaSession; display_name: string; turns: Turn[]; coach_turns: Turn[] } | null> {
+  const rows = await query<PersonaSession & { display_name: string }>(
+    `select ps.*, st.display_name from persona_session ps join student st on st.id = ps.student_id where ps.id = $1 and ps.persona_id = $2`,
+    [sessionId, persona.id]
+  );
+  const ps = rows[0];
+  if (!ps) return null;
+  return { session: ps, display_name: ps.display_name, turns: visibleTurns(await getSessionTurns(ps.session_id)), coach_turns: await coachTurnsFor(ps) };
+}
+
+/** A synthesis across the ended conversations' debriefs and reflections, written for the instructor. */
+export async function generatePersonaSynthesis(persona: Persona, attribution: Attribution): Promise<{ markdown: string; runs: number; generated_at: string }> {
+  const report = await getPersonaReport(persona);
+  const runs = report.rows.filter((r) => r.status === 'ended' && r.debrief);
+  if (runs.length === 0) throw new Error('No ended conversations with a debrief yet. The synthesis reads the debriefs.');
+  const spec = TEMPLATES[persona.template];
+  const objectives = persona.objectives.split('\n').map((s) => s.trim()).filter(Boolean);
+  const evidence = runs.map((r, i) => {
+    const d = r.debrief!;
+    return `### Conversation ${i + 1} (${r.turns} student turns)\nOverview: ${d.overview}\n${d.by_objective.map((o) => `- ${o.objective}: ${o.observation}`).join('\n')}\nStrengths: ${d.strengths.join('; ')}\nExplore further: ${d.explore_further.join('; ')}${r.reflection ? `\nStudent's reflection: ${r.reflection}` : ''}`;
+  }).join('\n\n');
+  const system = `You read the debriefs of ${runs.length} conversation${runs.length === 1 ? '' : 's'} students had with the persona "${persona.title}" in ${spec.debriefFrame}, and write a synthesis for the instructor who designed it. Never name students. Count in words ("most", "about half", "two of the seven"). Be concrete: quote the kind of move or question, not generalities. Each conversation's student-turn count is given: where conversations were very short (a few turns), say so plainly and draw only the conclusions that short exchanges can support, rather than reading more into the debriefs than the transcripts could hold. Do not add a title; start with the first heading.
+
+Learning objectives:
+${objectives.length ? objectives.map((o) => `- ${o}`).join('\n') : '(none set)'}
+
+Write markdown of at most 500 words with exactly these headings:
+## What students did well
+## Where most left gaps
+(by objective, with what they tended to miss)
+## Three moves worth teaching before the next run
+(concrete techniques, each tied to what the debriefs show)
+## Adjustments to the persona or the brief
+(wording in the pre-brief, the hidden layer, the objectives, the opening: what would make the activity work better, and what to leave alone)
+## In students' own words
+(themes from their reflections; if there are none, say so in one line)`;
+  const client = getAnthropic();
+  const t0 = Date.now();
+  const res = await client.messages.create({ model: GEN_MODEL, max_tokens: 2500, system, messages: [{ role: 'user', content: `${evidence}\n\nWrite the synthesis now.` }] });
+  void recordApiCall({ ...attribution, endpoint: 'persona.synthesis', model: GEN_MODEL, usage: res.usage, durationMs: Date.now() - t0 });
+  const markdown = textOf(res);
+  const rows = await query<{ markdown: string; runs: number; generated_at: string }>(
+    `insert into persona_report (persona_id, markdown, runs) values ($1, $2, $3)
+     on conflict (persona_id) do update set markdown = excluded.markdown, runs = excluded.runs, generated_at = now()
+     returning markdown, runs, generated_at::text`,
+    [persona.id, markdown, runs.length]
+  );
+  return rows[0]!;
 }

@@ -147,6 +147,13 @@
   .quotes .chip { cursor: help; max-width: 100%; white-space: normal; }
   .quotes .chip.ok { background: var(--good-bg); border-color: var(--good-bg); color: var(--good); }
   .quotes .chip.miss { background: var(--warn-bg); border-color: var(--warn-bg); color: var(--warn); }
+  .tot-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: .6rem; margin: .5rem 0 1rem; }
+  .tot-cards .tot { background: var(--surface-2); border-radius: 8px; padding: .6rem .8rem; }
+  .tot-cards .num { font-size: 1.4rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .tot-cards .lbl { color: var(--muted); font-size: .8rem; }
+  .synth { background: var(--surface-2); border-radius: 8px; padding: .75rem 1rem; margin: .5rem 0 1rem; }
+  .synth h3 { margin: .8rem 0 .3rem; font-size: .95rem; } .synth h3:first-child { margin-top: 0; }
+  .transcript .turn .bubble { max-width: 90%; }
   .bk-unit { margin: .5rem 0 .75rem; }
   .bk-unit .bk-head { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-bottom: .25rem; }
   .bk-preview { white-space: pre-wrap; margin: .3rem 0; max-height: 12rem; overflow: auto; font-size: .8rem; }
@@ -336,6 +343,7 @@
                   <select name="model" id="model-select"></select></label>
                 <label>Materials the persona draws on<span class="hint">Readings, the figure's own writings, a case file. Add them under the Materials tab; the persona cites them as its sources.</span>
                   <div class="check-list" id="editor-materials"></div></label>
+                <label style="flex-direction:row;align-items:center;gap:.4rem"><input type="checkbox" name="gradebook"> Post completion to the course gradebook (1/1) when a conversation ends</label>
                 <label>Status
                   <select name="status"><option value="draft">Draft (only you can see and try it)</option><option value="published">Published (students can start it)</option><option value="archived">Archived (hidden everywhere)</option></select></label>
               </div>
@@ -349,6 +357,35 @@
             </div>
             <div class="err" id="editor-err" role="alert"></div>
           </form>
+        </div>
+
+        <div id="persona-report" hidden>
+          <div class="view-header">
+            <h3 id="report-h" style="margin:0" tabindex="-1">Report</h3>
+            <div class="form-row"><button type="button" class="link-btn" id="report-csv">Download CSV</button><button type="button" class="back-btn" id="report-back">← All personas</button></div>
+          </div>
+          <p class="muted" id="report-sub"></p>
+          <div class="tot-cards" id="report-totals"></div>
+          <div class="synth" id="report-synth">
+            <div class="form-row" style="justify-content:space-between">
+              <strong>Across the conversations</strong>
+              <button type="button" class="btn-ghost btn" id="synth-btn">Generate synthesis</button>
+            </div>
+            <p class="muted" id="synth-blurb" style="margin:.3rem 0 0">Reads every ended conversation's debrief and the students' reflections and writes, for you, what students did well, where most left gaps, three moves worth teaching, and adjustments to the persona or the brief. Never names students. Takes 20 to 40 seconds.</p>
+            <div class="muted" id="synth-status" role="status"></div>
+            <div class="md" id="synth-body" hidden style="margin-top:.5rem"></div>
+          </div>
+          <div class="scroll-x">
+            <table class="tbl" id="report-table"><thead><tr><th>Student</th><th>Started</th><th>Status</th><th>Turns</th><th>Coach</th><th>Debrief</th><th>Reflection</th><th>Gradebook</th><th></th></tr></thead><tbody></tbody></table>
+          </div>
+          <div class="err" id="report-err" role="alert"></div>
+          <div id="report-conv" hidden style="margin-top:1rem">
+            <div class="view-header"><h3 id="conv-h" style="margin:0" tabindex="-1"></h3><button type="button" class="back-btn" id="conv-close">Close</button></div>
+            <div class="turns transcript" id="conv-turns" aria-label="Transcript"></div>
+            <div id="conv-coach" hidden><h4 style="margin:.6rem 0 .3rem;font-size:.9rem">Questions to the coach</h4><div class="turns transcript" id="conv-coach-turns" style="min-height:0"></div></div>
+            <div class="debrief" id="conv-debrief" hidden></div>
+            <div id="conv-reflection" hidden style="margin-top:.6rem"><strong>Student's reflection:</strong> <span></span></div>
+          </div>
         </div>
       </div>
 
@@ -615,6 +652,7 @@
     $('#debrief-body').hidden = true; $('#debrief-body').innerHTML = ''; $('#debrief-status').textContent = ''; $('#reflect').hidden = true;
     $('#reflect-text').value = data.session.reflection || ''; $('#reflect-status').textContent = '';
     setEnded(data.session.status === 'ended');
+    $('#chat-ended').textContent = data.session.grade_posted_at ? 'This conversation has ended. Completion has been recorded in the course gradebook.' : 'This conversation has ended.';
     if (data.session.status === 'ended' && data.session.debrief) renderDebrief(data.session.debrief);
     if (window.speechSynthesis) fillVoiceMenu();
     showView('chat');
@@ -690,7 +728,7 @@
     if (!chat.session || chat.busy) return;
     if (!confirm('End this conversation? You can get your debrief afterwards, and start a new one any time.')) return;
     stopChatVoice();
-    try { const d = await api(`/api/personas/session/${chat.session.id}/end`, { method: 'POST' }); chat.session = d.session; setEnded(true); announce('The conversation has ended. You can get your debrief now.'); $('#debrief-btn').focus(); }
+    try { const d = await api(`/api/personas/session/${chat.session.id}/end`, { method: 'POST' }); chat.session = d.session; setEnded(true); $('#chat-ended').textContent = d.grade && d.grade.posted ? 'This conversation has ended. Completion has been recorded in the course gradebook.' : 'This conversation has ended.'; announce('The conversation has ended. You can get your debrief now.'); $('#debrief-btn').focus(); }
     catch (e) { chatErr.textContent = friendlyError(e); }
   });
   $('#chat-again').addEventListener('click', () => startChat({ fresh: true }));
@@ -894,8 +932,9 @@
       tr.innerHTML = `<td><strong>${esc(p.title)}</strong><div class="muted">${esc(p.subtitle)}</div></td><td>${esc(tpl ? tpl.label : p.template)}</td>
         <td><span class="chip ${p.status === 'published' ? 'live' : p.status === 'draft' ? 'draft' : ''}">${esc(p.status)}</span></td>
         <td>${p.conversations} started · ${p.ended} ended</td>
-        <td style="white-space:nowrap"><button type="button" class="link-btn" data-act="edit">Edit</button> <button type="button" class="link-btn" data-act="try">Try</button></td>`;
+        <td style="white-space:nowrap"><button type="button" class="link-btn" data-act="edit">Edit</button> <button type="button" class="link-btn" data-act="try">Try</button> <button type="button" class="link-btn" data-act="report">Report</button></td>`;
       tr.querySelector('[data-act=edit]').addEventListener('click', () => openEditor(p));
+      tr.querySelector('[data-act=report]').addEventListener('click', () => openReport(p));
       tr.querySelector('[data-act=try]').addEventListener('click', () => openBrief(toPublic(p), { preview: true }));
       tbody.appendChild(tr);
     }
@@ -961,6 +1000,7 @@
   function formValues() {
     const out = {};
     for (const el of form.elements) { if (el.name && el.type !== 'radio' && el.type !== 'checkbox') out[el.name] = el.value; }
+    out.gradebook = !!form.elements.gradebook.checked;
     return out;
   }
   function renderMaterialChecks(selected = []) {
@@ -983,13 +1023,75 @@
     form.querySelector(`input[name=template][value="${template}"]`).checked = true;
     applyTemplate(template, { seedEmpty: !p });
     if (p) for (const [k, v] of Object.entries(p)) { const el = form.elements[k]; if (el && typeof v === 'string' && !(el instanceof RadioNodeList)) el.value = v; }
+    form.elements.gradebook.checked = !!(p && p.gradebook);
     if (!designerMaterials.length) try { await loadMaterials(); } catch {}
     renderMaterialChecks(p ? p.material_ids : []);
     $('#persona-try').hidden = !p; $('#persona-delete').hidden = !p;
-    $('#personas-admin').hidden = true; $('#persona-editor').hidden = false;
+    $('#personas-admin').hidden = true; $('#persona-editor').hidden = false; $('#persona-report').hidden = true;
     $('#editor-h').focus?.();
     window.scrollTo({ top: 0 });
   }
+  // ─── The report ───
+  let reportPersona = null;
+  async function openReport(p) {
+    reportPersona = p;
+    $('#personas-admin').hidden = true; $('#persona-editor').hidden = true; $('#persona-report').hidden = false;
+    $('#report-conv').hidden = true; $('#report-err').textContent = ''; $('#synth-status').textContent = '';
+    $('#report-h').textContent = `Report: ${p.title}`; $('#report-h').focus();
+    await loadReport();
+  }
+  $('#report-back').addEventListener('click', () => { $('#persona-report').hidden = true; $('#personas-admin').hidden = false; loadPersonasAdmin(); });
+  async function loadReport() {
+    const tbody = $('#report-table tbody'); tbody.innerHTML = '';
+    try {
+      const d = await api(`/api/teacher/personas/${reportPersona.id}/report`);
+      const t = d.totals;
+      $('#report-sub').textContent = `${d.persona.status === 'published' ? 'Published' : d.persona.status}${d.persona.gradebook ? ' · posts completion to the gradebook' : ''}. Previews by instructors are not counted.`;
+      $('#report-totals').innerHTML = [[t.started, 'conversations'], [t.students, 'students'], [t.ended, 'ended'], [t.with_debrief, 'with a debrief'], [t.with_reflection, 'with a reflection'], [t.avg_turns ?? '–', 'turns on average'], ...(d.persona.gradebook ? [[t.grade_posted, 'posted to gradebook']] : [])]
+        .map(([n, l]) => `<div class="tot"><div class="num">${esc(n)}</div><div class="lbl">${esc(l)}</div></div>`).join('');
+      renderSynthesis(d.synthesis);
+      if (!d.rows.length) { tbody.innerHTML = '<tr><td colspan="9" class="muted">No conversations yet.</td></tr>'; return; }
+      for (const r of d.rows) {
+        const tr = document.createElement('tr');
+        const grade = reportPersona.gradebook || r.grade_posted_at || r.grade_error ? (r.grade_posted_at ? '<span class="chip done">posted</span>' : r.grade_error ? `<span class="chip draft" title="${esc(r.grade_error)}">not posted</span>` : '—') : '—';
+        tr.innerHTML = `<td>${esc(r.display_name)}</td><td class="muted">${esc(new Date(r.started_at).toLocaleString())}</td>
+          <td><span class="chip ${r.status === 'ended' ? 'done' : 'live'}">${r.status === 'ended' ? 'ended' : 'in progress'}</span></td>
+          <td>${r.turns}</td><td>${r.coach_turns || ''}</td><td>${r.debrief ? '✓' : ''}</td><td>${r.reflection ? '✓' : ''}</td><td>${grade}</td>
+          <td><button type="button" class="link-btn">Open</button></td>`;
+        tr.querySelector('button').addEventListener('click', () => openConversation(r));
+        tbody.appendChild(tr);
+      }
+    } catch (e) { $('#report-err').textContent = friendlyError(e); }
+  }
+  function renderSynthesis(sy) {
+    const body = $('#synth-body'); const btn = $('#synth-btn');
+    if (sy) { body.hidden = false; setMd(body, sy.markdown); btn.textContent = 'Regenerate'; $('#synth-blurb').textContent = `Written ${new Date(sy.generated_at).toLocaleString()} from ${sy.runs} ended conversation${sy.runs === 1 ? '' : 's'} with a debrief. Regenerate after more conversations end.`; }
+    else { body.hidden = true; btn.textContent = 'Generate synthesis'; }
+  }
+  $('#synth-btn').addEventListener('click', async () => {
+    const btn = $('#synth-btn'); btn.disabled = true; $('#synth-status').textContent = 'Reading the debriefs…';
+    try { const d = await api(`/api/teacher/personas/${reportPersona.id}/synthesis`, { method: 'POST' }); renderSynthesis(d.synthesis); $('#synth-status').textContent = ''; announce('Synthesis ready.'); }
+    catch (e) { $('#synth-status').textContent = friendlyError(e); }
+    finally { btn.disabled = false; }
+  });
+  $('#report-csv').addEventListener('click', () => saveFile(`/api/teacher/personas/${reportPersona.id}/report.csv`, `persona-${reportPersona.id}-report.csv`).catch((e) => { $('#report-err').textContent = friendlyError(e); }));
+  async function openConversation(r) {
+    const box = $('#report-conv'); box.hidden = false; $('#report-err').textContent = '';
+    try {
+      const d = await api(`/api/teacher/personas/${reportPersona.id}/conversations/${r.session_id}`);
+      $('#conv-h').textContent = `${d.display_name} · ${new Date(d.session.started_at).toLocaleString()}`;
+      const turns = $('#conv-turns'); turns.innerHTML = '';
+      for (const t of d.turns) { const el = document.createElement('div'); el.className = 'turn ' + t.role; const b = document.createElement('div'); b.className = 'bubble'; if (t.role === 'assistant') { b.dataset.speaker = reportPersona.title; setMd(b, t.content); } else b.textContent = t.content; el.appendChild(b); turns.appendChild(el); }
+      const coach = $('#conv-coach'); const ct = $('#conv-coach-turns'); ct.innerHTML = ''; coach.hidden = !(d.coach_turns && d.coach_turns.length);
+      for (const t of d.coach_turns || []) { const el = document.createElement('div'); el.className = 'turn ' + t.role; const b = document.createElement('div'); b.className = 'bubble'; if (t.role === 'assistant') setMd(b, t.content); else b.textContent = t.content; el.appendChild(b); ct.appendChild(el); }
+      const db = $('#conv-debrief'); db.hidden = !d.session.debrief;
+      if (d.session.debrief) { const x = d.session.debrief; const li = (xs) => xs.map((v) => `<li>${esc(v)}</li>`).join(''); db.innerHTML = `<h3>Debrief</h3><p>${esc(x.overview)}</p>${(x.by_objective || []).map((o) => `<div class="obj"><strong>${esc(o.objective)}</strong> ${esc(o.observation)}</div>`).join('')}${x.strengths?.length ? `<h3>What went well</h3><ul>${li(x.strengths)}</ul>` : ''}${x.explore_further?.length ? `<h3>Worth exploring further</h3><ul>${li(x.explore_further)}</ul>` : ''}`; }
+      const rf = $('#conv-reflection'); rf.hidden = !d.session.reflection; rf.querySelector('span').textContent = d.session.reflection || '';
+      $('#conv-h').focus();
+    } catch (e) { $('#report-err').textContent = friendlyError(e); }
+  }
+  $('#conv-close').addEventListener('click', () => { $('#report-conv').hidden = true; });
+
   $('#persona-new').addEventListener('click', () => openEditor(null));
   $('#editor-back').addEventListener('click', () => { $('#persona-editor').hidden = true; $('#personas-admin').hidden = false; loadPersonasAdmin(); });
   form.addEventListener('submit', async (e) => {

@@ -58,6 +58,12 @@ An instructor who already has a Custom GPT pastes its instructions and knowledge
 - **The debrief.** After *End conversation*, *Get your debrief* makes one separate call in a coach's voice, not the persona's, against each objective, with the hidden layer in view so it can say what the student drew out and what a better question would have reached. No grades. It is stored on the session and shown again whenever the student reopens it.
 - **Reflection and export.** A short reflection the student writes for themselves (and the instructor can see later), then a download of the whole record as a standalone HTML page or Markdown, or print.
 
+## For the instructor afterwards
+
+- **Completion in the gradebook.** A persona with *Post completion to the course gradebook* on posts 1/1 through LTI Assignment and Grade Services when a live conversation ends, to the activity's own column if the persona was placed as an activity, otherwise to a column the tool creates and tags. Previews never post. The outcome is recorded on the session and shown in the report (`core/grades.ts`).
+- **The report.** *Report* on a persona lists every live conversation: student, when, status, turns, questions to the coach, whether a debrief and a reflection exist, and the gradebook outcome. *Open* shows the transcript, the coach exchanges, the debrief and the reflection. *Download CSV* gives one row per conversation.
+- **The synthesis.** *Generate synthesis* reads every ended conversation's debrief and the students' reflections and writes, for the instructor, what students did well, where most left gaps by objective, three moves worth teaching before the next run, adjustments to the persona or the brief, and themes from the reflections. It never names students and is stored until regenerated.
+
 ## Models and cost
 
 `PERSONA_MODEL` sets the deployment default (Haiku 5.5). The designer view offers a per-persona choice with list prices per million tokens: Haiku 5.5, Sonnet 5.5, Opus 5.5 and Haiku 4.5. Every call is recorded in `api_call` with its cost, as in the tutor; `/admin/costs?token=…` summarises it.
@@ -79,5 +85,5 @@ On the Materials tab, **Import a Moodle course backup** reads an `.mbz` file (up
 1. **Done.** Persona model, templates, designer authoring with the draft, materials by paste, URL and upload, the student gallery, pre-brief and streamed conversation, preview as a student, deep linking of single personas.
 2. **Done.** Grounding from the Moodle course (backup import and live sync through web services, the same preview and in-place updates as the tutor), chunked retrieval for long sources, verified quotations.
 3. **Done.** Voice in and out, the step-out coach, the debrief as a separate call against the objectives, transcript export, a short reflection.
-4. Completion passback to the gradebook and the instructor's report across conversations.
+4. **Done.** Completion passback to the gradebook and the instructor's report across conversations, with a synthesis.
 5. Visibility beyond the LMS: link with passcode, public, with spend caps.
