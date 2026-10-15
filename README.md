@@ -206,6 +206,7 @@ src/
     anthropic.ts, llm.ts   SDK client; JSON calls with schema + retry
     costs.ts               price table + api_call recording + summary
     chunks.ts              passages of each material and full-text retrieval; quotes.ts: quotation checking; unit tests alongside
+    document.ts            standalone HTML documents from markdown (transcripts, paper scripts, debriefs)
     secrets.ts, outbound.ts, limits.ts, db.ts, migrate.ts
     migrations/            001_core.sql (student, material, session, tutor_turn, api_call), 002_chunks.sql
   tutor/                   LTI Tutor
@@ -230,7 +231,7 @@ src/
     server/course.ts       the course's Moodle web-service token
     server/lti.ts, index.ts, env.ts
     fixtures/              the two reference personas (Melissa Chang, Tagore); seed.ts loads them
-    migrations/            001_personas.sql, 002_course_settings.sql
+    migrations/            001_personas.sql, 002_course_settings.sql, 003_experience.sql
     web/launch.html
 ```
 

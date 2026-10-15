@@ -22,6 +22,7 @@ import { query } from '../../core/db.js';
 import { getAnthropic } from '../../core/anthropic.js';
 import { recordApiCall, MODEL_PRICES, type Attribution } from '../../core/costs.js';
 import { jsonCall } from '../../core/llm.js';
+import { standaloneHtml } from '../../core/document.js';
 import { getMaterials, type Material, type Scope } from '../../core/materials.js';
 import { appendTurn, getSessionTurns, createSession, endSession, type Turn } from '../../core/conversations.js';
 import { GROUNDING_MAX_CHARS } from '../../core/limits.js';
@@ -39,6 +40,8 @@ export type { Scope };
 
 export type PersonaStatus = 'draft' | 'published' | 'archived';
 export type Opening = 'student' | 'persona';
+export const VOICE_PREFS = ['auto', 'feminine', 'masculine'] as const;
+export type VoicePref = (typeof VOICE_PREFS)[number];
 
 export interface Persona {
   id: number;
@@ -64,6 +67,10 @@ export interface Persona {
   opening: Opening;
   opening_line: string;
   response_length: ResponseLength;
+  /** Which installed voice reads the persona aloud. */
+  voice_pref: VoicePref;
+  /** Whether students may step out and ask the coach mid-conversation. */
+  coach: 'on' | 'off';
   /** '' = the deployment default. */
   model: string;
   material_ids: number[];
@@ -122,6 +129,8 @@ export const PersonaInput = z.object({
   opening: z.enum(['student', 'persona']).default('student'),
   opening_line: text(2000),
   response_length: z.enum(RESPONSE_LENGTHS).default('medium'),
+  voice_pref: z.enum(VOICE_PREFS).default('auto'),
+  coach: z.enum(['on', 'off']).default('on'),
   model: z.string().trim().max(60).default('').refine((m) => m === '' || isKnownModel(m), 'unknown model'),
   material_ids: z.array(z.number().int().positive()).max(40).default([]),
   status: z.enum(['draft', 'published', 'archived']).default('draft'),
@@ -133,7 +142,7 @@ export function publicPersona(p: Persona) {
   return {
     id: p.id, template: p.template, title: p.title, subtitle: p.subtitle, summary: p.summary,
     student_role: p.student_role, setting: p.setting, student_brief: p.student_brief,
-    opening: p.opening, status: p.status, objectives: p.objectives,
+    opening: p.opening, status: p.status, objectives: p.objectives, voice_pref: p.voice_pref, coach: p.coach,
   };
 }
 
@@ -166,7 +175,7 @@ async function validMaterialIds(ids: number[], scope: Scope): Promise<number[]> 
 const COLUMNS = [
   'template', 'title', 'subtitle', 'summary', 'student_role', 'setting', 'student_brief', 'character', 'voice', 'behaviour',
   'hidden', 'guardrails', 'historical_cutoff', 'raw_instructions', 'objectives', 'debrief_guidance', 'opening', 'opening_line',
-  'response_length', 'model', 'material_ids', 'status',
+  'response_length', 'voice_pref', 'coach', 'model', 'material_ids', 'status',
 ] as const;
 
 export async function createPersona(scope: Scope, input: PersonaInput, createdBy: number | null): Promise<Persona> {
@@ -306,7 +315,11 @@ export interface PersonaSession {
   status: 'in_progress' | 'ended';
   started_at: string;
   ended_at: string | null;
-  debrief: unknown | null;
+  debrief: PersonaDebrief | null;
+  coach_session_id: number | null;
+  debrief_generated_at: string | null;
+  reflection: string;
+  reflection_at: string | null;
 }
 
 /** Hidden user turn that opens a conversation the persona starts (the API needs a user turn first). */
@@ -502,5 +515,176 @@ export async function draftPersona(params: { text: string; template: PersonaTemp
     maxTokens: 8000,
     attribution: params.attribution,
     endpoint: 'persona.draft',
+  });
+}
+
+// ─── The debrief ────────────────────────────────────────────────────────────
+//
+// Written by a separate call, not by the persona: a coach's voice, judging
+// the conversation against the instructor's objectives, with the hidden
+// layer in view so it can say what was elicited and what was left on the
+// table. Stored on the session; regenerated only if the instructor clears it.
+
+const lines = (max: number) => z.preprocess(
+  (v) => (Array.isArray(v) ? v.map((x) => String(x ?? '').trim()).filter(Boolean) : String(v ?? '').split('\n').map((x) => x.trim()).filter(Boolean)).slice(0, max),
+  z.array(z.string().max(600))
+);
+
+export const PersonaDebrief = z.object({
+  overview: z.string().trim().max(2500),
+  by_objective: z.preprocess((v) => (Array.isArray(v) ? v : []), z.array(z.object({
+    objective: z.string().trim().max(300),
+    observation: z.string().trim().max(1200),
+  })).max(12)),
+  strengths: lines(8),
+  explore_further: lines(8),
+  one_question: z.string().trim().max(600).default(''),
+});
+export type PersonaDebrief = z.infer<typeof PersonaDebrief>;
+
+function transcriptText(turns: Turn[], studentName: string, personaName: string): string {
+  return visibleTurns(turns).map((t) => `${t.role === 'user' ? studentName : personaName}: ${t.content}`).join('\n\n');
+}
+
+function debriefSystemFor(p: Persona): string {
+  const spec = TEMPLATES[p.template];
+  const objectives = p.objectives.split('\n').map((s) => s.trim()).filter(Boolean);
+  return `You write the debrief after ${spec.debriefFrame}. You are not the persona; you write as a supportive, observant coach, to the student by first name. The student's role: ${p.student_role || 'a student'}. Setting: ${p.setting || 'unspecified'}.
+
+Judge the conversation that actually happened, with examples from it, against these learning objectives:
+${objectives.length ? objectives.map((o, i) => `${i + 1}. ${o}`).join('\n') : '(the instructor set no explicit objectives; judge the quality of the student\'s questions and thinking)'}
+
+${p.hidden.trim() ? `What the persona was holding back (the student never saw this; use it to say what they drew out and what they could have reached with a better question):\n${p.hidden}\n` : ''}
+${p.debrief_guidance.trim() ? `The instructor's guidance for this debrief:\n${p.debrief_guidance}\n` : ''}
+Never assign grades, scores, percentages or predictions of marks. Be specific and honest; praise only what the transcript supports. Where the student did not reach something, say what question or approach would have reached it, without lecturing.
+
+Return ONLY a JSON object, no code fences, with exactly these keys:
+{
+  "overview": "3 to 5 sentences on how the conversation went, addressed to the student",
+  "by_objective": [{ "objective": "the objective, short", "observation": "1 to 3 sentences with an example from the conversation" }],
+  "strengths": ["up to 5 specific things the student did well"],
+  "explore_further": ["up to 5 cues, topics or moves the student could have pursued, each tied to the conversation"],
+  "one_question": "one question for the student to carry away"
+}`;
+}
+
+export async function getOrGenerateDebrief(params: { persona: Persona; session: PersonaSession; studentName: string; attribution: Attribution }): Promise<PersonaDebrief> {
+  const { persona, session, studentName, attribution } = params;
+  if (session.debrief) return session.debrief;
+  const turns = await getSessionTurns(session.session_id);
+  const transcript = transcriptText(turns, studentName, persona.title);
+  const debrief = await jsonCall({
+    schema: PersonaDebrief,
+    system: debriefSystemFor(persona),
+    userPrompt: `Student's first name: ${studentName.split(' ')[0] || 'the student'}\n\nTranscript:\n${transcript || '(the student said nothing)'}\n\nWrite the debrief JSON now.`,
+    maxTokens: 3000,
+    attribution: { ...attribution, endpoint: 'persona.debrief' },
+    endpoint: 'persona.debrief',
+  });
+  await query(`update persona_session set debrief = $2::jsonb, debrief_generated_at = now() where id = $1`, [session.id, JSON.stringify(debrief)]);
+  return debrief;
+}
+
+export async function saveReflection(sessionId: number, text: string): Promise<void> {
+  await query(`update persona_session set reflection = $2, reflection_at = now() where id = $1`, [sessionId, text.trim().slice(0, 2000)]);
+}
+
+// ─── The coach: stepping out of the conversation ────────────────────────────
+//
+// A separate voice the student can turn to mid-conversation: "what should I
+// ask next?", "is this going anywhere?". It sees the pre-brief, the
+// objectives and the transcript so far, never the hidden layer, and it
+// answers with questions and options rather than scripts. Its own exchanges
+// live in a second session so they never enter the persona's transcript.
+
+function coachSystemFor(p: Persona): string {
+  const spec = TEMPLATES[p.template];
+  const objectives = p.objectives.split('\n').map((s) => s.trim()).filter(Boolean);
+  return `You are a coach sitting beside a student during ${spec.debriefFrame}. The student has stepped out of the conversation for a moment to think with you; the persona cannot hear this.
+
+The student's role: ${p.student_role || 'a student'}. Setting: ${p.setting || 'unspecified'}.
+${objectives.length ? `What the activity is for:\n${objectives.map((o) => `- ${o}`).join('\n')}\n` : ''}${p.student_brief.trim() ? `The instructor's guidance to the student:\n${p.student_brief}\n` : ''}
+You see the transcript so far. Help the student think about what to ask or try next: name what they have covered and what they have not, suggest two or three directions as questions they could put in their own words, and point out habits worth changing (closed questions, leading questions, skipping consent, agreeing too quickly, not following up a cue). Do not play the persona, do not invent facts about the persona, and do not reveal or guess what the persona may be holding back: say that finding it out is the student's job and suggest how. Two to five sentences, plain and warm, no headings or bullet lists unless listing options. If the student asks you to do the activity for them, decline briefly and hand it back.`;
+}
+
+export async function ensureCoachSession(ps: PersonaSession): Promise<number> {
+  if (ps.coach_session_id) return ps.coach_session_id;
+  const id = await createSession(ps.student_id, 'persona_coach');
+  await query(`update persona_session set coach_session_id = $2 where id = $1 and coach_session_id is null`, [ps.id, id]);
+  const rows = await query<{ coach_session_id: number }>(`select coach_session_id from persona_session where id = $1`, [ps.id]);
+  return rows[0]!.coach_session_id;
+}
+
+export async function streamCoachReply(params: {
+  persona: Persona;
+  session: PersonaSession;
+  studentName: string;
+  question: string;
+  onChunk: (text: string) => void;
+  attribution: Attribution;
+}): Promise<{ assistantText: string }> {
+  const { persona, session, studentName, question, onChunk, attribution } = params;
+  const coachId = await ensureCoachSession(session);
+  await appendTurn(coachId, 'user', question);
+  const coachTurns = await getSessionTurns(coachId);
+  const transcript = transcriptText(await getSessionTurns(session.session_id), studentName, persona.title);
+
+  const messages: Anthropic.MessageParam[] = [];
+  for (const t of coachTurns) {
+    const prev = messages[messages.length - 1];
+    if (prev && prev.role === t.role && typeof prev.content === 'string') prev.content = `${prev.content}\n\n${t.content}`;
+    else messages.push({ role: t.role, content: t.content });
+  }
+  const system: Anthropic.TextBlockParam[] = [
+    { type: 'text', text: coachSystemFor(persona), cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: `The conversation so far (the student is ${studentName}):\n\n${transcript || '(nothing yet)'}` },
+  ];
+  const model = modelFor(persona);
+  const client = getAnthropic();
+  const t0 = Date.now();
+  const stream = client.messages.stream({ model, max_tokens: TURN_MAX_TOKENS, system, messages, ...turnOptionsFor(model) });
+  let assistantText = '';
+  for await (const event of stream) {
+    if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') { assistantText += event.delta.text; onChunk(event.delta.text); }
+  }
+  if (assistantText.trim()) await appendTurn(coachId, 'assistant', assistantText);
+  try {
+    const final = await stream.finalMessage();
+    void recordApiCall({ ...attribution, endpoint: 'persona.coach', sessionId: session.session_id, model, usage: final.usage, durationMs: Date.now() - t0 });
+  } catch { /* partial reply already persisted */ }
+  return { assistantText };
+}
+
+export async function coachTurnsFor(ps: PersonaSession): Promise<Turn[]> {
+  return ps.coach_session_id ? getSessionTurns(ps.coach_session_id) : [];
+}
+
+// ─── Transcript export ──────────────────────────────────────────────────────
+
+export function debriefMarkdown(d: PersonaDebrief): string {
+  const parts = ['## Debrief', d.overview];
+  if (d.by_objective.length) { parts.push('\n### By objective'); for (const o of d.by_objective) parts.push(`- **${o.objective}** ${o.observation}`); }
+  if (d.strengths.length) { parts.push('\n### What went well'); for (const x of d.strengths) parts.push(`- ${x}`); }
+  if (d.explore_further.length) { parts.push('\n### Worth exploring further'); for (const x of d.explore_further) parts.push(`- ${x}`); }
+  if (d.one_question) parts.push(`\n### One question to carry away\n${d.one_question}`);
+  return parts.join('\n');
+}
+
+export function transcriptMarkdown(p: Persona, ps: PersonaSession, turns: Turn[], studentName: string): string {
+  const when = new Date(ps.started_at).toLocaleString('en-CA', { dateStyle: 'long', timeStyle: 'short' });
+  const parts = [`# ${p.title}`, p.subtitle ? `*${p.subtitle}*` : '', `${studentName} · ${when}${ps.mode === 'preview' ? ' · preview' : ''}`, ''];
+  if (p.student_role || p.setting) parts.push(`**You were:** ${p.student_role || '—'}  \n**Setting:** ${p.setting || '—'}`, '');
+  parts.push('## Conversation');
+  for (const t of visibleTurns(turns)) parts.push(`**${t.role === 'user' ? studentName : p.title}:** ${t.content}`, '');
+  if (ps.debrief) parts.push(debriefMarkdown(ps.debrief), '');
+  if (ps.reflection) parts.push('## Your reflection', ps.reflection, '');
+  return parts.join('\n');
+}
+
+export function transcriptHtml(p: Persona, ps: PersonaSession, turns: Turn[], studentName: string, toolName: string): string {
+  return standaloneHtml({
+    title: `${p.title} · ${studentName}`,
+    markdown: transcriptMarkdown(p, ps, turns, studentName),
+    footer: `Exported from ${toolName}. The persona is an AI playing a part for a learning activity; check anything you rely on against the course's sources.`,
   });
 }

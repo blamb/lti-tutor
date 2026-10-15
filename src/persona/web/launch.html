@@ -27,6 +27,7 @@
     }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { margin: 0; padding: 1.5rem; background: var(--bg); color: var(--fg); line-height: var(--lh); }
   .wrap { max-width: 900px; margin: 0 auto; }
   :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
@@ -129,6 +130,19 @@
   .draft-card summary { cursor: pointer; font-weight: 600; }
   .draft-card textarea { width: 100%; min-height: 140px; font: inherit; padding: .5rem .6rem; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--fg); margin: .5rem 0; }
   .sticky-actions { position: sticky; bottom: 0; background: var(--card); padding: .6rem 0 0; border-top: 1px solid var(--border); margin-top: .5rem; display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+  .voice-row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin-top: .5rem; font-size: .85rem; color: var(--muted); }
+  .mic-btn { padding: .45rem 1rem; min-height: 44px; border-radius: 999px; border: 1px solid var(--accent); background: var(--card); color: var(--accent); font-weight: 500; cursor: pointer; }
+  .mic-btn.listening { background: var(--bad); border-color: var(--bad); color: var(--card); animation: pulse 1.2s infinite; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(164,40,40,.45); } 70% { box-shadow: 0 0 0 10px rgba(164,40,40,0); } 100% { box-shadow: 0 0 0 0 rgba(164,40,40,0); } }
+  .coach { border: 1px dashed var(--accent); border-radius: 10px; padding: .75rem 1rem; margin-top: .75rem; background: var(--accent-soft); }
+  .coach h3 { margin: 0 0 .25rem; font-size: .95rem; }
+  .coach .turns { min-height: 120px; max-height: 36vh; }
+  .coach .turn.assistant .bubble { background: var(--card); }
+  .after { margin-top: .75rem; }
+  .debrief h3 { margin: .9rem 0 .3rem; font-size: .95rem; }
+  .debrief ul { margin: .25rem 0 .5rem 1.1rem; padding: 0; }
+  .debrief .obj { margin: .3rem 0; }
+  .reflect textarea { width: 100%; min-height: 72px; padding: .5rem .7rem; border: 1px solid var(--border); border-radius: 6px; font: inherit; background: var(--card); color: var(--fg); }
   .quotes { display: flex; flex-wrap: wrap; gap: .3rem; margin: .15rem 0 .4rem .2rem; }
   .quotes .chip { cursor: help; max-width: 100%; white-space: normal; }
   .quotes .chip.ok { background: var(--good-bg); border-color: var(--good-bg); color: var(--good); }
@@ -136,10 +150,10 @@
   .bk-unit { margin: .5rem 0 .75rem; }
   .bk-unit .bk-head { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-bottom: .25rem; }
   .bk-preview { white-space: pre-wrap; margin: .3rem 0; max-height: 12rem; overflow: auto; font-size: .8rem; }
-  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; } }
+  @media (prefers-reduced-motion: reduce) { .mic-btn.listening { animation: none; outline: 3px solid var(--bad); outline-offset: 2px; } *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; } }
   @media print {
     body { padding: 0; background: #fff; color: #000; }
-    header .header-actions, .compose, .chat-toolbar, button, .skip-link { display: none !important; }
+    header .header-actions, .compose, .chat-toolbar, .voice-row, .coach, .reflect textarea, button, .skip-link { display: none !important; }
     .turns { max-height: none; overflow: visible; border: none; padding: 0; }
     .turn .bubble { max-width: 100%; border: 1px solid #ccc; background: #fff !important; color: #000 !important; }
     .turn.user .bubble::before { content: "You: "; font-weight: 600; }
@@ -189,6 +203,7 @@
       <div id="brief-objectives"></div>
       <div class="form-row" style="margin-top:1rem">
         <button type="button" class="btn" id="brief-start">Start the conversation</button>
+        <button type="button" class="btn-ghost btn" id="brief-review" hidden>See your last conversation and debrief</button>
         <button type="button" class="btn-ghost btn" id="brief-restart" hidden>Start over</button>
         <span class="muted" id="brief-status"></span>
       </div>
@@ -206,7 +221,7 @@
         <span class="chip" id="chat-mode" hidden></span>
         <span class="muted" id="chat-setting"></span>
         <span class="spacer"></span>
-        <button type="button" class="link-btn" id="chat-print">Print</button>
+        <button type="button" class="link-btn" id="chat-coach-btn" title="Pause and think with a coach; the persona cannot hear this">Step out and ask the coach</button>
         <button type="button" class="link-btn" id="chat-end">End conversation</button>
       </div>
       <div class="turns" id="chat-turns" aria-label="Conversation"></div>
@@ -215,8 +230,47 @@
         <textarea id="chat-input" rows="1" placeholder="Type your message… (Enter to send, Shift+Enter for a new line)"></textarea>
         <button type="submit" id="chat-send">Send</button>
       </form>
-      <div class="muted" id="chat-ended" hidden style="margin-top:.6rem">This conversation has ended. <button type="button" class="link-btn" id="chat-again">Start a new one</button></div>
+      <div class="voice-row" id="chat-voice-row">
+        <button class="mic-btn" id="chat-mic" type="button" aria-pressed="false" aria-describedby="chat-voice-hint" title="Hold the conversation by voice. You decide when to start and stop."><span aria-hidden="true">🎤</span> <span class="mic-label">Speak</span></button>
+        <label style="display:flex;align-items:center;gap:.35rem;cursor:pointer"><input type="checkbox" id="chat-tts"> Read replies aloud</label>
+        <label style="display:flex;align-items:center;gap:.35rem" id="chat-voice-pick" hidden>Voice <select id="chat-voice" aria-label="Voice that reads replies aloud" title="Voices come from your device and browser. The automatic choice picks the most natural one available."><option value="">Automatic</option></select><button class="link-btn" type="button" id="chat-voice-test" title="Hear a sample in this voice">▶ sample</button></label>
+        <span id="chat-voice-hint"></span>
+      </div>
       <div class="err" id="chat-err" role="alert"></div>
+
+      <aside class="coach" id="coach-panel" hidden aria-labelledby="coach-h">
+        <h3 id="coach-h">Thinking it over with the coach</h3>
+        <p class="muted" style="margin:0 0 .5rem">The persona cannot hear this. Ask what to try next, whether you have covered what matters, or how a question could be put better. The coach will not tell you what the persona is holding back; finding that out is the point.</p>
+        <div class="turns" id="coach-turns" aria-label="Conversation with the coach"></div>
+        <form class="compose" id="coach-compose">
+          <label for="coach-input" class="visually-hidden">Your question to the coach</label>
+          <textarea id="coach-input" rows="1" placeholder="e.g. What haven't I asked about yet?"></textarea>
+          <button type="submit" id="coach-send">Ask</button>
+        </form>
+        <div class="form-row" style="margin-top:.5rem"><button type="button" class="link-btn" id="coach-back">Back to the conversation</button></div>
+        <div class="err" id="coach-err" role="alert"></div>
+      </aside>
+
+      <div class="after" id="chat-after" hidden>
+        <div class="muted" id="chat-ended">This conversation has ended.</div>
+        <div class="form-row" style="margin:.5rem 0">
+          <button type="button" class="btn" id="debrief-btn">Get your debrief</button>
+          <button type="button" class="link-btn" id="chat-again">Start a new conversation</button>
+        </div>
+        <div class="muted" id="debrief-status" role="status"></div>
+        <div class="debrief" id="debrief-body" hidden></div>
+        <div class="reflect" id="reflect" hidden>
+          <h3 style="margin:1rem 0 .3rem;font-size:.95rem">One thing to take from this</h3>
+          <p class="muted" style="margin:0 0 .4rem">A sentence or two for yourself. Your instructor can see it alongside the conversation.</p>
+          <textarea id="reflect-text" aria-label="Your reflection"></textarea>
+          <div class="form-row" style="margin-top:.4rem"><button type="button" class="btn-ghost btn" id="reflect-save">Save</button><span class="muted" id="reflect-status" role="status"></span></div>
+        </div>
+        <div class="form-row" style="margin-top:.9rem">
+          <button type="button" class="link-btn" id="export-html">Download transcript (HTML)</button>
+          <button type="button" class="link-btn" id="export-md">Download as Markdown</button>
+          <button type="button" class="link-btn" id="chat-print">Print</button>
+        </div>
+      </div>
     </section>
 
     <!-- Designer view -->
@@ -272,6 +326,12 @@
                     <select name="response_length"><option value="short">Short: conversational, a few sentences</option><option value="medium" selected>Medium: one to three short paragraphs</option><option value="long">Long: several paragraphs when warranted</option></select></label>
                 </div>
                 <label>Opening line<span class="hint" id="hint-opening_line"></span><textarea name="opening_line"></textarea></label>
+                <div class="form-row">
+                  <label style="flex:1;min-width:200px">Read-aloud voice<span class="hint">Voices come from each student's device; this only steers the automatic choice.</span>
+                    <select name="voice_pref"><option value="auto">Automatic</option><option value="feminine">Lean feminine</option><option value="masculine">Lean masculine</option></select></label>
+                  <label style="flex:1;min-width:200px">Step-out coach<span class="hint">Lets students pause and ask a coach what to try next. Switch off for assessment-like runs.</span>
+                    <select name="coach"><option value="on">On</option><option value="off">Off</option></select></label>
+                </div>
                 <label>Model<span class="hint">The model that plays this persona. Prices are per million tokens, in and out; a typical conversation is a few thousand tokens per turn.</span>
                   <select name="model" id="model-select"></select></label>
                 <label>Materials the persona draws on<span class="hint">Readings, the figure's own writings, a case file. Add them under the Materials tab; the persona cites them as its sources.</span>
@@ -501,14 +561,17 @@
     const objs = String(p.objectives || '').split('\n').map((s) => s.trim()).filter(Boolean);
     $('#brief-objectives').innerHTML = objs.length ? `<h3>What this helps you practise</h3><ul>${objs.map((o) => `<li>${esc(o)}</li>`).join('')}</ul>` : '';
     const inProgress = p.my_session && p.my_session.status !== 'ended';
-    $('#brief-start').textContent = inProgress ? 'Continue the conversation' : 'Start the conversation';
-    $('#brief-restart').hidden = !p.my_session;
+    const ended = p.my_session && p.my_session.status === 'ended';
+    $('#brief-start').textContent = inProgress ? 'Continue the conversation' : ended ? 'Start a new conversation' : 'Start the conversation';
+    $('#brief-review').hidden = !ended;
+    $('#brief-restart').hidden = !inProgress;
     $('#brief-status').textContent = preview ? 'Preview: this conversation is not counted or reported.' : '';
     $('#brief-err').textContent = '';
     showView('brief');
   }
   $('#brief-back').addEventListener('click', () => { if (current?.preview) { showView('teacher'); } else { showView('home'); loadHome(); } });
-  $('#brief-start').addEventListener('click', () => startChat({ fresh: false }));
+  $('#brief-start').addEventListener('click', () => startChat({ fresh: !!(current.persona.my_session && current.persona.my_session.status === 'ended') }));
+  $('#brief-review').addEventListener('click', () => openSession(current.persona.my_session.id));
   $('#brief-restart').addEventListener('click', () => { if (confirm('Start this conversation over from the beginning? The earlier one is kept but will not continue.')) startChat({ fresh: true }); });
 
   // ─── Chat ───
@@ -525,21 +588,41 @@
     const p = current.persona; $('#brief-err').textContent = '';
     try {
       const data = await api(`/api/personas/${p.id}/start`, { body: { fresh, preview: !!current.preview } });
-      chat.session = data.session;
-      $('#chat-h').textContent = p.title; $('#chat-sub').textContent = p.subtitle || '';
-      $('#chat-setting').textContent = p.setting || '';
-      current.model = data.persona.model || '';
-      const mode = $('#chat-mode'); mode.hidden = !current.preview; mode.textContent = current.preview ? `Preview · ${current.model}` : '';
-      chatTurns.innerHTML = ''; chatErr.textContent = '';
-      for (const t of data.turns) appendTurn(t.role, t.content);
-      setEnded(data.session.status === 'ended');
-      showView('chat');
+      await enterChat(data);
       if (!data.turns.length && p.opening === 'persona') await chatStream({ begin: true });
       else if (data.session.status !== 'ended') chatInput.focus();
     } catch (e) { $('#brief-err').textContent = 'Could not start: ' + friendlyError(e); }
   }
+  async function openSession(sid) {
+    $('#brief-err').textContent = '';
+    try { await enterChat(await api(`/api/personas/session/${sid}`)); }
+    catch (e) { $('#brief-err').textContent = 'Could not open: ' + friendlyError(e); }
+  }
+  async function enterChat(data) {
+    const p = current.persona;
+    stopChatVoice();
+    chat.session = data.session;
+    $('#chat-h').textContent = p.title; $('#chat-sub').textContent = p.subtitle || '';
+    $('#chat-setting').textContent = p.setting || '';
+    current.model = data.persona.model || '';
+    const mode = $('#chat-mode'); mode.hidden = !current.preview; mode.textContent = current.preview ? `Preview · ${current.model}` : '';
+    chatTurns.innerHTML = ''; chatErr.textContent = ''; $('#coach-err').textContent = '';
+    for (const t of data.turns) appendTurn(t.role, t.content);
+    $('#coach-turns').innerHTML = '';
+    for (const t of data.coach_turns || []) appendCoachTurn(t.role, t.content);
+    $('#coach-panel').hidden = true;
+    $('#chat-coach-btn').hidden = p.coach === 'off';
+    $('#debrief-body').hidden = true; $('#debrief-body').innerHTML = ''; $('#debrief-status').textContent = ''; $('#reflect').hidden = true;
+    $('#reflect-text').value = data.session.reflection || ''; $('#reflect-status').textContent = '';
+    setEnded(data.session.status === 'ended');
+    if (data.session.status === 'ended' && data.session.debrief) renderDebrief(data.session.debrief);
+    if (window.speechSynthesis) fillVoiceMenu();
+    showView('chat');
+  }
   function setEnded(ended) {
-    $('#chat-ended').hidden = !ended; $('#chat-compose').hidden = ended; $('#chat-end').hidden = ended;
+    $('#chat-after').hidden = !ended; $('#chat-compose').hidden = ended; $('#chat-voice-row').hidden = ended;
+    $('#chat-end').hidden = ended; $('#chat-coach-btn').hidden = ended || current.persona.coach === 'off';
+    if (ended) $('#coach-panel').hidden = true;
   }
   async function chatStream({ begin = false, message = '' } = {}) {
     if (!chat.session || chat.busy) return;
@@ -572,8 +655,9 @@
         }
       }
       if (!bubble._raw) bubble.closest('.turn').remove();
+      else if ($('#chat-tts').checked) speakText(bubble._raw);
     } catch (e) { chatErr.textContent = 'Send failed: ' + friendlyError(e); }
-    finally { chat.busy = false; chatSend.disabled = false; chatInput.focus(); }
+    finally { chat.busy = false; chatSend.disabled = false; if (!listening) chatInput.focus(); }
   }
   function renderQuotes(bubble, q) {
     const turn = bubble.closest('.turn'); if (!turn) return;
@@ -596,18 +680,194 @@
   }
   $('#chat-compose').addEventListener('submit', async (e) => {
     e.preventDefault(); const msg = chatInput.value.trim(); if (!msg) return;
-    chatInput.value = ''; await chatStream({ message: msg });
+    if (listening) stopListening(false);
+    stopSpeaking(); chatInput.value = ''; await chatStream({ message: msg });
   });
   chatInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('#chat-compose').requestSubmit(); } });
   $('#chat-back').addEventListener('click', () => { if (current?.preview) showView('teacher'); else { showView('home'); loadHome(); } });
   $('#chat-print').addEventListener('click', () => window.print());
   $('#chat-end').addEventListener('click', async () => {
     if (!chat.session || chat.busy) return;
-    if (!confirm('End this conversation? You can start a new one afterwards.')) return;
-    try { const d = await api(`/api/personas/session/${chat.session.id}/end`, { method: 'POST' }); chat.session = d.session; setEnded(true); announce('The conversation has ended.'); }
+    if (!confirm('End this conversation? You can get your debrief afterwards, and start a new one any time.')) return;
+    stopChatVoice();
+    try { const d = await api(`/api/personas/session/${chat.session.id}/end`, { method: 'POST' }); chat.session = d.session; setEnded(true); announce('The conversation has ended. You can get your debrief now.'); $('#debrief-btn').focus(); }
     catch (e) { chatErr.textContent = friendlyError(e); }
   });
   $('#chat-again').addEventListener('click', () => startChat({ fresh: true }));
+  $('#chat-back').addEventListener('click', stopChatVoice);
+
+  // ─── After the conversation: debrief, reflection, export ───
+  $('#debrief-btn').addEventListener('click', async () => {
+    if (!chat.session) return;
+    const btn = $('#debrief-btn'); btn.disabled = true; $('#debrief-status').textContent = 'Writing your debrief… about 20 seconds.';
+    try {
+      const d = await api(`/api/personas/session/${chat.session.id}/debrief`, { method: 'POST' });
+      chat.session.debrief = d.debrief; renderDebrief(d.debrief); $('#debrief-status').textContent = ''; announce('Your debrief is ready.');
+    } catch (e) { $('#debrief-status').textContent = friendlyError(e); btn.disabled = false; }
+  });
+  function renderDebrief(d) {
+    const box = $('#debrief-body'); box.hidden = false; $('#debrief-btn').hidden = true;
+    const li = (xs) => xs.map((x) => `<li>${esc(x)}</li>`).join('');
+    box.innerHTML = `<h3>How it went</h3><p>${esc(d.overview)}</p>` +
+      (d.by_objective && d.by_objective.length ? `<h3>By objective</h3>${d.by_objective.map((o) => `<div class="obj"><strong>${esc(o.objective)}</strong> ${esc(o.observation)}</div>`).join('')}` : '') +
+      (d.strengths && d.strengths.length ? `<h3>What went well</h3><ul>${li(d.strengths)}</ul>` : '') +
+      (d.explore_further && d.explore_further.length ? `<h3>Worth exploring further</h3><ul>${li(d.explore_further)}</ul>` : '') +
+      (d.one_question ? `<h3>One question to carry away</h3><p>${esc(d.one_question)}</p>` : '');
+    $('#reflect').hidden = false;
+  }
+  $('#reflect-save').addEventListener('click', async () => {
+    if (!chat.session) return;
+    const text = $('#reflect-text').value.trim(); $('#reflect-status').textContent = 'Saving…';
+    try { await api(`/api/personas/session/${chat.session.id}/reflection`, { body: { text } }); chat.session.reflection = text; $('#reflect-status').textContent = 'Saved.'; }
+    catch (e) { $('#reflect-status').textContent = friendlyError(e); }
+  });
+  async function saveFile(path, filename) {
+    const r = await fetch(apiUrl(path), { credentials: 'include' }); if (!r.ok) throw new Error('Server returned ' + r.status);
+    const url = URL.createObjectURL(await r.blob()); const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
+  const stem = () => `${(current?.persona?.title || 'conversation').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}-${chat.session?.id}`;
+  $('#export-html').addEventListener('click', () => saveFile(`/api/personas/session/${chat.session.id}/transcript.html?download=1`, stem() + '.html').catch((e) => { chatErr.textContent = friendlyError(e); }));
+  $('#export-md').addEventListener('click', () => saveFile(`/api/personas/session/${chat.session.id}/transcript.md?download=1`, stem() + '.md').catch((e) => { chatErr.textContent = friendlyError(e); }));
+
+  // ─── The coach: stepping out ───
+  const coachTurns = $('#coach-turns'), coachInput = $('#coach-input');
+  let coachBusy = false;
+  function appendCoachTurn(role, text) {
+    const t = document.createElement('div'); t.className = 'turn ' + role;
+    const b = document.createElement('div'); b.className = 'bubble';
+    if (role === 'assistant') { b.dataset.speaker = 'Coach'; setMd(b, text); } else b.textContent = text;
+    t.appendChild(b); coachTurns.appendChild(t); coachTurns.scrollTop = coachTurns.scrollHeight;
+    return b;
+  }
+  $('#chat-coach-btn').addEventListener('click', () => {
+    const panel = $('#coach-panel'); panel.hidden = !panel.hidden;
+    if (!panel.hidden) { stopChatVoice(); coachInput.focus(); announce('You have stepped out. The persona cannot hear this.'); }
+  });
+  $('#coach-back').addEventListener('click', () => { $('#coach-panel').hidden = true; chatInput.focus(); });
+  $('#coach-compose').addEventListener('submit', async (e) => {
+    e.preventDefault(); const q = coachInput.value.trim(); if (!q || coachBusy || !chat.session) return;
+    coachInput.value = ''; coachBusy = true; $('#coach-send').disabled = true; $('#coach-err').textContent = '';
+    appendCoachTurn('user', q); const bubble = appendCoachTurn('assistant', '');
+    try {
+      const resp = await fetch(apiUrl(`/api/personas/session/${chat.session.id}/coach`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ question: q }) });
+      if (!resp.ok) throw new Error('Server returned ' + resp.status);
+      const reader = resp.body.getReader(); const decoder = new TextDecoder(); let buf = '';
+      while (true) {
+        const { value, done } = await reader.read(); if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf('\n\n')) !== -1) {
+          const evt = parseSSE(buf.slice(0, idx)); buf = buf.slice(idx + 2);
+          if (evt.event === 'chunk') { bubble._raw = (bubble._raw || '') + (evt.data.text || ''); setMd(bubble, bubble._raw); coachTurns.scrollTop = coachTurns.scrollHeight; }
+          else if (evt.event === 'done') announce('Coach: ' + (bubble._raw || ''));
+          else if (evt.event === 'error') $('#coach-err').textContent = friendlyError(evt.data.message);
+        }
+      }
+      if (!bubble._raw) bubble.closest('.turn').remove();
+    } catch (e2) { $('#coach-err').textContent = friendlyError(e2); }
+    finally { coachBusy = false; $('#coach-send').disabled = false; coachInput.focus(); }
+  });
+  coachInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('#coach-compose').requestSubmit(); } });
+
+  // ─── Voice: push-to-talk and read-aloud (Web Speech API), ported from the tutor ───
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const inIframe = (() => { try { return window.self !== window.top; } catch { return true; } })();
+  const micBtn = $('#chat-mic'), ttsBox = $('#chat-tts'), voiceHint = $('#chat-voice-hint');
+  let rec = null, listening = false, recBase = '', ttsTouched = false;
+  ttsBox.addEventListener('change', () => { ttsTouched = true; if (!ttsBox.checked) stopSpeaking(); });
+  if (!SR) { micBtn.disabled = true; voiceHint.textContent = 'Voice input needs Chrome, Edge or Safari. Typing works everywhere.'; }
+  else if (inIframe) voiceHint.textContent = 'If the microphone is blocked inside the LMS, use Full screen. Typing always works.';
+  micBtn.addEventListener('click', () => (listening ? stopListening(false, { review: true }) : startListening()));
+  function startListening() {
+    if (!SR || chat.busy || listening) return;
+    stopSpeaking();
+    rec = new SR(); rec.lang = navigator.language || 'en-US'; rec.continuous = true; rec.interimResults = true;
+    recBase = chatInput.value.trim() ? chatInput.value.trim() + ' ' : '';
+    let finalText = '';
+    rec.onresult = (e) => {
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) { const r = e.results[i]; if (r.isFinal) finalText += r[0].transcript + ' '; else interim += r[0].transcript; }
+      chatInput.value = (recBase + finalText + interim).trim();
+    };
+    rec.onerror = (e) => {
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        chatErr.textContent = inIframe ? 'The microphone is blocked inside the LMS frame. Click ⛶ Full screen (top right), then try Speak again.' : 'Microphone access was blocked. Allow it in your browser and try again.';
+        stopListening(false);
+      } else if (e.error !== 'no-speech' && e.error !== 'aborted') { chatErr.textContent = 'Voice input error: ' + e.error; stopListening(false); }
+    };
+    rec.onend = () => { if (listening && rec) { recBase = chatInput.value.trim() ? chatInput.value.trim() + ' ' : ''; finalText = ''; try { rec.start(); } catch {} } };
+    try { rec.start(); } catch (e) { chatErr.textContent = 'Could not start voice input: ' + (e.message || e); return; }
+    listening = true; setMicState(true);
+    if (!ttsTouched) ttsBox.checked = true;
+    voiceHint.textContent = 'Listening. Your words appear in the box as you speak; press "Done speaking" to check them, then Send.';
+    announce('Listening. Press Done speaking when you have finished.');
+  }
+  function setMicState(on) {
+    micBtn.classList.toggle('listening', on); micBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    micBtn.innerHTML = on ? '<span aria-hidden="true">⏹</span> <span class="mic-label">Done speaking</span>' : '<span aria-hidden="true">🎤</span> <span class="mic-label">Speak</span>';
+    micBtn.setAttribute('aria-label', on ? 'Done speaking: stop voice input and check the text' : 'Speak: start voice input');
+  }
+  function stopListening(send, opts = {}) {
+    const was = listening; listening = false; setMicState(false);
+    if (rec) { try { rec.stop(); } catch {} } rec = null;
+    if (!was) return;
+    const text = chatInput.value.trim();
+    if (opts.review) {
+      voiceHint.textContent = text ? 'Check the text, edit it if you like, then press Send.' : 'Nothing was recognised. Try again, or type.';
+      announce(text ? 'Voice input stopped. Check the text, then press Send.' : 'Nothing was recognised.'); chatInput.focus(); return;
+    }
+    if (send && text) { chatInput.value = ''; chatStream({ message: text }); }
+  }
+  function stopSpeaking() { try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {} }
+  function stopChatVoice() { if (listening) stopListening(false); stopSpeaking(); }
+  // Rank installed voices: natural ones first, the persona's leaning next, the robotic ones last.
+  const VOICE_KEY = 'persona-chat-voice';
+  const VOICE_GOOD = [/natural/i, /premium/i, /enhanced/i, /neural/i, /siri/i, /^google/i, /\b(samantha|karen|daniel|moira|tessa|fiona|serena|allison|ava|zoe|evan|tom|nicky|aaron|arthur|martha|catherine|jamie|flo|reed|rocko|sandy|shelley|eddy|grandma|grandpa)\b/i];
+  const VOICE_BAD = [/compact/i, /espeak/i, /desktop/i, /\bfred\b/i, /\balbert\b/i, /\bbad news\b/i, /\bbells\b/i, /\bboing\b/i, /\bbubbles\b/i, /\bcellos\b/i, /\bwobble\b/i, /\bzarvox\b/i, /\btrinoids\b/i, /\bwhisper\b/i, /\bjester\b/i, /\borgan\b/i, /\bsuperstar\b/i, /\bgood news\b/i, /\bhysterical\b/i, /\bpipe organ\b/i];
+  const VOICE_FEM = /\b(samantha|karen|moira|tessa|fiona|serena|allison|ava|zoe|nicky|martha|catherine|flo|sandy|shelley|grandma|kate|victoria|susan|zira|hazel|female|woman|aria|jenny|sara|emma|sonia|libby)\b/i;
+  const VOICE_MASC = /\b(daniel|evan|tom|aaron|arthur|reed|rocko|eddy|grandpa|alex|oliver|david|mark|james|ryan|guy|male|man|george|thomas|brian|christopher)\b/i;
+  function voiceScore(v, lang) {
+    let s = 0; const l = (v.lang || '').toLowerCase(); const want = lang.toLowerCase();
+    if (l === want) s += 30; else if (l.split('-')[0] === want.split('-')[0]) s += 20; else return -1;
+    if (VOICE_BAD.some((re) => re.test(v.name))) s -= 40;
+    VOICE_GOOD.forEach((re, i) => { if (re.test(v.name)) s += 20 - i; });
+    const pref = current?.persona?.voice_pref || 'auto';
+    if (pref === 'feminine' && VOICE_FEM.test(v.name)) s += 12; else if (pref === 'feminine' && VOICE_MASC.test(v.name)) s -= 12;
+    if (pref === 'masculine' && VOICE_MASC.test(v.name)) s += 12; else if (pref === 'masculine' && VOICE_FEM.test(v.name)) s -= 12;
+    if (v.localService === false) s += 2; if (v.default) s += 1;
+    return s;
+  }
+  function usableVoices() { try { return (window.speechSynthesis && window.speechSynthesis.getVoices()) || []; } catch { return []; } }
+  function rankedVoices() { const lang = navigator.language || 'en-US'; return usableVoices().map((v) => ({ v, s: voiceScore(v, lang) })).filter((x) => x.s >= 0).sort((a, b) => b.s - a.s).map((x) => x.v); }
+  function storedVoice() { try { return localStorage.getItem(VOICE_KEY) || ''; } catch { return ''; } }
+  function rememberVoice(name) { try { if (name) localStorage.setItem(VOICE_KEY, name); else localStorage.removeItem(VOICE_KEY); } catch {} }
+  function chosenVoice() { const ranked = rankedVoices(); const wanted = storedVoice(); return (wanted && ranked.find((v) => v.name === wanted)) || ranked[0] || null; }
+  function fillVoiceMenu() {
+    const sel = $('#chat-voice'); const pick = $('#chat-voice-pick'); if (!sel || !window.speechSynthesis) return;
+    const ranked = rankedVoices(); pick.hidden = ranked.length < 2; const cur = storedVoice();
+    sel.innerHTML = '<option value="">Automatic' + (ranked[0] ? ` (${esc(ranked[0].name)})` : '') + '</option>' +
+      ranked.map((v) => `<option value="${esc(v.name)}"${v.name === cur ? ' selected' : ''}>${esc(v.name.replace(/^Microsoft |^Google /, ''))}${/natural|premium|enhanced|neural/i.test(v.name) ? ' ★' : ''} (${esc(v.lang)})</option>`).join('');
+  }
+  if (window.speechSynthesis) {
+    fillVoiceMenu();
+    try { window.speechSynthesis.addEventListener('voiceschanged', fillVoiceMenu); } catch { window.speechSynthesis.onvoiceschanged = fillVoiceMenu; }
+    $('#chat-voice').addEventListener('change', (e) => { rememberVoice(e.target.value); fillVoiceMenu(); });
+    $('#chat-voice-test').addEventListener('click', () => speakText(`Hello. This is the voice that will read ${current?.persona?.title || 'the persona'}'s replies. What do you think of it?`));
+  }
+  // Sentence by sentence: smoother pauses, and Chrome stops a single long utterance after about fifteen seconds. Stage directions in italics are not read.
+  function speakText(text) {
+    if (!window.speechSynthesis) return;
+    const plain = String(text).replace(/```[\s\S]*?```/g, ' ').replace(/\*[^*\n]{1,160}\*/g, ' ').replace(/[*_`#>]+/g, '').replace(/\[(.*?)\]\(.*?\)/g, '$1').replace(/\s+/g, ' ').trim();
+    if (!plain) return;
+    stopSpeaking();
+    const voice = chosenVoice();
+    const chunks = plain.match(/[^.!?]+[.!?]+["')\]]*\s*|[^.!?]+$/g) || [plain];
+    let buf = ''; const parts = [];
+    for (const c of chunks) { buf += c; if (buf.length > 180) { parts.push(buf.trim()); buf = ''; } }
+    if (buf.trim()) parts.push(buf.trim());
+    for (const part of parts) { const u = new SpeechSynthesisUtterance(part); u.lang = (voice && voice.lang) || navigator.language || 'en-US'; if (voice) u.voice = voice; u.rate = 0.98; u.pitch = 1; window.speechSynthesis.speak(u); }
+  }
 
   // ─── Designer ───
   let catalog = null, designerPersonas = [], designerMaterials = [];

@@ -7,8 +7,13 @@
  *   GET  /api/me                                 -> { name, role, course }
  *   GET  /api/personas                           -> { personas: [public fields + my latest conversation] }
  *   POST /api/personas/:id/start                 { fresh?, preview? } -> { persona, session, turns }
- *   POST /api/personas/session/:sid/turn         { message } | { begin: true } -> SSE chunk | notice | done | error
+ *   POST /api/personas/session/:sid/turn         { message } | { begin: true } -> SSE chunk | notice | quotes | done | error
+ *   GET  /api/personas/session/:sid              -> { persona, session, turns, coach_turns }   (reopen, including an ended one)
  *   POST /api/personas/session/:sid/end          -> { session }
+ *   POST /api/personas/session/:sid/debrief      -> { debrief }   (generated once the conversation has ended)
+ *   POST /api/personas/session/:sid/coach        { question } -> SSE chunk | done | error   (step out and ask the coach)
+ *   POST /api/personas/session/:sid/reflection   { text } -> { ok }
+ *   GET  /api/personas/session/:sid/transcript.html | .md   (?download=1)
  *
  * Instructor
  *   GET  /api/teacher/catalog                    -> { templates, models, model_default }
@@ -50,6 +55,7 @@ import {
   PersonaInput, PERSONA_MODELS, publicPersona, listPersonas, getPersona, createPersona, updatePersona, deletePersona, detachMaterial,
   startPersonaSession, getPersonaSession, endPersonaSession, getSessionTurns, visibleTurns, streamPersonaReply, draftPersona,
   latestSessionsForStudent, START_MARKER, DRAFT_MAX_CHARS, PERSONA_MATERIAL_MAX_CHARS, modelFor,
+  getOrGenerateDebrief, streamCoachReply, coachTurnsFor, saveReflection, transcriptHtml, transcriptMarkdown,
 } from './personas.js';
 
 // The course-import commit sends every selected material's text back in one
@@ -133,7 +139,7 @@ lti.app.post('/api/personas/:id/start', async (req: Request, res: Response) => {
     const me = await studentFromToken(token);
     const session = await startPersonaSession(persona, me.id, preview ? 'preview' : 'live', { fresh: !!req.body?.fresh });
     const turns = visibleTurns(await getSessionTurns(session.session_id));
-    res.json({ persona: { ...publicPersona(persona), model: isTeacher(token) ? modelFor(persona) : undefined }, session, turns });
+    res.json({ persona: { ...publicPersona(persona), model: isTeacher(token) ? modelFor(persona) : undefined }, session, turns, coach_turns: await coachTurnsFor(session) });
   } catch (e) {
     fail(res, e, 'POST /api/personas/:id/start');
   }
@@ -152,13 +158,31 @@ async function ownedSession(req: Request, res: Response) {
   return { token, scope, me, session, persona };
 }
 
-lti.app.post('/api/personas/session/:sid/turn', async (req: Request, res: Response) => {
+function sseStart(res: Response): (event: string, data: unknown) => void {
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders?.();
-  const send = (event: string, data: unknown): void => { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
+  return (event, data) => { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
+}
+
+lti.app.get('/api/personas/session/:sid', async (req: Request, res: Response) => {
+  try {
+    const owned = await ownedSession(req, res);
+    if (!owned) return res.status(404).json({ error: 'conversation not found' });
+    const { token, session, persona } = owned;
+    res.json({
+      persona: { ...publicPersona(persona), model: isTeacher(token) ? modelFor(persona) : undefined },
+      session, turns: visibleTurns(await getSessionTurns(session.session_id)), coach_turns: await coachTurnsFor(session),
+    });
+  } catch (e) {
+    fail(res, e, 'GET /api/personas/session/:sid');
+  }
+});
+
+lti.app.post('/api/personas/session/:sid/turn', async (req: Request, res: Response) => {
+  const send = sseStart(res);
   try {
     const owned = await ownedSession(req, res);
     if (!owned) { send('error', { message: 'conversation not found' }); return res.end(); }
@@ -197,6 +221,75 @@ lti.app.post('/api/personas/session/:sid/end', async (req: Request, res: Respons
     res.json({ session });
   } catch (e) {
     fail(res, e, 'POST /api/personas/session/:sid/end');
+  }
+});
+
+lti.app.post('/api/personas/session/:sid/debrief', async (req: Request, res: Response) => {
+  try {
+    const owned = await ownedSession(req, res);
+    if (!owned) return res.status(404).json({ error: 'conversation not found' });
+    const { token, me, session, persona } = owned;
+    if (session.status !== 'ended') return res.status(400).json({ error: 'End the conversation first; the debrief looks back at the whole of it.' });
+    const debrief = await getOrGenerateDebrief({ persona, session, studentName: me.display_name, attribution: attr(token, me.id, session.session_id, 'persona.debrief') });
+    res.json({ debrief });
+  } catch (e) {
+    fail(res, e, 'POST /api/personas/session/:sid/debrief');
+  }
+});
+
+lti.app.post('/api/personas/session/:sid/coach', async (req: Request, res: Response) => {
+  const send = sseStart(res);
+  try {
+    const owned = await ownedSession(req, res);
+    if (!owned) { send('error', { message: 'conversation not found' }); return res.end(); }
+    const { token, me, session, persona } = owned;
+    if (persona.coach !== 'on') { send('error', { message: 'The coach is switched off for this persona.' }); return res.end(); }
+    const question = String(req.body?.question ?? '').trim().slice(0, 4000);
+    if (!question) { send('error', { message: 'question is required' }); return res.end(); }
+    await streamCoachReply({
+      persona, session, studentName: me.display_name, question,
+      onChunk: (text) => send('chunk', { text }),
+      attribution: attr(token, me.id, session.session_id, 'persona.coach'),
+    });
+    send('done', {});
+    res.end();
+  } catch (e) {
+    console.error('POST /api/personas/session/:sid/coach failed:', e);
+    send('error', { message: (e as Error).message });
+    res.end();
+  }
+});
+
+lti.app.post('/api/personas/session/:sid/reflection', async (req: Request, res: Response) => {
+  try {
+    const owned = await ownedSession(req, res);
+    if (!owned) return res.status(404).json({ error: 'conversation not found' });
+    await saveReflection(owned.session.id, String(req.body?.text ?? ''));
+    res.json({ ok: true });
+  } catch (e) {
+    fail(res, e, 'POST /api/personas/session/:sid/reflection');
+  }
+});
+
+lti.app.get('/api/personas/session/:sid/transcript.:format', async (req: Request, res: Response) => {
+  try {
+    const owned = await ownedSession(req, res);
+    if (!owned) return res.status(404).json({ error: 'conversation not found' });
+    const { me, session, persona } = owned;
+    const turns = await getSessionTurns(session.session_id);
+    const format = String(req.params.format);
+    const stem = `${persona.title.replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'conversation'}-${session.id}`;
+    const download = String(req.query.download ?? '') === '1';
+    if (format === 'md') {
+      res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+      if (download) res.setHeader('Content-Disposition', `attachment; filename="${stem}.md"`);
+      return res.send(transcriptMarkdown(persona, session, turns, me.display_name));
+    }
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    if (download) res.setHeader('Content-Disposition', `attachment; filename="${stem}.html"`);
+    res.send(transcriptHtml(persona, session, turns, me.display_name, env.TOOL_NAME));
+  } catch (e) {
+    fail(res, e, 'GET /api/personas/session/:sid/transcript');
   }
 });
 

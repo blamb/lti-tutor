@@ -90,3 +90,30 @@ test('the draft schema accepts lines as arrays and normalises the opening', () =
   assert.equal(d.hidden, '');
   assert.equal(DraftPersona.parse({ opening: 'student' }).opening, 'student');
 });
+
+test('the transcript export carries the conversation, the debrief and the reflection as markdown', async () => {
+  const { transcriptMarkdown, debriefMarkdown, PersonaDebrief } = await import('./personas.js');
+  const debrief = PersonaDebrief.parse({ overview: 'You listened well.', by_objective: [{ objective: 'Therapeutic communication', observation: 'You asked consent before sleep.' }], strengths: 'Open questions\nWarm tone', explore_further: ['Caffeine'], one_question: 'What would you ask first next time?' });
+  assert.equal(debrief.strengths.length, 2, 'lines become a list');
+  const p = personaOf(fixture('melissa-chang'));
+  const session = { id: 9, persona_id: 1, student_id: 1, session_id: 1, mode: 'live' as const, status: 'ended' as const, started_at: '2026-10-15T20:00:00Z', ended_at: null, debrief, coach_session_id: null, debrief_generated_at: null, reflection: 'Ask more open questions.', reflection_at: null };
+  const turns = [
+    { id: 1, role: 'user' as const, content: 'Hi Melissa', ts: '' },
+    { id: 2, role: 'assistant' as const, content: 'Hi Jordan.', ts: '' },
+  ];
+  const md = transcriptMarkdown(p, session, turns, 'Jordan Lee');
+  assert.ok(md.startsWith('# Melissa Chang'));
+  assert.ok(md.includes('**Jordan Lee:** Hi Melissa'));
+  assert.ok(md.includes('**Melissa Chang:** Hi Jordan.'));
+  assert.ok(md.includes('## Debrief'));
+  assert.ok(md.includes('- **Therapeutic communication** You asked consent before sleep.'));
+  assert.ok(md.includes('## Your reflection\nAsk more open questions.'));
+  assert.ok(debriefMarkdown(debrief).includes('### One question to carry away'));
+});
+
+test('the student view carries the voice leaning and coach switch but still nothing hidden', () => {
+  const pub = publicPersona(personaOf({ ...fixture('tagore'), voice_pref: 'masculine', coach: 'off' }));
+  assert.equal(pub.voice_pref, 'masculine');
+  assert.equal(pub.coach, 'off');
+  assert.ok(!('hidden' in pub));
+});
