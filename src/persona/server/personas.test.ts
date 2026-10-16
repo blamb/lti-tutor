@@ -136,3 +136,13 @@ test('the report CSV has one row per conversation and quotes commas and quotes',
   assert.ok(lines[1]!.includes('a | b'));
   assert.ok(lines[1]!.endsWith('no column'));
 });
+
+test('blank cap fields from the editor fall back to the defaults instead of zero', () => {
+  const p = PersonaInput.parse({ title: 'X', public_daily_usd: '', public_max_turns: '' });
+  assert.equal(p.public_daily_usd, 2);
+  assert.equal(p.public_max_turns, 40);
+  const q = PersonaInput.parse({ title: 'X', public_daily_usd: '0', public_max_turns: '12' });
+  assert.equal(q.public_daily_usd, 0, 'an explicit zero is still allowed');
+  assert.equal(q.public_max_turns, 12);
+  assert.throws(() => PersonaInput.parse({ title: 'X', public_max_turns: '2' }));
+});

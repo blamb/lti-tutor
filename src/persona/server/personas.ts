@@ -123,6 +123,7 @@ export function turnOptionsFor(model: string): { output_config?: { effort: 'low'
 }
 
 const text = (max: number) => z.string().trim().max(max).default('');
+const blankToUndefined = (v: unknown) => (v === '' || v === null || (typeof v === 'string' && v.trim() === '') ? undefined : v);
 
 export const PersonaInput = z.object({
   template: z.enum(PERSONA_TEMPLATES).default('thinker'),
@@ -150,8 +151,9 @@ export const PersonaInput = z.object({
   visibility: z.enum(VISIBILITIES).default('lti'),
   /** Write-only: a new passcode to set; empty leaves the stored one. */
   passcode: z.string().trim().max(80).default(''),
-  public_daily_usd: z.coerce.number().min(0).max(1000).default(2),
-  public_max_turns: z.coerce.number().int().min(4).max(200).default(40),
+  // A blank field means "the default", never zero: an empty cap of 0 would silently close a public link.
+  public_daily_usd: z.preprocess(blankToUndefined, z.coerce.number().min(0).max(1000).default(2)),
+  public_max_turns: z.preprocess(blankToUndefined, z.coerce.number().int().min(4).max(200).default(40)),
   model: z.string().trim().max(60).default('').refine((m) => m === '' || isKnownModel(m), 'unknown model'),
   material_ids: z.array(z.number().int().positive()).max(40).default([]),
   status: z.enum(['draft', 'published', 'archived']).default('draft'),
