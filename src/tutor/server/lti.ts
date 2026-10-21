@@ -11,7 +11,7 @@ import { setupLti, launchHtmlLoader, escapeHtml, mintFullscreenNonce } from '../
 import { findOrCreateStudent } from '../../core/students.js';
 import { isTeacher } from '../../core/auth.js';
 import { listTutorials } from './tutorials.js';
-import { courseCtxFromToken, defaultAiDisclosure } from './courses.js';
+import { courseCtxFromToken, defaultAiDisclosure, instructorVisibility } from './courses.js';
 import { deliveryLabels } from './delivery.js';
 import { KINDS } from './kinds.js';
 
@@ -56,6 +56,7 @@ lti.onConnect(async (token: IdToken, req, res) => {
     .replaceAll('{{CONTEXT_TITLE}}', escapeHtml(ctx.title ?? ''))
     .replaceAll('{{DELIVERY}}', escapeHtml(JSON.stringify(ctx.delivery)))
     .replaceAll('{{DISCLOSURE}}', escapeHtml(ctx.settings.ai_disclosure || defaultAiDisclosure(env.TOOL_NAME, ctx.delivery)))
+    .replaceAll('{{VISIBILITY}}', escapeHtml(JSON.stringify(instructorVisibility(ctx.delivery))))
     .replaceAll('{{ROLE}}', role);
   return res.send(html);
 });

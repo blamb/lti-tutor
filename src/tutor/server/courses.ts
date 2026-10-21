@@ -140,16 +140,52 @@ export async function upsertCourseSettings(iss: string, contextId: string, input
 }
 
 /**
+ * What the instructor can see about one learner: the single source for every
+ * learner-facing statement about it (the disclosure, the Tutorials card, My
+ * learning, About you and the feedback box), so they cannot drift apart.
+ *
+ * It must match what the tool actually shows instructors: the per-session
+ * report lists each run with the learner's name, mastery, sticking points,
+ * ratings and feedback comments (routes.ts, getTutorialReport); the Concepts
+ * tab and the CSV export carry no names; no instructor route returns a
+ * transcript, an About you profile or a learner's own My learning list.
+ * Change this text only together with that behaviour.
+ */
+export interface InstructorVisibility {
+  /** One paragraph for the disclosure. */
+  full: string;
+  /** One clause for the Tutorials card, after "You get a summary at the end;". */
+  short: string;
+  /** The note on the feedback comment box. */
+  feedback: string;
+  /** The note on My learning. */
+  learning: string;
+  /** The note on About you. */
+  profile: string;
+}
+
+export function instructorVisibility(d: Delivery): InstructorVisibility {
+  const patterns = d.hasCohort
+    ? 'They also see, without names, which ideas the class finds hard.'
+    : 'They also see, without names, which ideas learners find hard, and use that to revise the course.';
+  return {
+    full: `Your instructor's report lists each session you finish with your name: its summary (what you showed you understand and where you got stuck), your ratings and your feedback comments. ${patterns} The conversation itself, what you write under *About you* and your *My learning* list are not shown to your instructor.`,
+    short: 'your instructor sees it with your name, but not the conversation itself.',
+    feedback: 'optional; your instructor sees it with your name',
+    learning: 'Your instructor does not see this list, only counts per idea across the course, without names.',
+    profile: "Everything here is optional, and your instructor can't see it.",
+  };
+}
+
+/**
  * What learners are told about the tutor, unless the course sets its own
  * text (course_settings.ai_disclosure). Markdown; mode-aware wording.
  */
 export function defaultAiDisclosure(toolName: string, d: Delivery): string {
-  const whoSees = d.hasCohort
-    ? 'Your instructor sees each session\'s summary with your name in their report, and course-wide patterns of what the class finds hard.'
-    : 'Your instructor sees each session\'s summary with your name in their report, and patterns across all learners of what is hard, which they use to revise the course.';
   return [
     `**${toolName} is an AI tutor.** It follows a brief your instructor wrote and asks questions rather than giving answers, so you do the thinking. It can be wrong: your course materials and your instructor are the authority, and nothing here is a grade.`,
-    `**What it keeps.** The text of each session, a short summary of each session, what you have shown you understand (see *My learning*), your ratings and comments, and anything you enter under *About you*. ${whoSees} What you write under *About you* and your *My learning* list are never shown to your instructor. You can delete all of it from this page at any time.`,
+    `**What it keeps.** The text of each session, a short summary of each session, what you have shown you understand (see *My learning*), your ratings and comments, and anything you enter under *About you*. You can delete all of it from this page at any time.`,
+    `**What your instructor sees.** ${instructorVisibility(d).full}`,
     `**Voice.** If you use *Speak*, your browser sends your audio to its maker's speech service (Google for Chrome and Edge, Apple for Safari) to turn it into text; this tool only ever receives the text. Typing is always available and works everywhere, including with no microphone.`,
     `**Where your words go.** To write its replies, the tool sends the session text and your *About you* notes to the AI service your institution has configured. The session text is kept only as long as your institution's retention setting allows.`,
   ].join('\n\n');

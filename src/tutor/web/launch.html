@@ -162,7 +162,7 @@
   }
 </style>
 </head>
-<body data-role="{{ROLE}}" data-return-url="{{RETURN_URL}}" data-tutorial-id="{{TUTORIAL_ID}}" data-delivery="{{DELIVERY}}" data-disclosure="{{DISCLOSURE}}">
+<body data-role="{{ROLE}}" data-return-url="{{RETURN_URL}}" data-tutorial-id="{{TUTORIAL_ID}}" data-delivery="{{DELIVERY}}" data-disclosure="{{DISCLOSURE}}" data-visibility="{{VISIBILITY}}">
 <a class="skip-link" href="#main">Skip to content</a>
 <div class="wrap">
   <header>
@@ -213,8 +213,7 @@
     <div class="card">
       <h2 tabindex="-1">Tutorials</h2>
       <div class="muted" id="home-tutorials-blurb" style="margin:-.25rem 0 .6rem">
-        A short one-on-one conversation your instructor designed to follow a lecture. Talk or type.
-        You get a summary at the end; your instructor sees where the class got stuck.
+        A short one-on-one conversation your instructor designed for this course. Talk or type.
       </div>
       <div id="home-nudges" hidden style="margin:-.25rem 0 .75rem"></div>
       <div id="tutorials-list"><ul class="items"><li class="static"><span class="t-goal">Loading…</span></li></ul></div>
@@ -258,7 +257,7 @@
     </div>
     <p class="muted" style="margin:.25rem 0 1rem">
       The tutor uses this to pick examples and analogies that fit you — about one in ten; the rest is the course.
-      Everything here is optional, and your instructor can't see it.
+      <span id="profile-visibility">Everything here is optional, and your instructor can't see it.</span>
     </p>
     <form class="form-grid" id="profile-form" autocomplete="off" style="max-width:560px">
       <label>Program and year <span class="hint">e.g. "2nd year Nursing", "MBA, part-time"</span><input type="text" name="program" maxlength="200"></label>
@@ -282,7 +281,7 @@
     </div>
     <p class="muted" style="margin:.25rem 0 1rem">
       After each session the tutor notes what you showed you understand, what is still developing, and what is worth revisiting,
-      and uses it to pick up where you left off next time. Your instructor sees course-wide patterns, not your list.
+      and uses it to pick up where you left off next time. <span id="learning-visibility">Your instructor does not see this list, only counts per idea across the course, without names.</span>
       Remove anything you don't want it to keep.
     </p>
     <div id="learning-body"></div>
@@ -713,6 +712,14 @@
   // Everything mode-dependent in this page keys on these booleans.
   let delivery = { truflex: 3, pacing: 'scheduled', hasCohort: true, hasFixedDates: true, hasLiveSessions: true, inPerson: true };
   try { const d = JSON.parse(document.body.dataset.delivery || ''); if (d && d.pacing) delivery = d; } catch { /* keep the scheduled default */ }
+  // What the instructor sees about this learner: one server-side source (courses.ts instructorVisibility), used everywhere it is said.
+  let visibility = {
+    short: 'your instructor sees it with your name, but not the conversation itself.',
+    feedback: 'optional; your instructor sees it with your name',
+    learning: 'Your instructor does not see this list, only counts per idea across the course, without names.',
+    profile: "Everything here is optional, and your instructor can't see it.",
+  };
+  try { const v = JSON.parse(document.body.dataset.visibility || ''); if (v && v.short) visibility = v; } catch { /* keep the defaults above, which match the server's */ }
   function debriefKindOf(d) { if (!d.hasCohort) return 'revision_brief'; return d.hasLiveSessions ? 'group_debrief' : 'cohort_note'; }
   const DEBRIEF_KIND_UI = {
     group_debrief: { heading: 'Debrief brief for the live follow-up', desc: 'Synthesises every completed run: what landed, where they stuck, misconceptions to address, discussion prompts, a one-minute re-teach. Takes 15–30 seconds.', button: 'Generate debrief brief' },
@@ -721,11 +728,14 @@
   };
   function applyDeliveryLabels() {
     const live = delivery.hasLiveSessions, cohort = delivery.hasCohort;
-    $('#home-tutorials-blurb').innerHTML = live
-      ? 'A short one-on-one conversation your instructor designed to follow a lecture. Talk or type. You get a summary at the end; your instructor sees where the class got stuck.'
+    $('#home-tutorials-blurb').textContent = (live
+      ? 'A short one-on-one conversation your instructor designed to follow a lecture. Talk or type.'
       : cohort
-        ? 'A short one-on-one conversation your instructor designed to go with the course materials. Talk or type. You get a summary at the end; your instructor sees where the cohort got stuck.'
-        : 'A short one-on-one conversation your instructor designed to go with the course materials. Talk or type, whenever suits you. You get a summary at the end; your instructor sees what learners find hard, never who said what.';
+        ? 'A short one-on-one conversation your instructor designed to go with the course materials. Talk or type.'
+        : 'A short one-on-one conversation your instructor designed to go with the course materials. Talk or type, whenever suits you.') +
+      ' You get a summary at the end; ' + visibility.short;
+    $('#learning-visibility').textContent = visibility.learning;
+    $('#profile-visibility').textContent = visibility.profile;
     $('#debriefs-heading').textContent = live ? 'Lecture debriefs' : 'Study debriefs';
     $('#debriefs-blurb').innerHTML = live
       ? 'A short written recap of a lecture or reading — the big ideas, plus one section that connects them to <em>your</em> goals, and three questions to test yourself.'
@@ -1287,7 +1297,7 @@
     wrap.innerHTML =
       '<div id="nps-q"><strong>How likely are you to recommend this session to someone else taking the course?</strong> <span class="muted">0 = not at all, 10 = definitely</span></div>' +
       '<div class="scale" role="group" aria-labelledby="nps-q"></div>' +
-      '<textarea aria-label="Anything you would tell your instructor about it (optional, anonymous in reports)" placeholder="Anything you\'d tell your instructor about it? (optional, anonymous in reports)"></textarea>' +
+      `<textarea aria-label="Anything you would tell your instructor about it (${escapeHtml(visibility.feedback)})" placeholder="Anything you'd tell your instructor about it? (${escapeHtml(visibility.feedback)})"></textarea>` +
       '<div class="form-row" style="margin-top:.4rem"><button class="btn btn-ghost" type="button">Send feedback</button><span class="muted"></span></div>';
     const scale = wrap.querySelector('.scale'); let picked = null;
     for (let i = 0; i <= 10; i++) {
