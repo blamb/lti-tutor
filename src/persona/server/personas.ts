@@ -23,6 +23,7 @@ import { query } from '../../core/db.js';
 import { getAnthropic } from '../../core/anthropic.js';
 import { recordApiCall, MODEL_PRICES, type Attribution } from '../../core/costs.js';
 import { GEN_MODEL } from '../../core/anthropic.js';
+import { supportsEffort, requestOptions } from '../../core/models.js';
 import { textOf } from '../../core/llm.js';
 import type { GradeResult } from '../../core/grades.js';
 import { jsonCall } from '../../core/llm.js';
@@ -119,7 +120,8 @@ export function modelFor(p: Pick<Persona, 'model'>): string {
 export const TURN_MAX_TOKENS = 4096;
 
 export function turnOptionsFor(model: string): { output_config?: { effort: 'low' } } {
-  return /-5(-\d+)?$/.test(model) ? { output_config: { effort: 'low' } } : {};
+  // Not by name pattern: "claude-haiku-4-5" also ends in "-5", and Haiku 4.5 takes no effort parameter.
+  return supportsEffort(model) ? { output_config: { effort: 'low' } } : {};
 }
 
 const text = (max: number) => z.string().trim().max(max).default('');
@@ -859,7 +861,7 @@ Write markdown of at most 500 words with exactly these headings:
 (themes from their reflections; if there are none, say so in one line)`;
   const client = getAnthropic();
   const t0 = Date.now();
-  const res = await client.messages.create({ model: GEN_MODEL, max_tokens: 2500, system, messages: [{ role: 'user', content: `${evidence}\n\nWrite the synthesis now.` }] });
+  const res = await client.messages.create({ model: GEN_MODEL, ...requestOptions(GEN_MODEL, { maxTokens: 2500, effort: 'medium' }), system, messages: [{ role: 'user', content: `${evidence}\n\nWrite the synthesis now.` }] });
   void recordApiCall({ ...attribution, endpoint: 'persona.synthesis', model: GEN_MODEL, usage: res.usage, durationMs: Date.now() - t0 });
   const markdown = textOf(res);
   const rows = await query<{ markdown: string; runs: number; generated_at: string }>(

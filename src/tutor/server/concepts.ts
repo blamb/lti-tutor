@@ -10,8 +10,9 @@
  *   - briefs name their key concepts (one per line in the editor); the labels
  *     are shared across the course by normalised wording
  *   - every new learner-model entry is matched onto a canonical concept, by
- *     exact wording first and then by the model with a confidence; below
- *     MATCH_THRESHOLD it stays unmapped, for the instructor to review
+ *     exact wording first and then by the model, which says how the idea fits
+ *     (same, narrower, related, none); only same and narrower are mapped, and
+ *     the rest stay unmapped for the instructor to review
  *   - the Concepts tab groups by canonical concept and counts distinct
  *     learners, each learner's latest status counted once; unmapped entries
  *     are listed apart, never as new concept rows
@@ -32,6 +33,18 @@ export interface CourseConcept {
   label: string;
 }
 
+/**
+ * How a description fits a key concept, as the model judges it. A category
+ * rather than a number: Haiku 4.5 and Haiku 5.5 rated the same clear matches
+ * 0.8+ and 0.5-0.6, so a numeric threshold did not carry across models.
+ */
+export const FITS = ['same', 'narrower', 'related', 'none'] as const;
+export type Fit = (typeof FITS)[number];
+/** The confidence stored for each fit; matches below MATCH_THRESHOLD stay unmapped. */
+export const FIT_CONFIDENCE: Record<Fit, number> = { same: 0.95, narrower: 0.8, related: 0.4, none: 0 };
+export function fitConfidence(fit: Fit | undefined): number {
+  return fit ? FIT_CONFIDENCE[fit] : 0;
+}
 /** Model matches below this confidence stay unmapped. */
 export const MATCH_THRESHOLD = 0.7;
 /** Key concepts per brief. */
@@ -129,13 +142,13 @@ const MatchResponse = z.object({
   matches: z.array(z.object({
     i: z.number().int(),
     concept_id: z.number().int().nullable(),
-    confidence: z.number().min(0).max(1),
+    fit: z.enum(FITS).catch('none'),
   })),
 });
 
 const MATCH_SYSTEM = `You map short descriptions of what a learner showed in a course onto the course's canonical concepts. For each numbered description, choose the one canonical concept it is about, or null if none fits. A description fits a concept when it is about the same idea, even if it is narrower, a step of it, or a misconception about it; it does not fit just because it shares a word.
 
-Return ONLY a JSON object, no code fences: {"matches": [{"i": description number, "concept_id": a canonical id or null, "confidence": 0 to 1}]}, one entry per description. Use confidence 0.9 or more only when the idea is clearly the same; below 0.7 means you are unsure.`;
+Return ONLY a JSON object, no code fences: {"matches": [{"i": description number, "concept_id": the best canonical id or null, "fit": "same" | "narrower" | "related" | "none"}]}, one entry per description. "same": the description is about that concept. "narrower": it is a part, step, example or misconception of that concept. "related": it touches the concept but is mainly about something else. "none": no concept fits (concept_id null).`;
 
 /** Map free-text concept names onto the canonical list: exact wording first, then one model call. */
 export async function matchConcepts(texts: string[], canon: CourseConcept[], attribution: Attribution): Promise<ConceptMatch[]> {
@@ -150,12 +163,13 @@ export async function matchConcepts(texts: string[], canon: CourseConcept[], att
     system: MATCH_SYSTEM,
     userPrompt: `# CANONICAL CONCEPTS (id: label)\n${canonBlock(canon)}\n\n# DESCRIPTIONS\n${todo.map(({ t }, n) => `${n + 1}. ${t}`).join('\n')}\n\nReturn the matches now.`,
     maxTokens: 200 + todo.length * 40,
+    effort: 'low',
     attribution: { ...attribution, endpoint: 'tutorial.concept_match' },
     endpoint: 'tutorial.concept_match',
   });
   for (const m of res.matches) {
     const target = todo[m.i - 1];
-    if (target) out[target.i] = acceptMatch(m, canon);
+    if (target) out[target.i] = acceptMatch({ concept_id: m.concept_id, confidence: fitConfidence(m.fit) }, canon);
   }
   return out;
 }

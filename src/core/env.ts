@@ -61,7 +61,7 @@ export const coreEnv = {
   ADMIN_TOKEN: optional('ADMIN_TOKEN', ''),
   // The model for summaries, drafts and other structured calls (llm.ts).
   // Each app names its conversation model separately. Prices live in costs.ts.
-  GEN_MODEL: optional('GEN_MODEL', 'claude-haiku-4-5'),
+  GEN_MODEL: optional('GEN_MODEL', 'claude-haiku-5-5'),
 } as const;
 
 /** Back-compat alias for core modules; apps import their own `env`. */

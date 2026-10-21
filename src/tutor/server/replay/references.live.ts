@@ -33,14 +33,14 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { getAnthropic } from '../../../core/anthropic.js';
 import { textOf } from '../../../core/llm.js';
 import { env } from '../env.js';
-import { tutorTurnRequest, briefFor } from '../tutorials.js';
+import { tutorTurnRequest, briefFor, tutorModelOptions } from '../tutorials.js';
 import { ctx, hero, round2 } from './fixtures.js';
 
 test('Finding 6: asked about GCC and the activity, the tutor cites only real passages and does not predict the VM', { skip: MATERIALS.length < 2 || !process.env.ANTHROPIC_API_KEY }, async () => {
   // Round 2 up to the student's -fcommon remark and direct question.
   const turns = round2.slice(0, 8);
   const req = tutorTurnRequest({ tutorial: hero, ctx, turns, student: { display_name: 'Test Student2' }, profile: null, materials: MATERIALS, brief: await briefFor(hero, ctx) });
-  const out = await Promise.all([1, 2, 3].map(async () => textOf(await getAnthropic().messages.create({ model: env.TUTOR_MODEL, max_tokens: 600, system: req.system, messages: req.messages as Anthropic.MessageParam[] }))));
+  const out = await Promise.all([1, 2, 3].map(async () => textOf(await getAnthropic().messages.create({ ...tutorModelOptions(), system: req.system, messages: req.messages as Anthropic.MessageParam[] }))));
   for (const r of out) {
     console.log(`\n${r}\n  issues: ${JSON.stringify(checkReferences(r, MATERIALS))}`);
     assert.deepEqual(checkReferences(r, MATERIALS).filter((i) => i.kind !== 'code'), [], r);

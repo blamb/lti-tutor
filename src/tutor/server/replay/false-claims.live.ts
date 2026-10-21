@@ -12,7 +12,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { getAnthropic } from '../../../core/anthropic.js';
 import { textOf } from '../../../core/llm.js';
 import { env } from '../env.js';
-import { tutorTurnRequest, summarizeRun, briefFor } from '../tutorials.js';
+import { tutorTurnRequest, summarizeRun, briefFor, tutorModelOptions } from '../tutorials.js';
 import { ctx, partB, partBRound2, PART_B_SIZE_PREDICTION, materials, t } from './fixtures.js';
 import type { Turn } from '../../../core/conversations.js';
 
@@ -25,7 +25,7 @@ const opening = (s: string) => s.split(/(?<=[.!?])\s+/).slice(0, 2).join(' ');
 async function replies(turns: Turn[], samples = SAMPLES): Promise<string[]> {
   const req = tutorTurnRequest({ tutorial: partB, ctx, turns, student: { display_name: 'Test Student2' }, profile: null, materials: MATERIALS, brief: await briefFor(partB, ctx) });
   return Promise.all(Array.from({ length: samples }, async () => {
-    const res = await getAnthropic().messages.create({ model: env.TUTOR_MODEL, max_tokens: 600, system: req.system, messages: req.messages as Anthropic.MessageParam[] });
+    const res = await getAnthropic().messages.create({ ...tutorModelOptions(), system: req.system, messages: req.messages as Anthropic.MessageParam[] });
     return textOf(res);
   }));
 }

@@ -69,7 +69,7 @@ test('a model match below the threshold, or to an unknown id, stays unmapped', (
 // ─── Items 4 and 5: misconceptions recorded, reflections cannot judge on thin evidence ───
 
 const e = (concept: string, status: ProposedEntry['status'], quote = '', concept_id: number | null = null): ProposedEntry =>
-  ({ concept, status, evidence: concept, quote, concept_id, confidence: concept_id ? 0.9 : 0 });
+  ({ concept, status, evidence: concept, quote, concept_id, fit: concept_id ? 'same' : 'none', confidence: concept_id ? 0.95 : 0 });
 
 // Student B's reflection, from the report: three terse replies.
 const B_REFLECTION = ['idk', 'not really. i just want to finish this', 'look for a typo in my code probably'];
@@ -160,3 +160,11 @@ test('within one session the more concerning row shows, even when the timestamps
   assert.deepEqual(pick(aggregateConcepts(next, canon).concepts[0]!), [1, 1, 0]);
 });
 const pick = (c: { learners: number; secure: number; misconception: number }) => [c.learners, c.secure, c.misconception];
+
+test('a fit category, not a number, decides a match: same and narrower map, related and none do not', async () => {
+  const { fitConfidence } = await import('./concepts.js');
+  assert.equal(acceptMatch({ concept_id: 3, confidence: fitConfidence('same') }, CANON).concept_id, 3);
+  assert.equal(acceptMatch({ concept_id: 3, confidence: fitConfidence('narrower') }, CANON).concept_id, 3);
+  assert.equal(acceptMatch({ concept_id: 3, confidence: fitConfidence('related') }, CANON).concept_id, null);
+  assert.equal(acceptMatch({ concept_id: 3, confidence: fitConfidence('none') }, CANON).concept_id, null);
+});

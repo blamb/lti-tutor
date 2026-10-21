@@ -43,6 +43,7 @@ import { COURSE_LEVEL_LABELS, type CourseCtx } from './courses.js';
 import type { Delivery } from './delivery.js';
 import { KINDS, TUTORIAL_KINDS, stageForRun, keyTermsFor, teachBackAskedAt, READINESS_WRAP_UP_WORDS, type TeachBackState, type TutorialKind } from './kinds.js';
 import { jsonCall, textOf } from '../../core/llm.js';
+import { requestOptions } from '../../core/models.js';
 import { listLearnerModel, learnerModelBlock, recallCandidates, recallCandidatesBlock, updateLearnerModelFromSummary } from './learner.js';
 import { ensureCourseConcepts, parseConceptLines, listCourseConcepts } from './concepts.js';
 import { checkReferences } from './references.js';
@@ -723,6 +724,15 @@ export function tutorTurnRequest(params: {
 }
 
 /**
+ * Model, output cap and effort for a tutor turn: low effort, because a short
+ * Socratic reply should come back quickly and its thinking stay brief
+ * (models.ts). The live replays use the same options.
+ */
+export function tutorModelOptions(model: string = TUTOR_MODEL): { model: string; max_tokens: number; output_config?: { effort: 'low' | 'medium' | 'high' } } {
+  return { model, ...requestOptions(model, { maxTokens: 1024, effort: 'low' }) };
+}
+
+/**
  * Stream one tutor turn. Persists the user turn before streaming and the
  * assistant turn after. A `userMessage` starting with START_MARKER produces
  * the opening.
@@ -753,7 +763,7 @@ export async function streamTutorialReply(params: {
 
   const client = getAnthropic();
   const t0 = Date.now();
-  const stream = client.messages.stream({ model: TUTOR_MODEL, max_tokens: 1024, system, messages });
+  const stream = client.messages.stream({ ...tutorModelOptions(), system, messages });
 
   let assistantText = '';
   for await (const event of stream) {
@@ -814,6 +824,12 @@ export const DraftSummary = z.discriminatedUnion('kind', [
   AssignmentStartSummary.extend(DraftKeys),
 ]);
 export type DraftSummary = z.infer<typeof DraftSummary>;
+
+/** The shape the summary model writes for one kind: that kind's draft, without `kind` (the caller adds it). */
+export function draftOutputFor(kind: TutorialKind): z.ZodType {
+  const variant = (DraftSummary.options.find((o) => o.shape.kind.value === kind) ?? DraftSummary.options[0]!) as z.ZodObject<{ kind: z.ZodLiteral<string> } & z.ZodRawShape>;
+  return variant.omit({ kind: true });
+}
 
 export const TEACH_BACK_NOT_REACHED = 'Teach-back not reached.';
 export const NO_TEACH_BACK = "No teach-back: the student agreed with the tutor's recap or did not explain the idea in their own words.";
@@ -1009,6 +1025,8 @@ export async function summarizeRun(params: {
   if (grounding) system.push({ type: 'text', text: grounding, cache_control: { type: 'ephemeral' } });
   const draft = await jsonCall({
     schema: DraftSummary,
+    output: draftOutputFor(tutorial.kind),
+    effort: 'medium',
     system,
     userPrompt:
       `${brief}\n\n` +
@@ -1291,7 +1309,7 @@ export async function generateGroupDebrief(
   const t0 = Date.now();
   const res = await client.messages.create({
     model: GEN_MODEL,
-    max_tokens: 1500,
+    ...requestOptions(GEN_MODEL, { maxTokens: 1500, effort: 'medium' }),
     system,
     messages: [{ role: 'user', content: `${content}\n\n${ask}` }],
   });
@@ -1346,7 +1364,7 @@ export async function deliverDebrief(tutorial: Tutorial, ctx: CourseCtx, attribu
   const t0 = Date.now();
   const res = await client.messages.create({
     model: GEN_MODEL,
-    max_tokens: 400,
+    ...requestOptions(GEN_MODEL, { maxTokens: 400, effort: 'medium' }),
     system: `${AFTER_SESSION_NOTE_SYSTEM}\n\n${framing}`,
     messages: [{ role: 'user', content: `# SESSION\n${KINDS[tutorial.kind].label}: ${tutorial.title}\n\n# INSTRUCTOR'S SYNTHESIS\n${stored.markdown}\n\nWrite the note now.` }],
   });
@@ -1519,7 +1537,7 @@ export async function generateDebrief(params: {
   const t0 = Date.now();
   const res = await client.messages.create({
     model: GEN_MODEL,
-    max_tokens: 1500,
+    ...requestOptions(GEN_MODEL, { maxTokens: 1500, effort: 'medium' }),
     system: [
       { type: 'text', text: (live ? LECTURE_DEBRIEF_SYSTEM : STUDY_DEBRIEF_SYSTEM).replace('{FIRST_NAME}', firstName) },
       { type: 'text', text: materialsBlock([material])!, cache_control: { type: 'ephemeral' } },

@@ -24,7 +24,7 @@ import type { Attribution } from '../../core/costs.js';
 import type { CourseCtx } from './courses.js';
 import type { Student } from '../../core/students.js';
 import type { Tutorial, TutorialSummary } from './tutorials.js';
-import { listCourseConcepts, canonBlock, acceptMatch, exactMatch, matchConcepts, labelKey, type CourseConcept } from './concepts.js';
+import { listCourseConcepts, canonBlock, acceptMatch, exactMatch, matchConcepts, labelKey, fitConfidence, FITS, type CourseConcept } from './concepts.js';
 
 export type ConceptStatus = 'secure' | 'developing' | 'fragile' | 'misconception';
 export const CONCEPT_STATUSES: readonly ConceptStatus[] = ['secure', 'developing', 'fragile', 'misconception'];
@@ -147,8 +147,17 @@ const LearnerUpdate = z.object({
     evidence: z.string().max(500),
     quote: z.string().max(600).default(''),
     concept_id: z.number().int().nullable().default(null),
+    fit: z.enum(FITS).catch('none').default('none'),
+    /** Filled in from `fit` (concepts.ts); not written by the model. */
     confidence: z.number().min(0).max(1).default(0),
   })).max(8),
+});
+/** What the model writes: `confidence` is derived from `fit`. */
+const LearnerUpdateOutput = z.object({
+  entries: z.array(z.object({
+    concept: z.string(), status: z.enum(['secure', 'developing', 'fragile', 'misconception']), evidence: z.string(),
+    quote: z.string(), concept_id: z.number().int().nullable(), fit: z.enum(FITS),
+  })),
 });
 export type ProposedEntry = z.infer<typeof LearnerUpdate>['entries'][number];
 
@@ -162,7 +171,7 @@ Return ONLY a JSON object, no code fences:
       "evidence": one sentence: what they said or did in this session that shows it,
       "quote": the student's own words behind it, copied exactly from THE STUDENT'S OWN WORDS below, or "" if there are none,
       "concept_id": the id of the one canonical concept this entry is about, or null if none fits,
-      "confidence": 0 to 1, how sure you are of that concept_id (0.9 or more only when it is clearly the same idea) }
+      "fit": "same" if the entry is about that concept, "narrower" if it is a part, step, example or misconception of it, "related" if it only touches it, "none" if no concept fits }
   ]
 }
 
@@ -258,14 +267,14 @@ export function guardEntries(entries: ProposedEntry[], g: GuardContext): { kept:
   const covered = (quote: string) => [...kept, ...added].some((e) => e.status === 'misconception' && e.quote && (normWords(e.quote).includes(normWords(quote)) || normWords(quote).includes(normWords(e.quote))));
   for (const s of g.sticking) {
     if (!CORRECTED.test(s.text) || !quoteInTurns(s.quote, g.studentTexts) || covered(s.quote)) continue;
-    added.push({ concept: s.text.slice(0, 120), status: 'misconception', evidence: s.text.slice(0, 500), quote: s.quote, concept_id: null, confidence: 0 });
+    added.push({ concept: s.text.slice(0, 120), status: 'misconception', evidence: s.text.slice(0, 500), quote: s.quote, concept_id: null, fit: 'none', confidence: 0 });
   }
   for (const claim of listedClaims(g.misconceptions)) {
     const want = [...stemsOf(claim)];
     if (want.length < 3) continue;
     const turn = g.studentTexts.find((t) => { const have = stemsOf(t); return want.filter((w) => have.has(w)).length / want.length >= 0.75; });
     if (!turn || covered(turn)) continue;
-    added.push({ concept: claim.slice(0, 120), status: 'misconception', evidence: `Said something close to the listed misconception "${claim}".`.slice(0, 500), quote: turn.slice(0, 600), concept_id: null, confidence: 0 });
+    added.push({ concept: claim.slice(0, 120), status: 'misconception', evidence: `Said something close to the listed misconception "${claim}".`.slice(0, 500), quote: turn.slice(0, 600), concept_id: null, fit: 'none', confidence: 0 });
   }
   return { kept, added, dropped };
 }
@@ -315,6 +324,7 @@ export async function proposeLearnerEntries(p: {
   ].join('\n') || '(none)';
   const update = await jsonCall({
     schema: LearnerUpdate,
+    output: LearnerUpdateOutput,
     system: LEARNER_MODEL_SYSTEM,
     userPrompt:
       `# SESSION\nKind: ${p.tutorial.kind}\nTitle: ${p.tutorial.title}\nLearning goal: ${p.tutorial.learning_goal}\n\n` +
@@ -324,13 +334,14 @@ export async function proposeLearnerEntries(p: {
       `# THE STUDENT'S OWN WORDS\n${words}\n\n` +
       `# EXISTING ENTRIES\n${existingText}\n\nReturn the entries to add or update now.`,
     maxTokens: 1200,
+    effort: 'medium',
     attribution: { ...p.attribution, endpoint: 'tutorial.learner_model' },
     endpoint: 'tutorial.learner_model',
   });
   // The model's concept match counts only when it names a real concept confidently; exact wording always wins.
   const proposed = update.entries.map((e) => {
     const exact = exactMatch(e.concept, p.canon);
-    const m = exact ? { concept_id: Number(exact.id), confidence: 1 } : acceptMatch(e, p.canon);
+    const m = exact ? { concept_id: Number(exact.id), confidence: 1 } : acceptMatch({ concept_id: e.concept_id, confidence: fitConfidence(e.fit) }, p.canon);
     return { ...e, concept_id: m.concept_id, confidence: m.confidence };
   });
   const { kept, added, dropped } = guardEntries(proposed, {

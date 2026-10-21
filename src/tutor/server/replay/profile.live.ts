@@ -6,7 +6,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { getAnthropic } from '../../../core/anthropic.js';
 import { textOf } from '../../../core/llm.js';
 import { env } from '../env.js';
-import { tutorTurnRequest, briefFor, START_MARKER, type StudentProfile } from '../tutorials.js';
+import { tutorTurnRequest, briefFor, START_MARKER, type StudentProfile, tutorModelOptions } from '../tutorials.js';
 import { ctx, hero, round2, materials, t } from './fixtures.js';
 import type { Turn } from '../../../core/conversations.js';
 
@@ -16,7 +16,7 @@ const PROFILE: StudentProfile = { student_id: 2, program: 'Computer science, 2nd
 
 async function replies(turns: Turn[]): Promise<string[]> {
   const req = tutorTurnRequest({ tutorial: hero, ctx, turns, student: { display_name: 'Test Student2' }, profile: PROFILE, materials: materials(), brief: await briefFor(hero, ctx) });
-  return Promise.all([1, 2, 3].map(async () => textOf(await getAnthropic().messages.create({ model: env.TUTOR_MODEL, max_tokens: 600, system: req.system, messages: req.messages as Anthropic.MessageParam[] }))));
+  return Promise.all([1, 2, 3].map(async () => textOf(await getAnthropic().messages.create({ ...tutorModelOptions(), system: req.system, messages: req.messages as Anthropic.MessageParam[] }))));
 }
 
 test('Finding 11: the opening greets the student by first name every time', { skip: !live }, async () => {

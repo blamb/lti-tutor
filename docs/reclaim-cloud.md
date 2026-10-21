@@ -66,7 +66,7 @@ Persona Chat deploys from the same repository and branch as its own environment 
 | `ANTHROPIC_API_KEY` | the key for this deployment's Console workspace (a separate key keeps the two tools' spend apart) |
 | `PLATFORM_HTTP_HOSTS` | `moodbox.ca.reclaim.cloud` (Moodle on the same account; see the next section) |
 | `PERSONA_MODEL` | optional; `claude-haiku-5-5` is the default for new personas |
-| `GEN_MODEL` | optional; drafts, debriefs and syntheses; `claude-haiku-4-5` by default |
+| `GEN_MODEL` | optional; drafts, debriefs and syntheses; `claude-haiku-5-5` by default |
 | `DATA_RETENTION_DAYS` | `0` |
 | `TOKEN_SECRET`, `ADMIN_TOKEN`, `ANTHROPIC_BASE_URL` | optional, as for the tutor |
 

@@ -17,6 +17,7 @@ import { createHash } from 'node:crypto';
 import { zipSync, strToU8 } from 'fflate';
 import { query } from '../../core/db.js';
 import { getAnthropic, GEN_MODEL } from '../../core/anthropic.js';
+import { requestOptions } from '../../core/models.js';
 import { recordApiCall, type Attribution } from '../../core/costs.js';
 import { textOf } from '../../core/llm.js';
 import { standaloneHtml, markdownToPrintHtml, normalizeMarkdownHeadings } from '../../core/document.js';
@@ -118,7 +119,7 @@ export async function ensurePrintScript(tutorial: Tutorial, ctx: CourseCtx, attr
   const t0 = Date.now();
   const res = await client.messages.create({
     model: GEN_MODEL,
-    max_tokens: 2500,
+    ...requestOptions(GEN_MODEL, { maxTokens: 2500, effort: 'medium' }),
     system: printSystem(tutorial.kind),
     messages: [{ role: 'user', content: `${await briefFor(tutorial, ctx)}\n\nWrite the paper version now.` }],
   });
@@ -172,7 +173,7 @@ export async function ensureDebriefTemplate(material: Material, ctx: CourseCtx, 
   const t0 = Date.now();
   const res = await client.messages.create({
     model: GEN_MODEL,
-    max_tokens: 1500,
+    ...requestOptions(GEN_MODEL, { maxTokens: 1500, effort: 'medium' }),
     system: [
       { type: 'text', text: templateSystem(live) },
       { type: 'text', text: `# COURSE MATERIAL\n\n## ${material.title}\n${material.body}`, cache_control: { type: 'ephemeral' } },

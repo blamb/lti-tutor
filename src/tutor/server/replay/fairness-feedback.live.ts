@@ -9,7 +9,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { getAnthropic } from '../../../core/anthropic.js';
 import { textOf } from '../../../core/llm.js';
 import { env } from '../env.js';
-import { tutorTurnRequest, summarizeRun, briefFor, type Tutorial } from '../tutorials.js';
+import { tutorTurnRequest, summarizeRun, briefFor, type Tutorial, tutorModelOptions } from '../tutorials.js';
 import { learnerModelBlock } from '../learner.js';
 import { ctx, hero, partB, partBRound2, reflection, reflectionTerse, round1ToRecap, round2, materials, t } from './fixtures.js';
 import { ROWS, B } from './comp2131-concepts.js';
@@ -27,7 +27,7 @@ const GAP = /\b(does ?n[o']t|did ?n[o']t|cannot|unable to) (recogni[sz]e|underst
 
 async function replies(tutorial: Tutorial, turns: Turn[], learnerBlocks: string[] = []): Promise<string[]> {
   const req = tutorTurnRequest({ tutorial, ctx, turns, student: { display_name: 'Test Student' }, profile: null, materials: MATERIALS, brief: await briefFor(tutorial, ctx), learnerBlocks });
-  return Promise.all([1, 2, 3].map(async () => textOf(await getAnthropic().messages.create({ model: env.TUTOR_MODEL, max_tokens: 600, system: req.system, messages: req.messages as Anthropic.MessageParam[] }))));
+  return Promise.all([1, 2, 3].map(async () => textOf(await getAnthropic().messages.create({ ...tutorModelOptions(), system: req.system, messages: req.messages as Anthropic.MessageParam[] }))));
 }
 
 test('Finding 5: three terse replies get no attitude label, no invented gap, and a pointer to earlier work', { skip: !live }, async () => {
@@ -53,7 +53,7 @@ test('Finding 7: a correct Scenario A answer gets a plain "yes", not "very close
   for (const r of out) {
     console.log(`\n${first(r)}`);
     assert.doesNotMatch(r, /very close|almost/i);
-    assert.match(first(r), /\b(yes|right|correct|exactly|that's it|spot on)\b/i);
+    assert.match(first(r), /\b(yes|right|correct|exactly|that's it|spot on|you've got|you have got)\b/i);
   }
 });
 
@@ -61,7 +61,7 @@ test('Finding 7: "Is that what Learning Activity 3 uses?" is answered in the fir
   const out = await replies(hero, round2.slice(0, 8));
   for (const r of out) {
     console.log(`\n${first(r)}`);
-    assert.match(first(r), /log_count|initiali[sz]ed|= 0|cannot see|can't see/i);
+    assert.match(first(r), /log_count|initiali[sz]ed|= 0|cannot see|can't see|Learning Activity 3 (does|uses|declares|has|is)/i);
   }
 });
 

@@ -289,7 +289,7 @@ Any Node host with Postgres works. A `railpack.json` is included for Railway. Se
 
 ### Models and cost
 
-Defaults are `claude-haiku-4-5` for both functions, the cheapest option that works well at class scale; set `TUTOR_MODEL=claude-sonnet-5-5` or `claude-opus-5-5` for a stronger tutor. Prices for current models are in `src/core/costs.ts`. Materials are prompt-cached, so the marginal cost of a turn is dominated by the transcript, not the course content.
+Defaults are `claude-haiku-5-5` for both functions, the cheapest option that works well at class scale (on the COMP 2131 replays it matched Haiku 4.5 at about an eighth of the cost per turn, with replies finishing sooner); set `TUTOR_MODEL=claude-sonnet-5-5` or `claude-opus-5-5` for a stronger tutor. The 5.x models think briefly before answering: `src/core/models.ts` sets the effort per call (low for tutor turns, medium for summaries and drafts) and the room for it in each request, and leaves both out for older models such as Haiku 4.5, which take neither. Summaries, drafts and the learner model ask for JSON through structured output, so a reply always parses. Prices for current models are in `src/core/costs.ts`. Materials are prompt-cached, so the marginal cost of a turn is dominated by the transcript, not the course content.
 
 ---
 
