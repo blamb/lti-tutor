@@ -106,6 +106,8 @@ const SummaryBase = {
   mastery: z.enum(['solid', 'developing', 'needs_work']),
   understood: z.array(z.string()).max(6),
   sticking_points: z.array(z.string()).max(6),
+  /** Ideas the tutor stated that the student only agreed with or heard (grounding, Finding 2). Absent on older runs. */
+  told: z.array(z.string()).max(6).optional(),
   next_step: z.string(),
   student_note: z.string(),
 };
@@ -690,22 +692,153 @@ export async function streamTutorialReply(params: {
 }
 
 // ─── Completion summary ─────────────────────────────────────────────────────
+//
+// Usability report, Finding 2: summaries credited the student with the
+// tutor's own recap ("accurately restated"), with self-corrections that never
+// happened and with topics only the tutor raised. The model now returns each
+// understood and sticking item with the student's own words that show it;
+// groundSummary() keeps only items whose quote is really in a student turn,
+// moves ideas the student only agreed with to `told`, decides the teach-back
+// line from the transcript rather than from the model, and caps the rating
+// when the student explained nothing themselves.
+
+const asItem = (v: unknown) => (typeof v === 'string' ? { text: v } : v);
+const EvidenceItem = z.preprocess(asItem, z.object({
+  text: z.string().trim().min(1),
+  quote: z.string().default(''),
+  source: z.enum(['explained', 'agreed', 'told']).catch('told'),
+}));
+const StuckItem = z.preprocess(asItem, z.object({
+  text: z.string().trim().min(1),
+  quote: z.string().default(''),
+}));
+const DraftKeys = { understood: z.array(EvidenceItem).max(8), sticking_points: z.array(StuckItem).max(8) };
+/** What the summary model returns, before grounding. */
+export const DraftSummary = z.discriminatedUnion('kind', [
+  ConceptSummary.extend(DraftKeys), ReadinessSummary.extend(DraftKeys), PreparationCheckSummary.extend(DraftKeys),
+  PracticeSummary.extend(DraftKeys), ReflectionSummary.extend(DraftKeys), RecallSummary.extend(DraftKeys),
+  AssignmentStartSummary.extend(DraftKeys),
+]);
+export type DraftSummary = z.infer<typeof DraftSummary>;
+
+export const TEACH_BACK_NOT_REACHED = 'Teach-back not reached.';
+export const NO_TEACH_BACK = "No teach-back: the student agreed with the tutor's recap or did not explain the idea in their own words.";
+/** Words a quote needs before it counts as the student explaining something. */
+export const EXPLAINED_QUOTE_MIN_WORDS = 5;
+/** Credit the transcript can never support from a quote alone: removed wherever it appears. */
+const SELF_CORRECTION = /self[- ]?correct|caught (yourself|themselves|themself|himself|herself)|corrected (yourself|themselves|themself|himself|herself)|in (your|their|his|her) (mind|head)/i;
+/** Credit for explaining: kept only when the student really explained something (and, for a tutorial, passed the teach-back). */
+const EXPLAINING_CREDIT = /accurately (re)?stat|restated|in (your|their) own words|on (your|their) own|you explained|explained (it|this|that|the (core |main )?idea) back|teach[- ]?back/i;
+
+function norm(s: string): string {
+  return s.toLowerCase().replace(/[‘’“”]/g, "'").replace(/[^a-z0-9']+/g, ' ').trim();
+}
+function wordCount(s: string): number {
+  return norm(s).split(' ').filter(Boolean).length;
+}
+/** Content-word stems, as kinds.ts uses for key terms. */
+function stemSet(s: string): Set<string> {
+  return new Set((norm(s).match(/[a-z][a-z0-9]*/g) ?? []).filter((w) => w.length >= 5).map((w) => w.slice(0, 5)));
+}
+/** Quotes shorter than this can be an echo of the tutor; longer ones are the student's own wording. */
+export const ECHO_MAX_WORDS = 15;
+/** Share of a short quote's content words the tutor must already have used for it to count as an echo. */
+export const ECHO_OVERLAP = 0.75;
+function sentences(s: string): string[] {
+  return s.split(/(?<=[.!?])\s+/).map((x) => x.trim()).filter(Boolean);
+}
+
+/**
+ * Keep only what the transcript supports. Pure: the tests replay the
+ * report's transcripts through it.
+ */
+export function groundSummary(
+  draft: DraftSummary,
+  opts: { turns: Pick<Turn, 'role' | 'content'>[]; studentName: string; teachBack: TeachBackState }
+): { summary: Omit<TutorialSummary, 'turns'>; dropped: string[] } {
+  const turns = opts.turns.filter((t) => !t.content.startsWith(START_MARKER));
+  const said = turns.map((t) => (t.role === 'user' ? norm(t.content) : null));
+  const turnOf = (q: string) => { const n = norm(q); return n.length ? said.findIndex((t) => t !== null && t.includes(n)) : -1; };
+  const inStudentTurn = (q: string) => turnOf(q) >= 0;
+  // A short quote whose content words the tutor had already used is the
+  // student agreeing with or repeating the tutor, not explaining.
+  const echoesTutor = (q: string) => {
+    const at = turnOf(q);
+    if (at < 0 || wordCount(q) >= ECHO_MAX_WORDS) return false;
+    const mine = [...stemSet(q)];
+    if (mine.length < 2) return false;
+    const tutor = stemSet(turns.slice(0, at).filter((t) => t.role === 'assistant').map((t) => t.content).join(' '));
+    return mine.filter((w) => tutor.has(w)).length / mine.length >= ECHO_OVERLAP;
+  };
+  const passedTeachBack = draft.kind !== 'concept' || opts.teachBack === 'explained';
+  const dropped: string[] = [];
+
+  const understood: string[] = [];
+  const told: string[] = [];
+  for (const it of draft.understood) {
+    if (SELF_CORRECTION.test(it.text)) { dropped.push(`understood: ${it.text} (self-correction claim)`); continue; }
+    const found = inStudentTurn(it.quote);
+    const credit = EXPLAINING_CREDIT.test(it.text);
+    if (it.source === 'explained' && found && wordCount(it.quote) >= EXPLAINED_QUOTE_MIN_WORDS && !echoesTutor(it.quote) && (passedTeachBack || !credit)) {
+      understood.push(it.text);
+    } else if (credit) {
+      dropped.push(`understood: ${it.text} (explaining credit without a teach-back)`);
+    } else if (it.source !== 'explained' || found) {
+      told.push(it.text);
+    } else {
+      dropped.push(`understood: ${it.text} (quote not in any student turn)`);
+    }
+  }
+  const sticking: string[] = [];
+  for (const it of draft.sticking_points) {
+    if (inStudentTurn(it.quote)) sticking.push(it.text);
+    else dropped.push(`sticking: ${it.text} (quote not in any student turn)`);
+  }
+
+  const ownWork = understood.length > 0;
+  let mastery = draft.mastery;
+  if (mastery === 'solid' && (!ownWork || !passedTeachBack)) mastery = 'developing';
+
+  const creditOk = ownWork && passedTeachBack;
+  const kept = sentences(draft.student_note).filter((x) => {
+    const bad = SELF_CORRECTION.test(x) || (!creditOk && EXPLAINING_CREDIT.test(x));
+    if (bad) dropped.push(`student_note: ${x}`);
+    return !bad;
+  });
+  const first = opts.studentName.split(/\s+/)[0] || 'there';
+  const student_note = kept.join(' ') || `Thanks for working through this session, ${first}.${draft.next_step ? ` Next: ${draft.next_step}` : ''}`;
+
+  const summary = { ...draft, mastery, understood: understood.slice(0, 6), sticking_points: sticking.slice(0, 6), told: told.slice(0, 6), student_note } as Omit<TutorialSummary, 'turns'>;
+  if (draft.kind === 'concept') {
+    // Decided from the transcript (kinds.ts stageForRun), not from the model's reading of it.
+    (summary as unknown as { teachback: string }).teachback =
+      opts.teachBack === 'explained' ? draft.teachback : opts.teachBack === 'not_reached' ? TEACH_BACK_NOT_REACHED : NO_TEACH_BACK;
+  }
+  return { summary, dropped };
+}
 
 function summarySystemFor(kind: TutorialKind): string {
   const spec = KINDS[kind];
   return `You read the transcript of a one-on-one ${spec.label.toLowerCase()} (${spec.blurb}) and write a short structured summary for two readers: the student (student_note) and the instructor (everything else). Judge against the brief's learning goal and success criteria.
 
+Evidence rules. These matter more than anything else here:
+- Only lines labelled with the student's name are evidence of what the student understood. Lines labelled "Tutor", including the tutor's recaps ("Here's what I heard…", "Let me play back…"), are never evidence, even if the student then says "yes".
+- Every "understood" and "sticking_points" item carries a quote: the student's own words that show it, copied exactly from one of their turns (a phrase is enough). If you cannot quote the student, the item does not belong there.
+- An idea the tutor stated first, which the student only agreed with or repeated, is "agreed" or "told", never "explained".
+- Never claim the student corrected themselves, worked something out "in their mind", did something "on their own" or ran anything, unless a quoted student turn shows exactly that.
+- A topic only the tutor raised is not one of the student's sticking points.
+
 Return ONLY a JSON object, no code fences, with exactly these keys:
 {
   "mastery": "solid" | "developing" | "needs_work",
-  "understood": [up to 6 short phrases naming what the student demonstrably understood or did well],
-  "sticking_points": [up to 6 short phrases naming where they were confused, guessed, needed heavy prompting, or fell short; empty array if none],
+  "understood": [up to 6 objects {"text": short phrase naming what the student demonstrably understood or did well, "quote": the student's own words that show it, copied exactly, "source": "explained" if the student put it in their own words before the tutor stated it, "agreed" if they agreed with or repeated something the tutor said, "told" if the tutor stated it and the student did not engage}],
+  "sticking_points": [up to 6 objects {"text": short phrase naming where they were confused, guessed, needed heavy prompting, or fell short, "quote": the student's own words where it showed (a wrong answer, a guess, "idk"), copied exactly}; empty array if none],
 ${spec.summaryExtras}
   "next_step": one concrete thing to review or practise, framed as a concept,
-  "student_note": 2–4 warm, specific sentences addressed to the student by first name — what they figured out or did well, and the one thing to revisit
+  "student_note": 2–4 warm, specific sentences addressed to the student by first name: what they figured out themselves (only "explained" items) and the one thing to revisit
 }
 
-Be honest. ${spec.summaryGuidance}`;
+Be honest: a flattering summary misleads the student and their instructor. ${spec.summaryGuidance}`;
 }
 
 function transcriptText(turns: Turn[], studentName: string): string {
@@ -715,6 +848,34 @@ function transcriptText(turns: Turn[], studentName: string): string {
     .join('\n\n');
 }
 
+/**
+ * Write and ground the summary of one run. No database access beyond the
+ * cost log (which never throws), so the live replay tests call it directly.
+ */
+export async function summarizeRun(params: {
+  tutorial: Tutorial;
+  brief: string;
+  turns: Turn[];
+  studentName: string;
+  attribution: Attribution;
+}): Promise<{ summary: TutorialSummary; dropped: string[] }> {
+  const { tutorial, brief, turns, studentName, attribution } = params;
+  const texts = studentTexts(turns);
+  const draft = await jsonCall({
+    schema: DraftSummary,
+    system: summarySystemFor(tutorial.kind),
+    userPrompt:
+      `${brief}\n\n# TRANSCRIPT\n${transcriptText(turns, studentName) || '(the student did not say anything)'}\n\nWrite the JSON summary now.`,
+    maxTokens: 1500,
+    attribution,
+    endpoint: 'tutorial.summary',
+    // The model never sees `kind`; it is the tutorial's, not its guess.
+    preprocess: (raw) => (raw && typeof raw === 'object' ? { ...(raw as object), kind: tutorial.kind } : raw),
+  });
+  const { teachBack } = stageForRun(tutorial.kind, texts, tutorial.target_minutes, keyTermsFor(tutorial), askedAt(turns));
+  const { summary, dropped } = groundSummary(draft, { turns, studentName, teachBack });
+  return { summary: { ...summary, turns: texts.length } as TutorialSummary, dropped };
+}
 
 export async function completeTutorialSession(params: {
   tutorial: Tutorial;
@@ -727,19 +888,10 @@ export async function completeTutorialSession(params: {
   if (tutorialSession.status === 'completed' && tutorialSession.summary) return tutorialSession.summary;
 
   const turns = await getSessionTurns(tutorialSession.session_id);
-  const studentTurns = turns.filter((t) => t.role === 'user' && !t.content.startsWith(START_MARKER)).length;
-  const parsed = await jsonCall({
-    schema: TutorialSummary,
-    system: summarySystemFor(tutorial.kind),
-    userPrompt:
-      `${await briefFor(tutorial, ctx)}\n\n# TRANSCRIPT\n${transcriptText(turns, student.display_name) || '(the student did not say anything)'}\n\nWrite the JSON summary now.`,
-    maxTokens: 1024,
-    attribution,
-    endpoint: 'tutorial.summary',
-    // The model never sees `kind`; it is the tutorial's, not its guess.
-    preprocess: (raw) => (raw && typeof raw === 'object' ? { ...(raw as object), kind: tutorial.kind } : raw),
+  const { summary, dropped } = await summarizeRun({
+    tutorial, brief: await briefFor(tutorial, ctx), turns, studentName: student.display_name, attribution,
   });
-  const summary: TutorialSummary = { ...parsed, turns: studentTurns };
+  if (dropped.length) console.info(`summary grounding, tutorial_session ${tutorialSession.id}: dropped ${dropped.length} unsupported item(s)`);
 
   await query(
     `update tutorial_session set status = 'completed', completed_at = now(), summary = $2 where id = $1`,

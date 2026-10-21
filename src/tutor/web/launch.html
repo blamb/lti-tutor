@@ -1290,6 +1290,7 @@
       `<h3>${ku.done} <span class="chip ${summary.mastery}">${masteryLabel(kind, summary.mastery)}</span></h3>` +
       `<div class="md" id="tut-sum-note"></div>` +
       `<div style="margin-top:.75rem"><strong>${understoodLabel}</strong>${list(summary.understood)}</div>` +
+      (summary.told && summary.told.length ? `<div><strong>Ideas the tutor explained</strong> <span class="muted">— worth putting in your own words next time</span>${list(summary.told)}</div>` : '') +
       `<div><strong>${stickyLabel}</strong>${list(summary.sticking_points)}</div>` +
       summaryExtrasHtml(kind, summary) +
       `<div style="margin-top:.5rem"><strong>Next step:</strong> ${escapeHtml(summary.next_step || '')}</div>` +

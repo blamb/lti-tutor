@@ -165,7 +165,7 @@ export const KINDS: Record<TutorialKind, KindSpec> = {
         `- WRAP-UP: in three or four sentences, say what the student worked out in their own words (only what they actually said), name the one thing to review, and ${WRAP_UP_FINISH}`,
       ];
     },
-    summaryExtras: `  "teachback": one sentence on how well they explained the core idea back in their own words, or "Teach-back not reached" if the tutorial ended before that stage,`,
+    summaryExtras: `  "teachback": one sentence on how well the student explained the core idea in their own words, judged only from their own turns after the tutor asked for it; "yes" or "that's right" to the tutor's recap is not a teach-back,`,
     summaryGuidance: '"solid" means they could explain the idea unprompted and survived a counter-example. A short transcript with little from the student is "needs_work", not "developing".',
     draftGuide: `This is a CONCEPT TUTORIAL. learning_goal = what the student should be able to explain by the end. opening_question = open, concrete, answerable from the materials, not yes/no. ta_brief = how to open, the 3–5 probes to work through in order (each with what a good answer contains), what to do when the student is stuck, and when to move to the teach-back. misconceptions = 3–5 lines, each a misconception and the question that exposes it. success_criteria = what a student who "got it" can say or do.`,
     prompts: null,

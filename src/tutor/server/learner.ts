@@ -150,7 +150,7 @@ Return ONLY a JSON object, no code fences:
   ]
 }
 
-Statuses: "secure" = explained unaided or survived a counter-example; "developing" = partly there, with prompting; "fragile" = recalled only with heavy cues, or had faded; "misconception" = holds a specific wrong idea (name the wrong idea in evidence). Include only concepts with evidence in this session, at most 8. An existing entry you do not mention is left as it was. If the summary shows nothing about any concept, return {"entries": []}.`;
+Statuses: "secure" = explained unaided or survived a counter-example; "developing" = partly there, with prompting; "fragile" = recalled only with heavy cues, or had faded; "misconception" = holds a specific wrong idea (name the wrong idea in evidence). Include only concepts with evidence in this session, at most 8. Only ideas in "understood" were put in the student's own words; ideas in "told" were stated by the tutor and only agreed with or heard, so they are at most "developing" and never "secure", and their evidence must say the tutor explained them. An existing entry you do not mention is left as it was. If the summary shows nothing about any concept, return {"entries": []}.`;
 
 /**
  * One small call after completion. Best-effort: a failure is logged and
