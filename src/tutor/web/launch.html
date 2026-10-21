@@ -207,7 +207,7 @@
       <div class="md" id="disclosure-notice-body"></div>
       <div class="form-row" style="margin-top:.75rem">
         <button class="btn" id="disclosure-ok" type="button">Got it</button>
-        <span class="muted">You can read this again any time under <em>About this tutor</em>.</span>
+        <span class="muted"><span id="disclosure-next" hidden>Your session opens next. </span>You can read this again any time under <em>About this tutor</em>.</span>
       </div>
     </div>
     <div class="card">
@@ -981,12 +981,28 @@
   function disclosureSeen() { try { return localStorage.getItem(DISCLOSURE_KEY) === hashText(disclosureText); } catch { return false; } }
   function markDisclosureSeen() { try { localStorage.setItem(DISCLOSURE_KEY, hashText(disclosureText)); } catch { /* storage blocked: shown again next launch, which is the safe default */ } }
   function hashText(t) { let h = 0; for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0; return String(h); }
+  function disclosurePending() { return !!disclosureText && !disclosureSeen() && !isTeacherRole; }
   function showDisclosureNotice() {
-    if (!disclosureText || disclosureSeen() || isTeacherRole) return;
+    if (!disclosurePending()) return;
     const box = $('#disclosure-notice'); box.hidden = false;
     setMd($('#disclosure-notice-body'), disclosureText);
   }
-  $('#disclosure-ok').addEventListener('click', () => { markDisclosureSeen(); $('#disclosure-notice').hidden = true; announce('Notice closed.'); });
+  // A learner who arrives through a session's own activity link sees the
+  // disclosure first, before About you or the chat; the session opens on
+  // "Got it". Nothing is recorded server-side and sending is not gated:
+  // whether acknowledgment should gate use is an open decision.
+  let afterDisclosure = null;
+  function holdForDisclosure(next) {
+    afterDisclosure = next;
+    $('#disclosure-next').hidden = false;
+    const h = $('#disclosure-notice h2'); if (h) h.focus({ preventScroll: true });
+    announce('Before you start: please read the notice about this tutor. Your session opens after you select Got it.');
+  }
+  $('#disclosure-ok').addEventListener('click', () => {
+    markDisclosureSeen(); $('#disclosure-notice').hidden = true; $('#disclosure-next').hidden = true;
+    const next = afterDisclosure; afterDisclosure = null;
+    if (next) next(); else announce('Notice closed.');
+  });
   function openAbout() { setMd($('#about-body'), disclosureText || '(No disclosure text has been set for this course.)'); $('#delete-data-status').textContent = ''; showView('about'); }
   $('#nav-about').addEventListener('click', openAbout);
   $('#about-back-btn').addEventListener('click', () => { showView('home'); loadHome(); });
@@ -2144,7 +2160,9 @@
   (window.requestIdleCallback || ((fn) => setTimeout(fn, 50)))(loadMdLibs);
   const launchTutorialId = parseInt(document.body.dataset.tutorialId || '', 10);
   loadHome().then(() => {
-    if (Number.isInteger(launchTutorialId) && launchTutorialId > 0) openTutorial(launchTutorialId);
+    if (!(Number.isInteger(launchTutorialId) && launchTutorialId > 0)) return;
+    if (disclosurePending()) holdForDisclosure(() => openTutorial(launchTutorialId));
+    else openTutorial(launchTutorialId);
   });
 </script>
 </body>
