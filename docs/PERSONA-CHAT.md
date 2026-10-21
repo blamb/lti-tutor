@@ -8,7 +8,9 @@ It shares `src/core` with LTI Tutor (LTI provider, materials and importers, the 
 
 ## Status
 
-As of 2026-10-15 all five planned phases are built, and the tool is deployed on Reclaim Cloud as `persona-chat` (https://persona-chat.ca.reclaim.cloud), registered in moodbox, placed in a course, and reading that course live through the shared web-service token. Tested through a local harness and in moodbox: launch, Designer view, materials by every route including the live sync. Not yet exercised in Moodle: a student launch of a persona placed as its own activity, the gradebook posting, and a public link opened from outside.
+All five planned phases were built by 2026-10-15. The fixes from the October 21 usability report (tested with a Bertrand Russell persona for PHIL 1101 and a simulated patient for Nursing 1830) and the general fact sheet followed on 2026-10-21 and were deployed the same day. The tool runs on Reclaim Cloud as `persona-chat` (https://persona-chat.ca.reclaim.cloud), is registered in moodbox, is placed in a course, and reads that course live through the shared web-service token.
+
+Tested through a local harness and in moodbox: launch, Designer view, materials by every route including the live sync. The October 21 work was tested with the replay harness against the real model and in a browser against the dev database, not yet in Moodle. Also not yet exercised in Moodle: a student launch of a persona placed as its own activity, the gradebook posting, and a public link opened from outside. The live personas have no case file, fact sheet or quote book until a designer fills them in.
 
 ## The persona model
 
@@ -42,7 +44,7 @@ The common rules, in every template: stay in character; describe non-verbal cues
 ```
 [template rules]            fixed per template, uncached
 [sources]                   the attached materials, cached
-[persona]                   the case file or quote book, the persona block, cached
+[persona]                   case file, fact sheet, quote book (each when filled), then the persona block, cached
 [transcript]                the conversation so far; the tail is cached
 ```
 
@@ -96,13 +98,29 @@ The routes live in `src/persona/server/public.ts`, mounted before ltijs's sessio
 
 `PERSONA_MODEL` sets the deployment default (Haiku 5.5). The designer view offers a per-persona choice with list prices per million tokens: Haiku 5.5, Sonnet 5.5, Opus 5.5 and Haiku 4.5. Every call is recorded in `api_call` with its cost, as in the tutor; `/admin/costs?token=…` summarises it.
 
+## Conduct rules worth knowing
+
+- **Names.** Course launches never pass the LMS display name to the persona; it uses a name only once the student gives one in the conversation. A visitor on a link may give a name at the gate, which is passed as one they chose. The debrief addresses the student as "you" and reads a transcript that labels them "Student".
+- **Placed activities.** A persona placed as its own activity (deep link with `custom.persona_id`) lists only that persona, and the page header shows the activity's title instead of the course's.
+- **Reply length.** Short is one to three sentences; medium is one to three short paragraphs under about 180 words; long rarely goes beyond about 350 words (`RESPONSE_LENGTH_NOTES`).
+- **Simulated clients.** Curt, closed or jargon questions get minimal answers; the persona never expands an abbreviation or guesses what one stands for, though everyday words (chemist, landlord, deadline) count as known; it never compliments the student's technique.
+- **Thinkers.** First person only; graded-work requests and "are you an AI?" are answered in a note, never in the persona's voice, and not restated afterwards.
+- **The coach.** The habits it watches for depend on the template (interview habits for a client, inquiry habits for a thinker, negotiation habits for a partner), and it points students who want to finish to the End conversation button.
+
+## API changes from October 21
+
+- `POST /api/personas/session/:sid/turn` may answer with an `end_intent` event instead of a reply; the page then asks the student to confirm, and sends `{ message, continue: true }` if they choose to keep talking.
+- `POST /api/personas/session/:sid/end` takes `{ final_message }`, kept as the student's last turn.
+- `POST /api/personas/session/:sid/debrief` returns `{ state, debrief, error }`; `GET` on the same path returns the state without starting anything. The open-web routes under `/api/public/<slug>/` match.
+- Sessions sent to the page carry `debrief_state`; the persona list's `my_session` does too.
+
 ## The regression harness
 
 ```bash
 npm run replay:persona
 ```
 
-Replays the saved student scripts in `src/persona/replay/scripts` (moderate and expert Russell; moderate and careless patient; plus the stored run whose debrief went wrong, for a fixed-input debrief replay) against the fixtures in `src/persona/replay/personas` with the real model, writes the debrief, and checks the October report's items 1 to 7: end requests caught, debrief state against Postgres, grounded debriefs (no re-suggested questions, critical issues for the medication advice and the ghostwriting), case-file consistency over five fresh sessions, disclosure by technique, no LMS names, Russell in the first person with notes and the soft word cap, and replies in about 1 to 4 seconds. Output goes to `replays/<timestamp>/` (gitignored); the exit code is 1 on any failure. Run it after every prompt or model change; `-- <id>` runs one script, `-- --no-db` skips the Postgres check. It uses the deployment's default models whatever `.env` pins (`REPLAY_PERSONA_MODEL` / `REPLAY_GEN_MODEL` to try others).
+Replays the saved student scripts in `src/persona/replay/scripts` (moderate and expert Russell; moderate and careless patient; plus the stored run whose debrief went wrong, for a fixed-input debrief replay) against the persona fixtures in `src/persona/replay/personas` (`russell`, `patient`, `patient-factsheet`, `tenant`, `partner`) with the real model, writes the debrief, and checks the October report's items 1 to 7: end requests caught, debrief state against Postgres, grounded debriefs (no re-suggested questions, critical issues for the medication advice and the ghostwriting), case-file consistency over five fresh sessions, disclosure by technique, no LMS names, Russell in the first person with notes and the soft word cap, and replies in about 1 to 4 seconds. Output goes to `replays/<timestamp>/` (gitignored); the exit code is 1 on any failure. Run it after every prompt or model change. `-- <text>` runs only the scripts and probes whose id contains that text; `-- compare` runs only the fixed-facts comparison (the patient as a case file and as a fact sheet, a tenant at a legal clinic and a negotiation counterpart: the same questions in five fresh sessions each, plus the technique probe), with a comparison table at the end of `summary.md`; `-- --no-db` skips the Postgres check. The fixtures are written for testing and are not the live personas. It uses the deployment's default models whatever `.env` pins (`REPLAY_PERSONA_MODEL` / `REPLAY_GEN_MODEL` to try others).
 
 ## Testing without Moodle
 
@@ -127,3 +145,5 @@ On the Materials tab, **Import a Moodle course backup** reads an `.mbz` file (up
 3. **Done.** Voice in and out, the step-out coach, the debrief as a separate call against the objectives, transcript export, a short reflection.
 4. **Done.** Completion passback to the gradebook and the instructor's report across conversations, with a synthesis.
 5. **Done.** Visibility beyond the LMS: link with passcode, or public, with spend caps.
+6. **Done (2026-10-21).** The usability report's fixes: the accessible end dialog and end-request detection; debrief state with Retry; grounded debriefs with turn references, a check pass and Critical issues; the case file and technique-matched disclosure for simulated clients; no LMS names; placed activities scoped to their persona; first person, system notes, the quote book and length caps for thinkers; the replay harness (migration 006).
+7. **Done (2026-10-21), for comparison.** The fact sheet for any template beside the case file, with presets, and its comparison in the harness (migration 007). Over three runs both models kept the patient's facts consistent in every session.

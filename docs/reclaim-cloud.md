@@ -42,9 +42,9 @@ Environment name `lti-tutor` → `https://lti-tutor.ca.reclaim.cloud`.
 
 moodbox web services: enabled, REST protocol on, external service **LTI Tutor course sync** with all twelve functions in `src/core/moodle-ws.ts`; one token per instructor on that service serves both tools.
 
-## A second environment for Persona Chat (done 2026-10-15)
+## A second environment for Persona Chat (created 2026-10-15, last redeployed 2026-10-21)
 
-Persona Chat deploys from the same repository and branch as its own environment with its own PostgreSQL node, so the two tools never share data or a registration. Environment `persona-chat` (Node.js 22.23.2 npm, node 17694; PostgreSQL 17.10, node 17695) is live at https://persona-chat.ca.reclaim.cloud, registered in moodbox and connected to a course through the shared web-service token. The checklist that was followed, for the next environment:
+Persona Chat deploys from the same repository and branch as its own environment with its own PostgreSQL node, so the two tools never share data or a registration. Environment `persona-chat` (Node.js 22.23.2 npm, node 17694; PostgreSQL 17.10, node 17695) is live at https://persona-chat.ca.reclaim.cloud, registered in moodbox and connected to a course through the shared web-service token. It was last redeployed on 2026-10-21 from `main` at `a34ad60` (the October 21 usability fixes and the fact sheet, migrations 006 and 007). The checklist that was followed, for the next environment:
 
 ### 1. Create the environment (Reclaim dashboard)
 
@@ -75,7 +75,7 @@ Persona Chat deploys from the same repository and branch as its own environment 
 ### 3. Check it
 
 - `https://persona-chat.ca.reclaim.cloud/healthz` answers `{"status":"ok","app":"persona",…}` within a minute.
-- The node's **Log** (`nodejs.log`) shows `apply core/001_core.sql` … `apply 005_public.sql` on the first start.
+- The node's **Log** (`nodejs.log`) shows `apply core/001_core.sql` … `apply 007_fact_sheet.sql` on the first start; a redeploy shows `apply` only for migrations it has not seen and `skip` for the rest.
 
 ### 4. Register it in Moodle (moodbox)
 
@@ -94,12 +94,13 @@ Launch the home activity as a teacher → **Designer view** → **New persona** 
 
 ### 6. What to test in Moodle that the local harness could not
 
-Done so far: the teacher launch, the Designer view, and the live sync. Still to try:
+Done so far: the teacher launch, the Designer view, and the live sync. A student run of a Russell persona and a simulated patient (the October 21 usability report) showed the fixes now deployed. Those fixes were tested with the replay harness and a local browser, not yet in Moodle. Still to try:
 
 - A student launch of the home activity and of a persona placed on its own.
 - Ending a conversation with a persona placed as an activity with the gradebook on: the column appears in the gradebook with 1/1, and the report shows *posted*.
 - A persona set to *Anyone with the link*: open the link in a private window.
-- The live sync, once a token is connected.
+- After the October 21 redeploy: typing "end simulation" opens the end dialog; the debrief shows Critical issues and turn links; a placed persona's page lists only that persona and shows the activity title.
+- Filling a live persona's case file, fact sheet or quote book in the Designer view and checking a conversation uses it.
 
 ## Moodle on the same Reclaim account: private-network routing
 
@@ -113,5 +114,5 @@ A Moodle on another host (e.g. TRU's production Moodle) needs neither change.
 ## Logs and updates
 
 - Node.js logs: the Application Servers layer's **Log** icon → `nodejs.log`.
-- Redeploy after a push: Deployment Manager → Git / SVN → the `lti-tutor` repo → deploy icon → environment `lti-tutor`, or tick *Check and auto-deploy updates* in that dialog. `npm start` re-runs migrations, which are idempotent.
+- Redeploy after a push: Deployment Manager → Git / SVN (the panel sometimes opens on Archive) → hover the `lti-tutor` repo row → deploy icon → branch `main` → environment: the Application Servers node of `lti-tutor`, or of `persona-chat` further down the list → **Deploy** → **Yes** to "Context ROOT is already in use. Redeploy context?". Or tick *Check and auto-deploy updates* in that dialog. `npm start` rebuilds and re-runs migrations, which are idempotent; the app starts only after they succeed, so `/healthz` answering with a fresh `uptime_s` (within about two minutes) means they applied.
 - The build runs on every start; it takes a few seconds on 4 cloudlets.

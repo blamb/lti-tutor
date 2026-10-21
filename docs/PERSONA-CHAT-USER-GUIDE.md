@@ -83,7 +83,7 @@ Long documents (a reading, a novel) belong under Materials, not in the paste box
 ### Conduct
 
 - **Who speaks first.** A thinker usually opens ("Introduce yourself briefly, establish the setting, ask what they'd like to discuss, and wait"). A patient usually waits for the student.
-- **Reply length.** *Short* for a patient or a role-play; *medium* for a thinker.
+- **Reply length.** *Short* (one to three sentences) for a patient or a role-play; *medium* (one to three short paragraphs, under about 180 words) for a thinker; *long* only when the subject needs it, rarely beyond about 350 words.
 - **Read-aloud voice.** Voices come from each student's device; this only leans the automatic choice feminine or masculine. Students can pick any installed voice.
 - **Step-out coach.** On by default. Switch it off when the conversation is itself the assessment.
 - **Model.** Haiku 5.5 is the default and is good for most personas, including the patient simulations. A thinker whose voice matters, or a persona where nuance is the point, may be worth Sonnet 5.5 or Opus 5.5; the menu shows the list price per million tokens. A conversation on Haiku costs a few cents; the stronger models cost more per turn in proportion, and retrieval keeps even long sources affordable on them.
@@ -99,7 +99,7 @@ Save, then **Try it as a student**. A preview runs the real persona with your ma
 Two ways:
 
 - **The home activity**, added once, lists every published persona. Good for a gallery like Philosopher Chats.
-- **A persona as its own activity.** *Add an activity → External tool → Persona Chat → Select content* and tick the personas you want. Each becomes an activity that opens straight into its pre-brief. A persona with the gradebook on brings its column with it. Draft personas can be placed now and published later.
+- **A persona as its own activity.** *Add an activity → External tool → Persona Chat → Select content* and tick the personas you want. Each becomes an activity that opens straight into its pre-brief, lists only that persona, and shows the activity's title in the page header. A persona with the gradebook on brings its column with it. Draft personas can be placed now and published later.
 
 Students launch in a new window, which is what voice needs; inside Moodle's own frame the microphone is blocked, and the page offers **Full screen** instead.
 
@@ -108,7 +108,7 @@ Students launch in a new window, which is what voice needs; inside Moodle's own 
 ## 5. What students see
 
 1. **The card and the pre-brief**: who they are in this, the setting, who speaks first, your *How to use* text, the objectives, and a plain disclosure that this is an AI playing a part.
-2. **The conversation.** Typed or spoken (**Speak**, then **Done speaking**, then check the text and send). Replies can be read aloud. Quotation chips appear under replies that quote.
+2. **The conversation.** Typed or spoken (**Speak**, then **Done speaking**, then check the text and send). Replies can be read aloud. Quotation chips appear under replies that quote. When the persona has to step out of character (to say it is an AI, or to decline to write graded work), that part appears as a marked note from the tool rather than in the persona's voice. The persona never sees the name the student has in the course; it uses a name only once the student introduces themselves.
 3. **Step out and ask the coach.** A side panel the persona cannot hear: "What haven't I covered?", "How could I put that better?". The coach sees the brief, the objectives and the transcript so far, never the hidden layer, and answers with questions and options. Its exchanges stay out of the persona's transcript.
 4. **End conversation** (or typing something like "end simulation" or "I'm finished", which asks the same question), then **Get your debrief**: any critical issues first (unsafe advice, a request to have work written for them, a breach of consent), then how it went, each objective with an example, what went well, what was worth exploring further, one question to carry away. Every point links to the turns it rests on. No grades. If writing the debrief fails or is interrupted, **Retry** stays on the page.
 5. **One thing to take from this**: a short reflection, saved with the conversation.

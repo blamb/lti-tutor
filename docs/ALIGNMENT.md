@@ -48,27 +48,27 @@ The Paski sequence as built: live lecture, one-on-one tutorial, group debrief ru
 
 ## Every behaviour that differs by mode
 
-The raw TRUFlex number is interpreted only in `deliveryOf()` (`src/tutor/server/delivery.ts:70`). Everything else keys on `pacing` or the four booleans. Line numbers are as of the Phase 8 commit.
+The raw TRUFlex number is interpreted only in `deliveryOf()` (`src/tutor/server/delivery.ts`). Everything else keys on `pacing` or the four booleans. The Where column names files and functions; line numbers were dropped because they drift with every change.
 
 | Switch | Behaviour | Where |
 |---|---|---|
-| `hasLiveSessions` | Tutor rules: without live sessions, rule 8 frames the session as discovery and forbids any mention of a lecture, class, live session or follow-up | `tutorials.ts:524` (`buildTutorialRules`) |
-| `hasLiveSessions`, `hasCohort` | Rules cache key: one fixed string per (kind, variant), so prompts stay cacheable | `tutorials.ts:550` (`tutorialRulesFor`) |
-| `hasLiveSessions` | Concept ORIENT assumes nothing was attended; TEACH-BACK audience: "classmate who missed the lecture" / "classmate who has not reached this topic" / "someone who has never studied this" | `kinds.ts:147–152` |
-| `hasLiveSessions`, `hasFixedDates` | Kind wording: "before the next class" / "this week's reading" / "before the next section" | `kinds.ts:29–30` (`timing()`), used by readiness and preparation_check |
-| `hasCohort` | Tutor rule 9: no classmates, peers, cohort or group work mentioned | `tutorials.ts:527` |
-| `hasLiveSessions` | Lecture debrief vs study debrief: prompt and `api_call` endpoint | `tutorials.ts:1201` (`generateDebrief`) |
-| `hasLiveSessions` | Labels "lecture debrief(s)" / "study debrief(s)" | `delivery.ts:94–95` (`deliveryLabels`), `lti.ts:189` (picker text), `launch.html:625` (`applyDeliveryLabels`) |
-| `hasCohort`, `hasLiveSessions` | Synthesis kind: group debrief brief / cohort note / course revision brief, prompts and endpoints | `tutorials.ts:883` (`debriefKindFor`), `:948–954` (`generateGroupDebrief`); `routes.ts:100, 692`; `launch.html:618, 636` |
-| `hasCohort` | "Mark as delivered" offered, after-session notes listed for learners; refused without a cohort | `routes.ts:182, 694, 722`; `launch.html:844` |
-| `hasLiveSessions` | After-session note framing: recap of the live debrief vs standalone; button wording | `tutorials.ts:1040` (`deliverDebrief`); `launch.html:1784–1785` |
-| `hasLiveSessions` | Debrief template wording for the course pack | `print.ts:156` (`ensureDebriefTemplate`) |
-| `inPerson` | Typing-first input with voice opt-in and a one-line hint; learner's choice remembered | `launch.html:1244, 1251` (`inputMode`, `applyInputMode`) |
-| `hasFixedDates` | Course start date field shown; editor's week and due date fields shown and sent | `launch.html:635, 1651, 1667–1668` |
-| `hasFixedDates` | Concepts report broken down by week | `routes.ts:495–498`; `learner.ts` `courseConceptsByWeek` |
-| `hasFixedDates` | Home view grouped by week with "this week" first; due-date chip on sessions | `progress.ts:91–93`; `launch.html:797` |
-| `hasFixedDates` | Date-aware nudges: "due …", "was due … and is still open"; readiness nudge names the week | `progress.ts:111, 135` |
-| `hasFixedDates`, `hasCohort` | "The cohort has moved on from week N" nudge; recall nudge mentions the cohort | `progress.ts:119, 151` |
-| `hasCohort` | Default AI disclosure: who sees what | `courses.ts:108` (`defaultAiDisclosure`) |
-| `pacing` | Human name in the course pack index | `delivery.ts:96` (`deliveryLabels`) |
+| `hasLiveSessions` | Tutor rules: without live sessions, rule 8 frames the session as discovery and forbids any mention of a lecture, class, live session or follow-up | `tutorials.ts` (`buildTutorialRules`) |
+| `hasLiveSessions`, `hasCohort` | Rules cache key: one fixed string per (kind, variant), so prompts stay cacheable | `tutorials.ts` (`tutorialRulesFor`) |
+| `hasLiveSessions` | Concept ORIENT assumes nothing was attended; TEACH-BACK audience: "classmate who missed the lecture" / "classmate who has not reached this topic" / "someone who has never studied this" | `kinds.ts` |
+| `hasLiveSessions`, `hasFixedDates` | Kind wording: "before the next class" / "this week's reading" / "before the next section" | `kinds.ts` (`timing()`), used by readiness and preparation_check |
+| `hasCohort` | Tutor rule 9: no classmates, peers, cohort or group work mentioned | `tutorials.ts` |
+| `hasLiveSessions` | Lecture debrief vs study debrief: prompt and `api_call` endpoint | `tutorials.ts` (`generateDebrief`) |
+| `hasLiveSessions` | Labels "lecture debrief(s)" / "study debrief(s)" | `delivery.ts` (`deliveryLabels`), `lti.ts` (picker text), `launch.html` (`applyDeliveryLabels`) |
+| `hasCohort`, `hasLiveSessions` | Synthesis kind: group debrief brief / cohort note / course revision brief, prompts and endpoints | `tutorials.ts` (`debriefKindFor`, `generateGroupDebrief`); `routes.ts`; `launch.html` |
+| `hasCohort` | "Mark as delivered" offered, after-session notes listed for learners; refused without a cohort | `routes.ts`; `launch.html` |
+| `hasLiveSessions` | After-session note framing: recap of the live debrief vs standalone; button wording | `tutorials.ts` (`deliverDebrief`); `launch.html` |
+| `hasLiveSessions` | Debrief template wording for the course pack | `print.ts` (`ensureDebriefTemplate`) |
+| `inPerson` | Typing-first input with voice opt-in and a one-line hint; learner's choice remembered | `launch.html` (`inputMode`, `applyInputMode`) |
+| `hasFixedDates` | Course start date field shown; editor's week and due date fields shown and sent | `launch.html` |
+| `hasFixedDates` | Concepts report broken down by week | `routes.ts`; `learner.ts` `courseConceptsByWeek` |
+| `hasFixedDates` | Home view grouped by week with "this week" first; due-date chip on sessions | `progress.ts`; `launch.html` |
+| `hasFixedDates` | Date-aware nudges: "due …", "was due … and is still open"; readiness nudge names the week | `progress.ts` |
+| `hasFixedDates`, `hasCohort` | "The cohort has moved on from week N" nudge; recall nudge mentions the cohort | `progress.ts` |
+| `hasCohort` | Default AI disclosure: who sees what | `courses.ts` (`defaultAiDisclosure`) |
+| `pacing` | Human name in the course pack index | `delivery.ts` (`deliveryLabels`) |
 | `pacing` (none) | Kinds themselves, the learner model, materials import, paper versions, accessibility, retention and deletion do not vary by mode; only their wording does, through the switches above | — |

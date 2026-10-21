@@ -88,6 +88,16 @@ Every tutorial has a **kind**, chosen in the editor. The kind sets the stage tem
 
 Every summary carries `mastery`, `understood`, `sticking_points`, `next_step` and `student_note`, so the report and the learner model treat all kinds alike; each kind adds its own fields (readiness: prior knowledge and misconceptions found; practice: strengths, what to improve, whether they revised; recall: retained and faded; assignment start: understanding of the task, the plan and the first step in the learner's words, and the sources they drew on). The definitions live in `src/tutor/server/kinds.ts`.
 
+### How the tutor conducts itself
+
+Rules added after the October 20 usability report on the COMP 2131 sessions, each with a regression test and most with a live replay (`npm run test:live`):
+
+- **Facts first.** A false claim is never praised or built on: the tutor says plainly, in one sentence, what is right, then carries on. A direct question gets a direct answer before any probing. Readiness checks correct a false fact the same way and then move on without teaching.
+- **Teach-back makes the learner teach.** The tutor asks first and waits; a bare "yes" earns no credit, and the teach-back stage holds (for up to two extra turns) until the learner has given an explanation in their own words.
+- **References.** The tutor cites only what the materials contain (each reply's references are checked against them and any miss is logged, `references.ts`) and never predicts what the learner's own machine will show.
+- **No shortcuts.** Requests for the tutor's instructions, the brief or an answer key are declined out loud.
+- **Summaries credit the learner's own words.** Every item in a summary carries a quotation from the learner; ideas they only agreed with are listed as explained by the tutor, and reflections judge what was said, never attitude.
+
 ### Starting an assignment
 
 An **assignment start** session is for the moment a learner opens an assignment and does not know where to begin. The tutor helps them restate what is being asked and catches a misreading, asks which reading and which activity bear on the task (sending them to the passage rather than summarising it), gets them to choose an approach and name the parts in order, and then has them take the first step out loud: standardise the first argument, state the first claim in a sentence, pick the passage they will analyse. Nothing in the session is submittable text: the tutor's rules forbid writing any part of it, the screen says so to the learner, and the summary records the learner's own understanding of the task, their plan, their first step and the sources they used, so the instructor sees who is stuck before the due date. Deep-link it under the assignment in the course; in self-paced courses it is also nudged once whatever it follows is done.
@@ -140,7 +150,7 @@ Nothing conversational works without a connection. What the tool can do is turn 
 - **Debriefs as files.** A learner's own debrief downloads as a single HTML file with inline CSS and no JavaScript, and prints cleanly. For the course pack, each material also gets a non-personalised debrief template with space to "make it yours" (`material_debrief_template`, `tutorial.debrief_template`).
 - **Export course pack.** One zip: every published session's paper script (HTML and Markdown), every material's debrief template, and `index.txt`.
 - **Printing in the app.** A print stylesheet turns the tutorial transcript, the end-of-session summary and a debrief into a clean record, so a learner on an intermittent connection can keep one.
-- **Slow connections.** The page carries no CDN dependency: marked and DOMPurify are served from the tool itself and loaded lazily after first paint, so the transcript shows as plain text immediately and re-renders once they arrive (or never, with nothing lost). The page is about 110 KB before fonts.
+- **Slow connections.** The page carries no CDN dependency: marked and DOMPurify are served from the tool itself and loaded lazily after first paint, so the transcript shows as plain text immediately and re-renders once they arrive (or never, with nothing lost). The page is about 175 KB uncompressed (about 46 KB gzipped) before fonts.
 
 ---
 
@@ -214,7 +224,8 @@ src/
     importers.ts           materials by URL (readable text, Pressbooks API) and by file (.txt .md .html .docx .pdf); unit tests alongside
     course-model.ts        one model of a Moodle course from a backup or a live sync, and its preview
     moodle-backup.ts       .mbz parsing; moodle-ws.ts: Moodle web-services client; unit tests alongside
-    anthropic.ts, llm.ts   SDK client; JSON calls with schema + retry
+    anthropic.ts, llm.ts   SDK client; JSON calls through structured output, with one correction retry
+    models.ts              per-model request options: effort and thinking headroom on 5.x models, none on Haiku 4.5
     costs.ts               price table + api_call recording + summary
     chunks.ts              passages of each material and full-text retrieval; quotes.ts: quotation checking; unit tests alongside
     document.ts            standalone HTML documents from markdown (transcripts, paper scripts, debriefs)
@@ -234,17 +245,25 @@ src/
     server/print.ts        paper versions of sessions, debrief templates, standalone HTML, the course pack zip
     server/tutorials.ts    briefs, profiles, the staged dialogue, summaries, debriefs, AI draft
     server/grades.ts       AGS completion passback
-    migrations/001_init.sql … 010_moodle_ws.sql
+    server/concepts.ts     canonical key concepts: one Concepts row per idea, matching and moving wordings
+    server/references.ts   checks each reply's references against the materials and flags claims about the learner's own machine
+    server/replay/         live replays against the real model (*.live.ts, `npm run test:live`) and their fixtures
+    migrations/001_init.sql … 013_student_goal.sql
     web/launch.html        the single-page frontend
   persona/                 Persona Chat: docs/PERSONA-CHAT-USER-GUIDE.md and docs/PERSONA-CHAT.md
-    server/personas.ts     the persona model, prompt assembly, conversations, the AI draft; unit tests alongside
-    server/templates.ts    templates: standing rules, field hints, seeds
+    server/personas.ts     the persona model, prompt assembly, conversations, the coach, the AI draft, exports, the report; unit tests alongside
+    server/templates.ts    templates: standing rules, field hints, seeds, reply lengths
+    server/debrief.ts      the debrief: numbered turns, turn references, the check pass, critical issues, its none/generating/ready/failed state
+    server/casefile.ts     a simulated client's case file; factsheet.ts: the general fact sheet for any template, with presets
+    server/quotebook.ts    a thinker's vetted quotations, misattributions and reading list
+    server/signals.ts      end requests ("end simulation") and out-of-character [[note]] markers
     server/routes.ts       /api/* (student + designer + deep-link response)
     server/course.ts       the course's Moodle web-service token
     server/public.ts       the persona beyond the LMS: /p/<slug>, passcode, caps
     server/lti.ts, index.ts, env.ts
-    fixtures/              the two reference personas (Melissa Chang, Tagore); seed.ts loads them
-    migrations/            001_personas.sql … 005_public.sql
+    fixtures/              the two reference personas (Melissa Chang, Tagore), loaded by seed.ts beside this folder
+    replay/                the regression harness (`npm run replay:persona`): run.ts, student scripts, test personas
+    migrations/            001_personas.sql … 007_fact_sheet.sql
     web/launch.html
 ```
 
@@ -267,7 +286,7 @@ npm run dev:persona
 ngrok http --domain=<your-static-domain> 3000   # or any HTTPS tunnel; LTI_TOOL_URL must match
 ```
 
-`npm run typecheck` and `npm test` (unit tests, no database needed) should both pass before committing.
+`npm run typecheck` and `npm test` (unit tests, no database needed) should both pass before committing. Two suites call the real model and cost a little: `npm run test:live` replays the tutor's COMP 2131 cases (`src/tutor/server/replay/*.live.ts`), and `npm run replay:persona` replays Persona Chat's student scripts and checks the October 21 report's items (see [docs/PERSONA-CHAT.md](docs/PERSONA-CHAT.md#the-regression-harness)). Run the one for the tool you changed after any prompt or model change.
 
 Register the tool in Moodle: *Site administration → Plugins → External tool → Manage tools → Dynamic registration* with URL `<LTI_TOOL_URL>/register`, then activate it. Check the tool's configuration has:
 
@@ -285,7 +304,7 @@ Register the tool in Moodle: *Site administration → Plugins → External tool 
 
 ### Deploying
 
-Any Node host with Postgres works. A `railpack.json` is included for Railway. Set `LTI_TOOL_URL`, `DATABASE_URL`, `LTI_COOKIE_SECRET`, `ANTHROPIC_API_KEY`, `NODE_ENV=production` and optionally `ANTHROPIC_BASE_URL` (a sovereign or institutional Anthropic-compatible endpoint), `DATA_RETENTION_DAYS`, `ADMIN_TOKEN`, `TOOL_NAME`, `TUTOR_MODEL`, `GEN_MODEL`. `npm start` runs migrations then the server; `GET /healthz` is an unauthenticated liveness probe. A Persona Chat deployment is the same with `APP=persona` set (and its own `DATABASE_URL`, `LTI_TOOL_URL` and `TOOL_NAME`).
+Any Node host with Postgres works. A `railpack.json` is included for Railway. Set `LTI_TOOL_URL`, `DATABASE_URL`, `LTI_COOKIE_SECRET`, `ANTHROPIC_API_KEY`, `NODE_ENV=production` and optionally `ANTHROPIC_BASE_URL` (a sovereign or institutional Anthropic-compatible endpoint), `PLATFORM_HTTP_HOSTS` (an LMS on the same private network), `TOKEN_SECRET` (encrypts Moodle web-service tokens), `DATA_RETENTION_DAYS`, `ADMIN_TOKEN`, `TOOL_NAME`, `TUTOR_MODEL`, `GEN_MODEL`. `npm start` runs migrations then the server; `GET /healthz` is an unauthenticated liveness probe. A Persona Chat deployment is the same with `APP=persona` set (and its own `DATABASE_URL`, `LTI_TOOL_URL` and `TOOL_NAME`; `PERSONA_MODEL` instead of `TUTOR_MODEL`). Both tools run on Reclaim Cloud; [docs/reclaim-cloud.md](docs/reclaim-cloud.md) has the environments and the redeploy steps.
 
 ### Models and cost
 
