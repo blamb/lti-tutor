@@ -61,7 +61,7 @@ import { courseCtxFromToken, CourseSettingsInput, upsertCourseSettings, courseCt
 } from './courses.js';
 import { deleteMyData } from './retention.js';
 import { TRUFLEX_MODES, deliveryLabels } from './delivery.js';
-import { isTutorialKind, kindCatalog, titledForKind, KINDS } from './kinds.js';
+import { isTutorialKind, kindCatalog, titledForKind, KINDS, studentGoalFor } from './kinds.js';
 import { listLearnerModel, deleteLearnerEntry, courseConceptsByWeek } from './learner.js';
 import { courseConceptReport, setWordingConcept, remapUnmapped, keyConceptsText } from './concepts.js';
 import { importFromUrl, extractFromFile, fitMaterial, ImportError, MAX_BOOK_CHAPTERS } from '../../core/importers.js';
@@ -199,7 +199,7 @@ lti.app.get('/api/tutorials', async (req: Request, res: Response) => {
       tutorials: tutorials.map((t) => {
         const s = latest.get(t.id);
         return {
-          id: t.id, kind: t.kind, title: t.title, learning_goal: t.learning_goal, target_minutes: t.target_minutes,
+          id: t.id, kind: t.kind, title: t.title, goal: studentGoalFor(t), target_minutes: t.target_minutes,
           week: t.week, due_at: t.due_at, suggested_after_tutorial_id: t.suggested_after_tutorial_id,
           my_status: s?.status ?? null, my_mastery: s?.summary?.mastery ?? null, my_nps: s?.nps_score ?? null,
           my_completed_at: s?.status === 'completed' ? s.completed_at : null,
@@ -230,9 +230,10 @@ lti.app.post('/api/tutorials/:id/start', async (req: Request, res: Response) => 
     const turns = await getSessionTurns(session.session_id);
     res.json({
       tutorial: {
-        id: tutorial.id, kind: tutorial.kind, title: tutorial.title, learning_goal: tutorial.learning_goal,
+        id: tutorial.id, kind: tutorial.kind, title: tutorial.title, goal: studentGoalFor(tutorial),
         target_minutes: tutorial.target_minutes, status: tutorial.status,
         stages: KINDS[tutorial.kind].stages.map((s) => s.name),
+        stage_labels: Object.fromEntries(KINDS[tutorial.kind].stages.map((s) => [s.name, s.label])),
       },
       session,
       turns: turns.filter((t) => !t.content.startsWith(START_MARKER)),
@@ -989,7 +990,7 @@ lti.app.post('/api/deeplink', express.urlencoded({ extended: false }), async (re
       const item: DeepLinkContentItem = {
         type: 'ltiResourceLink',
         title: titled,
-        text: t.learning_goal,
+        text: studentGoalFor(t),
         url: env.LTI_TOOL_URL,
         custom: { tutorial_id: String(t.id) },
       };

@@ -106,6 +106,15 @@
   .tot-cards .lbl { color: var(--muted); font-size: .8rem; }
 
   /* Tutorial */
+  /* Narrow screens: the page scrolls, not a box inside it, and the message box stays in view (Finding 12). */
+  @media (max-width: 900px) {
+    #view-tutorial .turns { max-height: none; min-height: 160px; overflow: visible; }
+    #view-tutorial .turn, #view-tutorial .turn .bubble { scroll-margin-bottom: 7rem; }
+  }
+  /* The message box stays in view at every width, so a long goal or toolbar never pushes it below the fold. */
+  #tutorial-compose { position: sticky; bottom: 0; z-index: 5; background: var(--card); padding: .5rem 0; box-shadow: 0 -8px 8px -8px rgba(0,0,0,.25); }
+  details.tut-goal > summary { cursor: pointer; font-weight: 500; }
+  details.tut-goal:not([open]) { padding-top: .35rem; padding-bottom: .35rem; }
   .tut-goal { background: var(--accent-soft); border-left: 3px solid var(--accent); padding: .5rem .75rem; border-radius: 0 6px 6px 0; margin: .25rem 0 .75rem; font-size: .9rem; }
   .tut-toolbar { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin-bottom: .5rem; }
   .tut-toolbar .spacer { flex: 1; }
@@ -127,6 +136,7 @@
   .form-grid { display: grid; gap: .7rem; max-width: 720px; }
   .form-grid label { display: flex; flex-direction: column; gap: .25rem; font-size: .9rem; }
   .form-grid label .hint { color: var(--muted); font-size: .78rem; }
+  .form-grid textarea.short { min-height: 2.6rem; resize: vertical; }
   .form-grid input[type=text], .form-grid input[type=url], .form-grid input[type=date], .form-grid input[type=number], .form-grid select, .form-grid textarea, .text-input { padding: .45rem .6rem; border: 1px solid var(--border); border-radius: 6px; font: inherit; width: 100%; background: var(--card); color: var(--fg); }
   .text-input { width: auto; }
   .form-grid textarea { min-height: 70px; resize: vertical; }
@@ -177,7 +187,7 @@
       <button class="link-btn" id="nav-learning" type="button" title="What you've shown you understand so far in this course"><span aria-hidden="true">📚</span> My learning</button>
       <button class="link-btn" id="nav-about" type="button" title="What this tutor is, what it keeps, and how to delete your data"><span aria-hidden="true">ℹ</span> About this tutor</button>
       <details class="display-menu" id="display-menu">
-        <summary class="link-btn" title="Text size and line spacing"><span aria-hidden="true">Aa</span><span class="visually-hidden">Text size and line spacing</span></summary>
+        <summary class="link-btn" title="Text size and line spacing"><span aria-hidden="true">Aa</span> Text size and spacing</summary>
         <div class="display-pop">
           <fieldset>
             <legend>Text size</legend>
@@ -261,11 +271,11 @@
       <span id="profile-visibility">Everything here is optional, and your instructor can't see it.</span>
     </p>
     <form class="form-grid" id="profile-form" autocomplete="off" style="max-width:560px">
-      <label>Program and year <span class="hint">e.g. "2nd year Nursing", "MBA, part-time"</span><input type="text" name="program" maxlength="200"></label>
-      <label>Why you're taking this course / your goal <span class="hint">e.g. "moving into a data role", "I need this for the licensing exam"</span><input type="text" name="goal" maxlength="500"></label>
-      <label>Background in the subject <span class="hint">e.g. "none", "a course three years ago"</span><input type="text" name="background" maxlength="500"></label>
-      <label>What you find hardest so far <input type="text" name="struggles" maxlength="500"></label>
-      <label>Interests, work, hobbies <span class="hint">used for analogies</span><input type="text" name="interests" maxlength="300"></label>
+      <label>Program and year <span class="hint">e.g. "2nd year Nursing", "MBA, part-time"</span><textarea name="program" maxlength="200" rows="2" class="short"></textarea></label>
+      <label>Why you're taking this course / your goal <span class="hint">e.g. "moving into a data role", "I need this for the licensing exam"</span><textarea name="goal" maxlength="500" rows="2" class="short"></textarea></label>
+      <label>Background in the subject <span class="hint">e.g. "none", "a course three years ago"</span><textarea name="background" maxlength="500" rows="2" class="short"></textarea></label>
+      <label>What you find hardest so far <textarea name="struggles" maxlength="500" rows="2" class="short"></textarea></label>
+      <label>Interests, work, hobbies <span class="hint">used for analogies</span><textarea name="interests" maxlength="300" rows="2" class="short"></textarea></label>
       <div class="form-row">
         <button class="btn" type="submit" id="profile-save">Save</button>
         <span id="profile-status" class="muted" role="status"></span>
@@ -296,7 +306,7 @@
         <button class="back-btn" id="tutorial-back-btn" type="button">← Back</button>
       </div>
     </div>
-    <div class="tut-goal" id="tutorial-goal"></div>
+    <details class="tut-goal" id="tutorial-goal-box" open><summary>What this session is for</summary><div id="tutorial-goal"></div></details>
     <div class="tut-goal" id="tutorial-frame" hidden></div>
     <div class="tut-panel" data-state="chat">
       <div class="tut-toolbar">
@@ -313,6 +323,7 @@
         <span id="compose-hint" class="visually-hidden">Press Enter to send, Shift+Enter for a new line. Spoken words appear here first so you can check them before sending.</span>
         <button type="submit" id="tutorial-send">Send</button>
       </form>
+      <div class="muted" id="tutorial-return-note" style="font-size:.8rem;margin-top:.35rem">You can stop and come back later: this conversation is saved.</div>
       <div class="voice-row">
         <button class="mic-btn" id="tutorial-mic" type="button" aria-pressed="false" aria-describedby="tutorial-voice-hint tutorial-mode-hint" title="Hold the conversation by voice. You decide when to start and stop."><span aria-hidden="true">🎤</span> <span class="mic-label">Speak</span></button>
         <label style="display:flex;align-items:center;gap:.35rem;cursor:pointer"><input type="checkbox" id="tutorial-tts"> Read replies aloud</label>
@@ -406,6 +417,7 @@
           </div>
           <label>Pitch <span class="hint">Reading level and tone. Leave blank to use the course default from Course settings.</span><input type="text" name="pitch" maxlength="500" placeholder="e.g. Adult Basic Education reading level, short sentences, everyday examples — or: upper-year undergraduate"></label>
           <label><span data-kf="learning_goal">Learning goal</span> <span class="hint" data-kh="learning_goal">What the student should be able to explain by the end.</span><textarea name="learning_goal" required></textarea></label>
+          <label>What students see <span class="hint">One sentence to the student ("you"): what this session will help them do. Shown on their home list, above the chat and in the course. Leave blank for a plain line for this kind of session; the learning goal above is never shown to them.</span><textarea name="student_goal" maxlength="500" class="short"></textarea></label>
           <label><span data-kf="opening_question">Opening question</span> <span class="hint" data-kh="opening_question">The first thing the tutor asks. Open, concrete, answerable from the materials.</span><textarea name="opening_question" required></textarea></label>
           <label><span data-kf="ta_brief">How to run it — your notes to the TA</span> <span class="hint" data-kh="ta_brief">How to open, the probes to work through in order and what a good answer contains, what to do when they're stuck, when to move to the teach-back.</span><textarea name="ta_brief" class="tall"></textarea></label>
           <label><span data-kf="misconceptions">Misconceptions to listen for</span> <span class="hint" data-kh="misconceptions">One per line, with the question that exposes it.</span><textarea name="misconceptions"></textarea></label>
@@ -915,7 +927,7 @@
     const kindChip = t.kind && t.kind !== 'concept' ? `<span class="chip">${escapeHtml(kindUI(t.kind).label)}</span> ` : '';
     const due = delivery.hasFixedDates && t.due_at && t.my_status !== 'completed' ? `<div>due ${new Date(t.due_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</div>` : '';
     li.innerHTML =
-      `<button type="button" class="item-open"><span class="t-title">${kindChip}${escapeHtml(t.title)}</span><span class="t-goal">${escapeHtml(t.learning_goal)}</span></button>` +
+      `<button type="button" class="item-open"><span class="t-title">${kindChip}${escapeHtml(t.title)}</span><span class="t-goal">${escapeHtml(t.goal || t.learning_goal || '')}</span></button>` +
       `<div class="t-meta"><div>~${t.target_minutes} min</div>${due}<div style="margin-top:.2rem">${chip}</div><div style="margin-top:.2rem"><button class="link-btn paper-btn" type="button" title="A printable version to work through on paper, offline" aria-label="Paper version of ${escapeHtml(t.title)}"><span aria-hidden="true">📄</span> Paper</button></div></div>`;
     li.querySelector('.item-open').addEventListener('click', () => openTutorial(t.id));
     li.querySelector('.paper-btn').addEventListener('click', async (ev) => {
@@ -1126,9 +1138,17 @@
   const tutErr = $('#tutorial-err'), tutStage = $('#tutorial-stage'), tutFinish = $('#tutorial-finish');
   const STAGE_LABEL = {
     ORIENT: 'Getting started', EXPLORE: 'Exploring', 'TEACH-BACK': 'Teach it back', 'WRAP-UP': 'Wrapping up',
-    PROBE: 'Exploring', RECALL: 'Recalling the reading', CONNECT: 'Connecting', SHARE: 'Share your work',
-    FEEDBACK: 'Feedback', REVISE: 'Revising', 'MORE-PRACTICE': 'One more', OPEN: 'Getting started', PLAN: 'Planning', RETRIEVE: 'Retrieving',
+    PROBE: 'Exploring', RECALL: 'Recalling the reading', CONNECT: 'Connecting', SHARE: 'Sharing your work',
+    FEEDBACK: 'Feedback', REVISE: 'Revising', 'MORE-PRACTICE': 'One more', OPEN: 'Getting started', PLAN: 'Planning', RETRIEVE: 'Recalling',
+    UNPACK: 'Unpacking the task', 'FIRST-STEP': 'First step',
   };
+  // The server's labels for this kind come first (kinds.ts); this map only covers an older server.
+  function stageText(name) {
+    const fromServer = tut.tutorial && tut.tutorial.stage_labels && tut.tutorial.stage_labels[name];
+    return fromServer || STAGE_LABEL[name] || (name.charAt(0) + name.slice(1).toLowerCase().replace(/-/g, ' '));
+  }
+  /** The reply ends by asking something, so the session is not ready to finish. */
+  function endsWithQuestion(text) { return /\?["'”’)\]*]*\s*$/.test((text || '').trim()); }
   const MASTERY_LABEL = { solid: 'Solid', developing: 'Developing', needs_work: 'Needs work' };
   // Per-kind labels. Mirrors src/tutor/server/kinds.ts (labels only; the server owns the behaviour).
   const KIND_UI = {
@@ -1157,13 +1177,18 @@
   function kindUI(kind) { return KIND_UI[kind] || KIND_UI.concept; }
   function masteryLabel(kind, m) { return kindUI(kind).mastery[m] || MASTERY_LABEL[m] || m; }
 
+  /** Keep the newest turn in view: inside the box where it scrolls, or on the page on narrow screens. */
+  function scrollToLatest(el) {
+    if (tutTurns.scrollHeight > tutTurns.clientHeight + 4) tutTurns.scrollTop = tutTurns.scrollHeight;
+    else if (el && window.matchMedia('(max-width: 900px)').matches && $('#view-tutorial').classList.contains('active')) el.scrollIntoView({ block: 'end' });
+  }
   function tutShowState(state) { $$('#view-tutorial .tut-panel').forEach((p) => { p.hidden = p.dataset.state !== state; }); }
 
   function appendTutTurn(role, content) {
     const div = document.createElement('div'); div.className = 'turn ' + role;
     const bub = document.createElement('div'); bub.className = 'bubble'; bub._raw = content || '';
     setMd(bub, bub._raw); div.appendChild(bub); tutTurns.appendChild(div);
-    tutTurns.scrollTop = tutTurns.scrollHeight;
+    scrollToLatest(div);
     return bub;
   }
 
@@ -1182,7 +1207,10 @@
       const ku = kindUI(data.tutorial.kind);
       $('#tutorial-title').textContent = (data.tutorial.kind && data.tutorial.kind !== 'concept' ? ku.label + ': ' : '') + data.tutorial.title + (data.tutorial.status !== 'published' ? ' (draft preview)' : '');
       applyInputMode(inputMode());
-      $('#tutorial-goal').textContent = 'Goal: ' + data.tutorial.learning_goal;
+      // What the session is for, in the learner's terms; folded away on narrow screens so the chat fits.
+      $('#tutorial-goal').textContent = data.tutorial.goal || '';
+      $('#tutorial-goal-box').hidden = !data.tutorial.goal;
+      $('#tutorial-goal-box').open = !window.matchMedia('(max-width: 900px)').matches;
       const frame = $('#tutorial-frame');
       frame.hidden = data.tutorial.kind !== 'assignment_start';
       frame.textContent = frame.hidden ? '' : 'This session helps you start the assignment: it asks, it does not write. Nothing here is submittable text, and the tutor will not draft any part of it for you.';
@@ -1192,7 +1220,7 @@
       }
       tutTurns.innerHTML = '';
       for (const t of data.turns) appendTutTurn(t.role, t.content);
-      tutStage.textContent = data.turns.some((t) => t.role === 'user') ? 'Continuing' : (STAGE_LABEL[(data.tutorial.stages || [])[0]] || 'Getting started');
+      tutStage.textContent = data.turns.some((t) => t.role === 'user') ? 'Continuing' : stageText((data.tutorial.stages || [])[0] || 'ORIENT');
       if (!data.turns.length) await tutorialStream({ begin: true }); else tutInput.focus();
     } catch (e) {
       tutTurns.innerHTML = ''; tutErr.textContent = 'Could not open the tutorial: ' + friendlyError(e);
@@ -1221,14 +1249,16 @@
           const evt = parseSSE(buf.slice(0, idx)); buf = buf.slice(idx + 2);
           if (evt.event === 'chunk') {
             bubble._raw = (bubble._raw || '') + (evt.data.text || '');
-            setMd(bubble, bubble._raw); tutTurns.scrollTop = tutTurns.scrollHeight;
+            setMd(bubble, bubble._raw); scrollToLatest(bubble);
           } else if (evt.event === 'done') {
+            // "Wrapping up" only once the tutor has stopped asking: a final question still wants an answer.
+            const ready = evt.data.stage === 'WRAP-UP' && !endsWithQuestion(bubble._raw);
             if (evt.data.stage) {
-              tutStage.textContent = STAGE_LABEL[evt.data.stage] || evt.data.stage;
-              if (evt.data.stage === 'WRAP-UP') tutStage.textContent += ' — click Finish when ready';
+              tutStage.textContent = evt.data.stage === 'WRAP-UP' && !ready ? 'Nearly done' : stageText(evt.data.stage);
+              if (ready) tutStage.textContent += ' — click Finish when ready';
             }
             // Streamed text is announced once, complete, rather than chunk by chunk.
-            announce('Tutor: ' + (bubble._raw || '') + (evt.data.stage === 'WRAP-UP' ? ' You can finish the session when ready.' : ''));
+            announce('Tutor: ' + (bubble._raw || '') + (ready ? ' You can finish the session when ready.' : ''));
           } else if (evt.event === 'error') {
             tutErr.textContent = 'Tutor error: ' + evt.data.message;
           }
@@ -2045,6 +2075,7 @@
     $('#tutorial-dates-row').hidden = !delivery.hasFixedDates;
     f.title.value = t.title || ''; f.target_minutes.value = t.target_minutes || 15;
     f.learning_goal.value = t.learning_goal || ''; f.opening_question.value = t.opening_question || '';
+    f.student_goal.value = t.student_goal || '';
     f.ta_brief.value = t.ta_brief || ''; f.misconceptions.value = t.misconceptions || ''; f.success_criteria.value = t.success_criteria || '';
     f.key_concepts.value = t.key_concepts || '';
     f.pitch.value = t.pitch || '';
@@ -2055,7 +2086,7 @@
     const f = tutorialForm.elements;
     return {
       title: f.title.value.trim(), target_minutes: parseInt(f.target_minutes.value, 10) || 15,
-      learning_goal: f.learning_goal.value.trim(), opening_question: f.opening_question.value.trim(),
+      learning_goal: f.learning_goal.value.trim(), opening_question: f.opening_question.value.trim(), student_goal: f.student_goal.value.trim(),
       ta_brief: f.ta_brief.value.trim(), misconceptions: f.misconceptions.value.trim(), success_criteria: f.success_criteria.value.trim(),
       key_concepts: f.key_concepts.value.trim(),
       pitch: f.pitch.value.trim(), kind: f.kind.value, practice_prompts: f.practice_prompts.value.trim(), recall_tutorial_ids: selectedRecallIds(),
@@ -2076,7 +2107,7 @@
   async function saveTutorial(payload, opts = {}) {
     const id = payload.id || (tm.editing && tm.editing.id);
     const body = {};
-    for (const k of ['title', 'kind', 'target_minutes', 'learning_goal', 'opening_question', 'ta_brief', 'misconceptions', 'success_criteria', 'key_concepts', 'pitch', 'practice_prompts', 'recall_tutorial_ids', 'suggested_after_tutorial_id', 'week', 'due_at', 'material_ids', 'gradebook', 'status']) body[k] = payload[k] === undefined ? null : payload[k];
+    for (const k of ['title', 'kind', 'target_minutes', 'learning_goal', 'student_goal', 'opening_question', 'ta_brief', 'misconceptions', 'success_criteria', 'key_concepts', 'pitch', 'practice_prompts', 'recall_tutorial_ids', 'suggested_after_tutorial_id', 'week', 'due_at', 'material_ids', 'gradebook', 'status']) body[k] = payload[k] === undefined ? null : payload[k];
     const data = await api(id ? `/api/teacher/tutorials/${id}` : '/api/teacher/tutorials', { method: id ? 'PUT' : 'POST', body });
     if (!opts.quiet) tm.editing = data.tutorial;
     await loadTeacherTutorials();

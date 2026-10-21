@@ -66,7 +66,7 @@ Two limits worth knowing: a reading that exists in the course only as a link to 
 
 2. **Tick the materials** this session may draw on. They are grouped by unit if they came from an import. The usual set is the unit's text and reading plus its activities and study questions.
 
-3. **Click Draft.** Type the topic in a few words (rough notes are fine), and the tool writes the brief from your materials: learning goal, opening question, your notes to the tutor, misconceptions to listen for, what "got it" sounds like. It draws probes from the course's own activities first. Read it as you would a teaching assistant's draft and edit anything you would say differently. The brief is yours; the tutor follows it.
+3. **Click Draft.** Type the topic in a few words (rough notes are fine), and the tool writes the brief from your materials: learning goal, the one sentence students see about what the session is for, opening question, your notes to the tutor, misconceptions to listen for, what "got it" sounds like. It draws probes from the course's own activities first. Read it as you would a teaching assistant's draft and edit anything you would say differently. The brief is yours; the tutor follows it.
 
 4. **Try it as a student** before you publish. Then **Save** with status *published*.
 

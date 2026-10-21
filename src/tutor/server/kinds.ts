@@ -35,6 +35,8 @@ function timing(d: Delivery, live: string, dated: string, open: string): string 
 
 export interface StageDef {
   name: string;
+  /** What the learner's status chip says, in sentence case (Finding 12). */
+  label: string;
   /** Fraction of the target exchange count this stage runs until; Infinity for the last. */
   until: number;
 }
@@ -47,6 +49,8 @@ export interface KindSpec {
   engagement: number[];
   /** One line for the instructor's kind selector. */
   blurb: string;
+  /** What the session is for, said to the learner, when the brief has no student goal (Finding 12). */
+  forStudents: string;
   /** 4–8 exchanges and no teach-back. */
   short: boolean;
   stages: StageDef[];
@@ -79,11 +83,12 @@ export const KINDS: Record<TutorialKind, KindSpec> = {
     label: 'Readiness check',
     engagement: [1, 2],
     blurb: 'Short diagnostic before a unit: what they already know and misunderstand, then what to watch for.',
+    forStudents: "A short check-in before the new material: what you already know and think. Not graded.",
     short: true,
     stages: [
-      { name: 'ORIENT', until: 0 },
-      { name: 'PROBE', until: 0.8 },
-      { name: 'WRAP-UP', until: Infinity },
+      { name: 'ORIENT', label: 'Getting started', until: 0 },
+      { name: 'PROBE', label: 'Exploring', until: 0.8 },
+      { name: 'WRAP-UP', label: 'Wrapping up', until: Infinity },
     ],
     replyWords: 70,
     purpose: (d) =>
@@ -110,12 +115,13 @@ export const KINDS: Record<TutorialKind, KindSpec> = {
     label: 'Preparation check',
     engagement: [3],
     blurb: 'After an assigned reading: did they do it, what stuck, what did not. Kind, not a quiz.',
+    forStudents: "A short, friendly check on the reading: what stood out and what did not. Not a quiz.",
     short: true,
     stages: [
-      { name: 'ORIENT', until: 0 },
-      { name: 'RECALL', until: 0.55 },
-      { name: 'CONNECT', until: 0.85 },
-      { name: 'WRAP-UP', until: Infinity },
+      { name: 'ORIENT', label: 'Getting started', until: 0 },
+      { name: 'RECALL', label: 'Recalling the reading', until: 0.55 },
+      { name: 'CONNECT', label: 'Connecting', until: 0.85 },
+      { name: 'WRAP-UP', label: 'Wrapping up', until: Infinity },
     ],
     replyWords: 70,
     purpose: (d) =>
@@ -142,12 +148,13 @@ export const KINDS: Record<TutorialKind, KindSpec> = {
     label: 'Tutorial',
     engagement: [4, 5],
     blurb: 'The core Socratic tutorial: orient, explore, teach it back, wrap up.',
+    forStudents: "A one-on-one conversation that helps you work out one idea for yourself.",
     short: false,
     stages: [
-      { name: 'ORIENT', until: 0 },
-      { name: 'EXPLORE', until: 0.6 },
-      { name: 'TEACH-BACK', until: 1 },
-      { name: 'WRAP-UP', until: Infinity },
+      { name: 'ORIENT', label: 'Getting started', until: 0 },
+      { name: 'EXPLORE', label: 'Exploring', until: 0.6 },
+      { name: 'TEACH-BACK', label: 'Teach it back', until: 1 },
+      { name: 'WRAP-UP', label: 'Wrapping up', until: Infinity },
     ],
     replyWords: 80,
     purpose: () => '',
@@ -179,13 +186,14 @@ export const KINDS: Record<TutorialKind, KindSpec> = {
     label: 'Practice',
     engagement: [6, 9],
     blurb: 'The learner brings a draft or attempt; the tutor gives feedback against the criteria and offers more practice. Never a grade.',
+    forStudents: "Bring a draft or an attempt and get feedback on it. Not graded.",
     short: false,
     stages: [
-      { name: 'SHARE', until: 0 },
-      { name: 'FEEDBACK', until: 0.4 },
-      { name: 'REVISE', until: 0.7 },
-      { name: 'MORE-PRACTICE', until: 0.9 },
-      { name: 'WRAP-UP', until: Infinity },
+      { name: 'SHARE', label: 'Sharing your work', until: 0 },
+      { name: 'FEEDBACK', label: 'Feedback', until: 0.4 },
+      { name: 'REVISE', label: 'Revising', until: 0.7 },
+      { name: 'MORE-PRACTICE', label: 'One more', until: 0.9 },
+      { name: 'WRAP-UP', label: 'Wrapping up', until: Infinity },
     ],
     replyWords: 150,
     purpose: () =>
@@ -216,12 +224,13 @@ export const KINDS: Record<TutorialKind, KindSpec> = {
     label: 'Reflection',
     engagement: [7],
     blurb: 'A short metacognitive conversation after a unit: what was hard, what worked, what to change.',
+    forStudents: "A few minutes on how the unit went for you and what you will do next.",
     short: true,
     stages: [
-      { name: 'OPEN', until: 0 },
-      { name: 'PROBE', until: 0.55 },
-      { name: 'PLAN', until: 0.85 },
-      { name: 'WRAP-UP', until: Infinity },
+      { name: 'OPEN', label: 'Getting started', until: 0 },
+      { name: 'PROBE', label: 'Exploring', until: 0.55 },
+      { name: 'PLAN', label: 'Planning', until: 0.85 },
+      { name: 'WRAP-UP', label: 'Wrapping up', until: Infinity },
     ],
     replyWords: 70,
     purpose: () =>
@@ -249,11 +258,12 @@ export const KINDS: Record<TutorialKind, KindSpec> = {
     label: 'Recall',
     engagement: [8],
     blurb: 'Revisit earlier learning: retrieve it from memory, then connect it to the current unit.',
+    forStudents: "Bring back something from earlier in the course and connect it to what you are doing now.",
     short: false,
     stages: [
-      { name: 'RETRIEVE', until: 0.45 },
-      { name: 'CONNECT', until: 0.85 },
-      { name: 'WRAP-UP', until: Infinity },
+      { name: 'RETRIEVE', label: 'Recalling', until: 0.45 },
+      { name: 'CONNECT', label: 'Connecting', until: 0.85 },
+      { name: 'WRAP-UP', label: 'Wrapping up', until: Infinity },
     ],
     replyWords: 80,
     purpose: () =>
@@ -279,13 +289,14 @@ export const KINDS: Record<TutorialKind, KindSpec> = {
     label: 'Assignment start',
     engagement: [4, 9],
     blurb: 'Get going on an assignment: unpack what it asks, connect it to the readings and activities, choose an approach, take the first step out loud. Nothing it produces is submittable.',
+    forStudents: "Get started on the assignment: understand the task, make a plan, take the first step. It writes nothing for you.",
     short: false,
     stages: [
-      { name: 'UNPACK', until: 0.25 },
-      { name: 'CONNECT', until: 0.5 },
-      { name: 'PLAN', until: 0.7 },
-      { name: 'FIRST-STEP', until: 0.9 },
-      { name: 'WRAP-UP', until: Infinity },
+      { name: 'UNPACK', label: 'Unpacking the task', until: 0.25 },
+      { name: 'CONNECT', label: 'Connecting', until: 0.5 },
+      { name: 'PLAN', label: 'Planning', until: 0.7 },
+      { name: 'FIRST-STEP', label: 'First step', until: 0.9 },
+      { name: 'WRAP-UP', label: 'Wrapping up', until: Infinity },
     ],
     replyWords: 90,
     purpose: () =>
@@ -423,6 +434,16 @@ export function stageForRun(
   if (studentTexts.slice(start).some((t) => isExplanation(t, keyTerms))) return { ...base, teachBack: 'explained' };
   if (n < end + TEACH_BACK_MAX_HOLD) return { stage: 'TEACH-BACK', target: base.target, teachBack: 'waiting' };
   return { ...base, teachBack: 'skipped' };
+}
+
+/** The learner-facing status line for a stage name. */
+export function stageLabel(kind: TutorialKind, name: string): string {
+  return KINDS[kind].stages.find((s) => s.name === name)?.label ?? name.charAt(0) + name.slice(1).toLowerCase().replace(/-/g, ' ');
+}
+
+/** What a session is for, to a learner: the brief's student goal, or a plain line for its kind. */
+export function studentGoalFor(t: { kind: TutorialKind; student_goal?: string }): string {
+  return (t.student_goal ?? '').trim() || KINDS[t.kind].forStudents;
 }
 
 /** Stage names for every kind, for the client's status chip. */

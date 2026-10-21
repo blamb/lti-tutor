@@ -65,6 +65,8 @@ export interface Tutorial {
   lti_context_id: string;
   title: string;
   learning_goal: string;
+  /** What the session is for, in the learner's terms (Finding 12); empty = a plain line for its kind. */
+  student_goal: string;
   opening_question: string;
   ta_brief: string;
   misconceptions: string;
@@ -233,6 +235,7 @@ const MATERIAL_ROLE_NOTES: Record<MaterialRole, string> = {
 export const TutorialInput = z.object({
   title: z.string().trim().min(1).max(160),
   learning_goal: z.string().trim().min(1).max(2000),
+  student_goal: z.string().trim().max(500).nullable().default('').transform((v) => v ?? ''),
   opening_question: z.string().trim().min(1).max(2000),
   ta_brief: z.string().trim().max(8000).default(''),
   misconceptions: z.string().trim().max(4000).default(''),
@@ -352,13 +355,13 @@ export async function createTutorial(ctx: CourseCtx, input: TutorialInput, creat
     `insert into tutorial
        (lti_iss, lti_context_id, title, learning_goal, opening_question, ta_brief, misconceptions,
         success_criteria, pitch, kind, practice_prompts, recall_tutorial_ids, material_ids,
-        target_minutes, gradebook, status, created_by, suggested_after_tutorial_id, week, due_at, concept_ids)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::bigint[],$13::bigint[],$14,$15,$16,$17,$18,$19,$20::timestamptz,$21::bigint[]) returning *`,
+        target_minutes, gradebook, status, created_by, suggested_after_tutorial_id, week, due_at, concept_ids, student_goal)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::bigint[],$13::bigint[],$14,$15,$16,$17,$18,$19,$20::timestamptz,$21::bigint[],$22) returning *`,
     [
       ctx.iss, ctx.contextId, input.title, input.learning_goal, input.opening_question,
       input.ta_brief, input.misconceptions, input.success_criteria, input.pitch,
       input.kind, input.practice_prompts, recallIds, materialIds,
-      input.target_minutes, input.gradebook, input.status, createdBy, after, input.week, input.due_at, conceptIds,
+      input.target_minutes, input.gradebook, input.status, createdBy, after, input.week, input.due_at, conceptIds, input.student_goal,
     ]
   );
   return rows[0]!;
@@ -374,13 +377,13 @@ export async function updateTutorial(id: number, ctx: CourseCtx, input: Tutorial
        title = $4, learning_goal = $5, opening_question = $6, ta_brief = $7, misconceptions = $8,
        success_criteria = $9, pitch = $10, kind = $11, practice_prompts = $12, recall_tutorial_ids = $13::bigint[],
        material_ids = $14::bigint[], target_minutes = $15, gradebook = $16, status = $17,
-       suggested_after_tutorial_id = $18, week = $19, due_at = $20::timestamptz, concept_ids = $21::bigint[], updated_at = now()
+       suggested_after_tutorial_id = $18, week = $19, due_at = $20::timestamptz, concept_ids = $21::bigint[], student_goal = $22, updated_at = now()
      where id = $1 and lti_iss = $2 and lti_context_id = $3 returning *`,
     [
       id, ctx.iss, ctx.contextId, input.title, input.learning_goal, input.opening_question,
       input.ta_brief, input.misconceptions, input.success_criteria, input.pitch,
       input.kind, input.practice_prompts, recallIds, materialIds,
-      input.target_minutes, input.gradebook, input.status, after, input.week, input.due_at, conceptIds,
+      input.target_minutes, input.gradebook, input.status, after, input.week, input.due_at, conceptIds, input.student_goal,
     ]
   );
   return rows[0] ?? null;
@@ -1396,6 +1399,7 @@ export const DraftBrief = z.object({
   success_criteria: textOrLines(z.string()),
   practice_prompts: textOrLines(z.string()).default(''),
   key_concepts: textOrLines(z.string()).default(''),
+  student_goal: textOrLines(z.string()).default(''),
 });
 export type DraftBrief = z.infer<typeof DraftBrief>;
 
@@ -1416,6 +1420,7 @@ Return ONLY a JSON object, no code fences. Every value is a single string (never
 {
   "title": short title (under 60 characters),
   "learning_goal": one or two sentences,
+  "student_goal": one sentence addressed to the student ("you"), saying what the session will help them do, in plain words and without promising an outcome,
   "opening_question": the first thing the tutor asks — open, concrete, not yes/no,
   "ta_brief": 150–300 words in the instructor's voice,
   "misconceptions": 3–5 lines in one string, each a misconception (or common error) and the question that exposes it,
