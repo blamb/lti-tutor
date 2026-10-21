@@ -161,8 +161,8 @@ export const KINDS: Record<TutorialKind, KindSpec> = {
       return [
         `- ORIENT (first reply only): ${orient}`,
         "- EXPLORE: work through the brief's probes. Build on what they say. Keep them doing the thinking.",
-        `- TEACH-BACK: ask the student to explain the core idea back ${audience}. Then play back your understanding of what they said in two or three sentences and ask whether you've got it right (Pask's conversation theory: understanding is confirmed when it survives being re-explained). Probe one gap if there is one.`,
-        `- WRAP-UP: in four or five sentences, summarise the path they walked and what they figured out, name the one thing to review, and ${WRAP_UP_FINISH}`,
+        `- TEACH-BACK: ask one open question that has the student explain the core idea in their own words, ${audience}. Do not explain, summarise or play back the idea yourself before they have, and give no model answer or outline of one. If they reply only with agreement or thanks ("yes", "ok", "that's right", "thanks"), do not accept it as a teach-back: say in one short sentence that you want to hear it in their words, and ask again, more concretely. Once they have explained it, respond only to the gaps: name the one thing that is missing or wrong, as a question. Any recap of yours is at most two sentences and never restates the whole idea (Pask's conversation theory: understanding is confirmed when the student can re-explain it, not when they agree with yours).`,
+        `- WRAP-UP: in three or four sentences, say what the student worked out in their own words (only what they actually said), name the one thing to review, and ${WRAP_UP_FINISH}`,
       ];
     },
     summaryExtras: `  "teachback": one sentence on how well they explained the core idea back in their own words, or "Teach-back not reached" if the tutorial ended before that stage,`,
@@ -329,6 +329,96 @@ export function stageFor(kind: TutorialKind, studentTurns: number, targetMinutes
     if (studentTurns < Math.round(target * s.until)) return { stage: s.name, target };
   }
   return { stage: stages[stages.length - 1]!.name, target };
+}
+
+// ─── Teach-back: a real explanation, not a "yes" ───────────────────────────
+//
+// Usability report, Finding 4: a one-word "yes" to the tutor's own recap
+// completed the teach-back. The stage now holds until a student turn after
+// the teach-back prompt is an explanation, for at most TEACH_BACK_MAX_HOLD
+// extra turns, so a learner who cannot is never stuck there.
+
+/** Words in a reply before it can count as an explanation. */
+export const TEACH_BACK_MIN_WORDS = 15;
+/** Extra student turns the stage holds before wrap-up anyway. */
+export const TEACH_BACK_MAX_HOLD = 2;
+
+const STOPWORDS = new Set(('about above after again against along among another around because before being below between both could course does doing during each either every first former further given going having itself might most often other others ought perhaps quite rather really should since something still student students such their theirs them then there these they thing things those though three through under until using various what when where whether which while whole whose would years your yours able clearly explain explains explained example examples understand understands understanding words without within').split(' '));
+
+/** Five-letter stems of the content words in a text: "linker", "linking" → "linki"/"linke"; good enough to spot shared vocabulary. */
+function stems(text: string): Set<string> {
+  const out = new Set<string>();
+  for (const w of text.toLowerCase().match(/[a-z][a-z0-9_]*/g) ?? []) {
+    if (w.length < 5 || STOPWORDS.has(w)) continue;
+    out.add(w.slice(0, 5));
+  }
+  return out;
+}
+
+/** The session's key terms: content-word stems of its learning goal and success criteria. */
+export function keyTermsFor(t: { learning_goal: string; success_criteria?: string }): string[] {
+  return [...stems(`${t.learning_goal}\n${t.success_criteria ?? ''}`)];
+}
+
+/**
+ * Whether a student turn explains rather than acknowledges: long enough,
+ * and (when the session has key terms) using at least two of them.
+ */
+export function isExplanation(text: string, keyTerms: string[]): boolean {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length < TEACH_BACK_MIN_WORDS) return false;
+  if (keyTerms.length < 2) return true;
+  const have = stems(text);
+  return keyTerms.filter((k) => have.has(k)).length >= 2;
+}
+
+/**
+ * How a tutor asks for the teach-back: the stage guide's audiences and the
+ * phrasing briefs use. The tutor may ask earlier than the schedule (it moves
+ * on when the student clearly has the idea), so the ask itself counts.
+ */
+export const TEACH_BACK_ASK = /in your own words|someone who (has never|hasn't|never) (studied|seen)|as if (to|teaching|you were teaching) (a |someone)|explain (it |this |that )?(back )?to (a classmate|a friend|someone)|teach (it|this) (back )?to/i;
+
+/** Student turn index (0-based) of the first reply to a teach-back ask, or null. */
+export function teachBackAskedAt(turns: Array<{ role: 'user' | 'assistant'; content: string }>, isOpening: (content: string) => boolean = () => false): number | null {
+  let studentIdx = 0;
+  for (const t of turns) {
+    if (t.role === 'user') { if (!isOpening(t.content)) studentIdx++; continue; }
+    if (studentIdx > 0 && TEACH_BACK_ASK.test(t.content)) return studentIdx;
+  }
+  return null;
+}
+
+export type TeachBackState = 'none' | 'not_reached' | 'waiting' | 'explained' | 'skipped';
+
+/**
+ * The stage after these student turns, holding TEACH-BACK until an
+ * explanation arrives. teachBack: 'none' for kinds without a teach-back;
+ * 'not_reached' before it starts; 'waiting' while it holds; 'explained' once
+ * a student turn after the prompt is an explanation; 'skipped' when the
+ * hold ran out without one.
+ */
+export function stageForRun(
+  kind: TutorialKind,
+  studentTexts: string[],
+  targetMinutes: number,
+  keyTerms: string[],
+  /** teachBackAskedAt(): where the tutor actually asked, if earlier than the schedule. */
+  askedAt: number | null = null
+): { stage: string; target: number; teachBack: TeachBackState } {
+  const n = studentTexts.length;
+  const base = stageFor(kind, n, targetMinutes);
+  if (!KINDS[kind].stages.some((s) => s.name === 'TEACH-BACK')) return { ...base, teachBack: 'none' };
+  let start = 1;
+  while (start < 200 && stageFor(kind, start, targetMinutes).stage !== 'TEACH-BACK') start++;
+  let end = start;
+  while (end < 200 && stageFor(kind, end, targetMinutes).stage === 'TEACH-BACK') end++;
+  if (askedAt !== null && askedAt < start) start = askedAt;
+  if (n <= start) return { ...base, teachBack: 'not_reached' };
+  // Student turn index `start` (0-based) is the first reply to the teach-back prompt.
+  if (studentTexts.slice(start).some((t) => isExplanation(t, keyTerms))) return { ...base, teachBack: 'explained' };
+  if (n < end + TEACH_BACK_MAX_HOLD) return { stage: 'TEACH-BACK', target: base.target, teachBack: 'waiting' };
+  return { ...base, teachBack: 'skipped' };
 }
 
 /** Stage names for every kind, for the client's status chip. */

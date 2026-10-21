@@ -13,6 +13,7 @@
     "start": "npm run build && node dist/start.js",
     "start:persona": "APP=persona npm start",
     "test": "LTI_TOOL_URL=http://localhost:3000 LTI_COOKIE_SECRET=test DATABASE_URL=postgres://localhost:5432/unused tsx --test \"src/**/*.test.ts\"",
+    "test:live": "tsx --test --test-concurrency=1 \"src/**/*.live.ts\"",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

@@ -41,7 +41,7 @@ import { recordApiCall, type Attribution } from '../../core/costs.js';
 import type { Student } from '../../core/students.js';
 import { COURSE_LEVEL_LABELS, type CourseCtx } from './courses.js';
 import type { Delivery } from './delivery.js';
-import { KINDS, TUTORIAL_KINDS, stageFor, type TutorialKind } from './kinds.js';
+import { KINDS, TUTORIAL_KINDS, stageForRun, keyTermsFor, teachBackAskedAt, type TeachBackState, type TutorialKind } from './kinds.js';
 import { jsonCall, textOf } from '../../core/llm.js';
 import { listLearnerModel, learnerModelBlock, recallCandidates, recallCandidatesBlock, updateLearnerModelFromSummary } from './learner.js';
 
@@ -402,7 +402,7 @@ export async function upsertProfile(studentId: number, input: ProfileInput): Pro
   return rows[0]!;
 }
 
-function profileBlock(student: Student, profile: StudentProfile | null): string {
+function profileBlock(student: Pick<Student, 'display_name'>, profile: StudentProfile | null): string {
   const lines = [`Student's name: ${student.display_name}`];
   if (profile) {
     if (profile.program) lines.push(`Program / year: ${profile.program}`);
@@ -560,6 +560,77 @@ export async function briefFor(t: Tutorial, ctx: CourseCtx): Promise<string> {
   return tutorialBrief(t, ctx, sources);
 }
 
+/** The learner's own turns, without the hidden opening marker. */
+export function studentTexts(turns: Pick<Turn, 'role' | 'content'>[]): string[] {
+  return turns.filter((t) => t.role === 'user' && !t.content.startsWith(START_MARKER)).map((t) => t.content);
+}
+
+/** Where the tutor asked for the teach-back, in student turns. */
+function askedAt(turns: Pick<Turn, 'role' | 'content'>[]): number | null {
+  return teachBackAskedAt(turns, (c) => c.startsWith(START_MARKER));
+}
+
+/** The progress note, the one uncached block: changes at stage transitions and while a teach-back is held. */
+export function progressNote(studentTurns: number, target: number, stage: string, teachBack: TeachBackState): string {
+  let note = `# PROGRESS NOTE\nStudent turns so far: ${studentTurns} of about ${target}. Current stage: ${stage}.`;
+  if (stage === 'TEACH-BACK' && teachBack === 'not_reached') {
+    note += "\nUnless the student's last answer left a question open, this is the turn to ask for the teach-back: one open question asking them to explain the core idea in their own words, as the brief describes. Do not explain anything yourself.";
+  } else if (teachBack === 'waiting') {
+    note += '\nThe student has not yet explained the core idea in their own words. Stay in TEACH-BACK: ask them to, more concretely if they only agreed or said thanks, and do not explain it for them.';
+  }
+  return note;
+}
+
+/**
+ * Everything one tutor turn sends to the model, from data already loaded:
+ * no database access, so the live replay tests build exactly what learners get.
+ */
+export function tutorTurnRequest(params: {
+  tutorial: Tutorial;
+  ctx: CourseCtx;
+  turns: Pick<Turn, 'role' | 'content'>[];
+  student: Pick<Student, 'display_name'>;
+  profile: StudentProfile | null;
+  materials: Material[];
+  brief: string;
+  learnerBlocks?: string[];
+}): { system: Anthropic.TextBlockParam[]; messages: Anthropic.MessageParam[]; stage: string; studentTurns: number } {
+  const { tutorial, ctx, turns, student, profile, materials, brief } = params;
+  const texts = studentTexts(turns);
+  const { stage, target, teachBack } = stageForRun(tutorial.kind, texts, tutorial.target_minutes, keyTermsFor(tutorial), askedAt(turns));
+
+  // Merge consecutive same-role turns (the API requires alternation).
+  const messages: Anthropic.MessageParam[] = [];
+  for (const t of turns) {
+    const prev = messages[messages.length - 1];
+    if (prev && prev.role === t.role && typeof prev.content === 'string') {
+      prev.content = `${prev.content}\n\n${t.content}`;
+    } else {
+      messages.push({ role: t.role, content: t.content });
+    }
+  }
+  // Cache the transcript prefix: the progress note changes only at stage
+  // transitions, so most turns re-read the prior transcript from cache.
+  const last = messages[messages.length - 1];
+  if (last && typeof last.content === 'string') {
+    last.content = [{ type: 'text', text: last.content, cache_control: { type: 'ephemeral' } }];
+  }
+
+  const system: Anthropic.TextBlockParam[] = [{ type: 'text', text: tutorialRulesFor(ctx.delivery, tutorial.kind) }];
+  const grounding = materialsBlock(materials);
+  if (grounding) system.push({ type: 'text', text: grounding, cache_control: { type: 'ephemeral' } });
+  // Learner model after the profile, inside the cached block: it changes
+  // only when a session completes, so mid-tutorial turns still hit cache.
+  const extraText = (params.learnerBlocks ?? []).filter(Boolean).map((b) => `\n\n${b}`).join('');
+  system.push({
+    type: 'text',
+    text: `${brief}\n\n# STUDENT PROFILE\n${profileBlock(student, profile)}${extraText}`,
+    cache_control: { type: 'ephemeral' },
+  });
+  system.push({ type: 'text', text: progressNote(texts.length, target, stage, teachBack) });
+  return { system, messages, stage, studentTurns: texts.length };
+}
+
 /**
  * Stream one tutor turn. Persists the user turn before streaming and the
  * assistant turn after. A `userMessage` starting with START_MARKER produces
@@ -580,43 +651,13 @@ export async function streamTutorialReply(params: {
 
   await appendTurn(sessionId, 'user', userMessage);
   const turns = await getSessionTurns(sessionId);
-  const studentTurns = turns.filter((t) => t.role === 'user' && !t.content.startsWith(START_MARKER)).length;
-  const { stage, target } = stageFor(tutorial.kind, studentTurns, tutorial.target_minutes);
-
-  // Merge consecutive same-role turns (the API requires alternation).
-  const messages: Anthropic.MessageParam[] = [];
-  for (const t of turns) {
-    const prev = messages[messages.length - 1];
-    if (prev && prev.role === t.role && typeof prev.content === 'string') {
-      prev.content = `${prev.content}\n\n${t.content}`;
-    } else {
-      messages.push({ role: t.role, content: t.content });
-    }
-  }
-  // Cache the transcript prefix: the progress note changes only at stage
-  // transitions, so most turns re-read the prior transcript from cache.
-  const last = messages[messages.length - 1];
-  if (last && typeof last.content === 'string') {
-    last.content = [{ type: 'text', text: last.content, cache_control: { type: 'ephemeral' } }];
-  }
-
-  const materials = await getMaterials(tutorial.material_ids, ctx);
-  const system: Anthropic.TextBlockParam[] = [{ type: 'text', text: tutorialRulesFor(ctx.delivery, tutorial.kind) }];
-  const grounding = materialsBlock(materials);
-  if (grounding) system.push({ type: 'text', text: grounding, cache_control: { type: 'ephemeral' } });
-  // Learner model after the profile, inside the cached block: it changes
-  // only when a session completes, so mid-tutorial turns still hit cache.
   const extras = [learnerModelBlock(await listLearnerModel(student.id, ctx))];
   if (tutorial.kind === 'recall') extras.push(recallCandidatesBlock(await recallCandidates(student.id, ctx)));
-  const extraText = extras.filter(Boolean).map((b) => `\n\n${b}`).join('');
-  system.push({
-    type: 'text',
-    text: `${await briefFor(tutorial, ctx)}\n\n# STUDENT PROFILE\n${profileBlock(student, profile)}${extraText}`,
-    cache_control: { type: 'ephemeral' },
-  });
-  system.push({
-    type: 'text',
-    text: `# PROGRESS NOTE\nStudent turns so far: ${studentTurns} of about ${target}. Current stage: ${stage}.`,
+  const { system, messages, stage, studentTurns } = tutorTurnRequest({
+    tutorial, ctx, turns, student, profile,
+    materials: await getMaterials(tutorial.material_ids, ctx),
+    brief: await briefFor(tutorial, ctx),
+    learnerBlocks: extras,
   });
 
   const client = getAnthropic();
