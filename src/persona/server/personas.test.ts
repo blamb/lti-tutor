@@ -44,7 +44,8 @@ test('the persona block carries the hidden layer with its preface, the cutoff an
   assert.ok(block.startsWith('# PERSONA: Melissa Chang (40'));
   assert.ok(block.includes('## What you hold back (hidden layer)'));
   assert.ok(block.includes('The student cannot see this section.'));
-  assert.ok(block.includes("The student's name is Jordan."));
+  assert.ok(block.includes('The student asked to be called Jordan.'), 'a name the student chose is passed on');
+  assert.ok(personaBlock(mel).includes('You do not know the student\'s name.'), 'a course launch passes no name');
   assert.ok(block.includes('The student speaks first.'));
   assert.ok(!block.includes('Historical cutoff'));
 
@@ -92,24 +93,39 @@ test('the draft schema accepts lines as arrays and normalises the opening', () =
   assert.equal(DraftPersona.parse({ opening: 'student' }).opening, 'student');
 });
 
-test('the transcript export carries the conversation, the debrief and the reflection as markdown', async () => {
-  const { transcriptMarkdown, debriefMarkdown, PersonaDebrief } = await import('./personas.js');
-  const debrief = PersonaDebrief.parse({ overview: 'You listened well.', by_objective: [{ objective: 'Therapeutic communication', observation: 'You asked consent before sleep.' }], strengths: 'Open questions\nWarm tone', explore_further: ['Caffeine'], one_question: 'What would you ask first next time?' });
-  assert.equal(debrief.strengths.length, 2, 'lines become a list');
+test('the transcript export carries numbered turns, notes, the debrief and the reflection as markdown', async () => {
+  const { transcriptMarkdown } = await import('./personas.js');
+  const { PersonaDebrief, debriefMarkdown } = await import('./debrief.js');
+  const debrief = PersonaDebrief.parse({
+    critical_issues: [{ kind: 'integrity', text: 'You asked Melissa to write your care plan.', turns: [1] }],
+    overview: [{ text: 'You listened well.', turns: [1, 2] }],
+    by_objective: [{ objective: 'Therapeutic communication', observation: 'You asked consent before sleep.', turns: [1] }],
+    strengths: [{ text: 'Open questions', turns: [1] }], explore_further: [{ text: 'Caffeine', turns: [2] }], one_question: 'What would you ask first next time?',
+  });
   const p = personaOf(fixture('melissa-chang'));
-  const session = { id: 9, persona_id: 1, student_id: 1, session_id: 1, mode: 'live' as const, status: 'ended' as const, started_at: '2026-10-15T20:00:00Z', ended_at: null, debrief, coach_session_id: null, debrief_generated_at: null, reflection: 'Ask more open questions.', reflection_at: null, grade_posted_at: null, grade_error: null };
+  const session = { id: 9, persona_id: 1, student_id: 1, session_id: 1, mode: 'live' as const, status: 'ended' as const, started_at: '2026-10-15T20:00:00Z', ended_at: null, debrief, coach_session_id: null, debrief_generated_at: null, debrief_state: 'ready' as const, debrief_started_at: null, debrief_error: null, reflection: 'Ask more open questions.', reflection_at: null, grade_posted_at: null, grade_error: null };
   const turns = [
     { id: 1, role: 'user' as const, content: 'Hi Melissa', ts: '' },
-    { id: 2, role: 'assistant' as const, content: 'Hi Jordan.', ts: '' },
+    { id: 2, role: 'assistant' as const, content: 'Hi Jordan. [[note]]This is a simulated patient.[[/note]]', ts: '' },
   ];
   const md = transcriptMarkdown(p, session, turns, 'Jordan Lee');
   assert.ok(md.startsWith('# Melissa Chang'));
-  assert.ok(md.includes('**Jordan Lee:** Hi Melissa'));
-  assert.ok(md.includes('**Melissa Chang:** Hi Jordan.'));
+  assert.ok(md.includes('**[1] Jordan Lee:** Hi Melissa'));
+  assert.ok(md.includes('**[2] Melissa Chang:** Hi Jordan.'));
+  assert.ok(md.includes('> **Note (out of character):** This is a simulated patient.'));
   assert.ok(md.includes('## Debrief'));
-  assert.ok(md.includes('- **Therapeutic communication** You asked consent before sleep.'));
+  assert.ok(md.includes('### Critical issues\n- **Academic integrity.** You asked Melissa to write your care plan. _(turn 1)_'));
+  assert.ok(md.includes('- **Therapeutic communication** You asked consent before sleep. _(turn 1)_'));
   assert.ok(md.includes('## Your reflection\nAsk more open questions.'));
   assert.ok(debriefMarkdown(debrief).includes('### One question to carry away'));
+});
+
+test('a debrief stored before turn references still exports', async () => {
+  const { debriefMarkdown } = await import('./debrief.js');
+  const md = debriefMarkdown({ overview: 'You listened well.', by_objective: [{ objective: 'X', observation: 'Y' }], strengths: ['Open questions'], explore_further: [], one_question: '' });
+  assert.ok(md.includes('### How it went\nYou listened well.'));
+  assert.ok(md.includes('- Open questions'));
+  assert.ok(!md.includes('Critical issues'));
 });
 
 test('the student view carries the voice leaning and coach switch but still nothing hidden', () => {
@@ -123,7 +139,7 @@ test('the report CSV has one row per conversation and quotes commas and quotes',
   const { reportCsv } = await import('./personas.js');
   const csv = reportCsv({
     rows: [{ session_id: 3, student_id: 1, display_name: 'Lee, Jordan', status: 'ended', started_at: '2026-10-15', ended_at: '2026-10-15', turns: 4, coach_turns: 1,
-      debrief: { overview: 'Said "fine".', by_objective: [], strengths: ['a', 'b'], explore_further: [], one_question: '' }, reflection: '', grade_posted_at: null, grade_error: 'no column', via: 'web' }],
+      debrief: { overview: 'Said "fine".', by_objective: [], strengths: ['a', 'b'], explore_further: [], one_question: '' } as never, reflection: '', grade_posted_at: null, grade_error: 'no column', via: 'web' }],
     totals: { started: 1, ended: 1, with_debrief: 1, with_reflection: 0, avg_turns: 4, grade_posted: 0, students: 1 },
     synthesis: null,
   });

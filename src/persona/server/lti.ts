@@ -51,7 +51,8 @@ lti.onConnect(async (token: IdToken, req, res) => {
     .replaceAll('{{TOOL_NAME}}', escapeHtml(env.TOOL_NAME))
     .replaceAll('{{RETURN_URL}}', escapeHtml(returnUrl))
     .replaceAll('{{DISPLAY_NAME}}', escapeHtml(student.display_name))
-    .replaceAll('{{CONTEXT_TITLE}}', escapeHtml(token.platformContext.context?.title ?? ''))
+    // The label names where this launch came from: the placed activity's own title, else the course.
+    .replaceAll('{{CONTEXT_TITLE}}', escapeHtml((personaId && token.platformContext.resource?.title) || token.platformContext.context?.title || ''))
     .replaceAll('{{ROLE}}', role);
   return res.send(html);
 });

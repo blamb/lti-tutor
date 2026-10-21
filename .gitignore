@@ -9,3 +9,6 @@ dist/
 .idea/
 .claude/
 !.env.persona.example
+
+# Persona replay harness output (npm run replay:persona)
+replays/

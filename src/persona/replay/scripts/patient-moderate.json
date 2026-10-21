@@ -1,0 +1,22 @@
+{
+  "id": "patient-moderate",
+  "run": 2,
+  "persona": "patient",
+  "kind": "moderate patient",
+  "note": "The student turns of the stored run (docs/simulated-patient-consultation-7.md), ending at its first end request. The student asks about ibuprofen versus Tylenol at turn 4; the old debrief then recommended asking exactly that.",
+  "turns": [
+    "Hi, my name is Sam, I'm a second-year nursing student and I'll be doing your assessment today under my instructor's supervision. Could you tell me your name and how you'd like me to address you?",
+    "Of course, Maggie, please sit however is most comfortable. Before we start, can you confirm your date of birth for me? And then, in your own words, what brings you in today?",
+    "It sounds like your daughter cares a lot about you. Can you tell me more about the breathlessness — when did you first notice it, and has it been getting worse?",
+    "That sounds really uncomfortable, especially waking up at night. How many pillows do you sleep with now? And you mentioned your ankles are swollen — is that both ankles, and is it worse at certain times of day?",
+    "Thank you, that's really helpful detail. Can I ask about your general health? Do you have any medical conditions you've been diagnosed with, and are you taking any medications right now, including anything over the counter?",
+    "That's completely okay, lots of people find it hard to keep track. Do you ever find yourself missing doses or skipping any of the tablets? And for the back pain, would it be something like ibuprofen or Advil, or more like Tylenol?",
+    "Yes, bringing the box next time would be really helpful, thank you. I'd like to ask a bit about your day-to-day. What does a typical day of eating and drinking look like for you? And have you noticed any changes in your weight recently?",
+    "Yes, we'll get your weight today, nothing to be ashamed of. Maggie, I noticed you were turning your ring just now, and you mentioned not cooking much these days. Would it be okay if I asked about who's at home with you and how things have been for you lately? You don't have to answer anything you're not comfortable with.",
+    "Please don't apologize. I'm so sorry about Ray. Forty-seven years is a long time, and it makes sense that this past year has been hard. When you say some days you don't feel like making much of anything, how has your mood been overall? Are you sleeping okay, apart from the breathing?",
+    "Thank you for sharing all of that with me. I want to make sure I'm not missing anything important about your heart. Have you had any chest pain, pressure, or tightness, or felt dizzy or like you might faint?",
+    "No, you're doing great, I'm glad you told me now. I'll be passing all of this on to my instructor and the nurse in charge today because it's important. One more thing, and I ask this of everyone: with everything that's been going on since Ray died, have you ever had thoughts of hurting yourself or that life isn't worth living?",
+    "Yes, I'll note it, and thank you for being so honest. Just to summarize: you've had about a month of worsening breathlessness, needing extra pillows at night, swelling in both ankles that's worse in the evening, some chest tightness with exertion, dizziness when standing, and sometimes missed or doubled doses. And it's been a really hard year since losing Ray. Did I get that right, and is there anything else you'd like me to know?",
+    "Absolutely, my instructor and the doctor will come and explain everything properly, and I'll make sure you get a chance to ask questions. Thank you, Maggie. End simulation."
+  ]
+}

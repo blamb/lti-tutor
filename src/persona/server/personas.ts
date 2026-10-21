@@ -34,6 +34,10 @@ import { GROUNDING_MAX_CHARS } from '../../core/limits.js';
 import { searchPassages, ensureChunks, type Passage } from '../../core/chunks.js';
 import { checkQuotes, type QuoteCheck } from '../../core/quotes.js';
 import { env } from './env.js';
+import { CaseRecord, caseRecordOf, caseFileBlock } from './casefile.js';
+import { QuoteBook, quoteBookOf, quoteBookBlock, quoteBookSources } from './quotebook.js';
+import { personaWords, notesToMarkdown } from './signals.js';
+import { debriefMarkdown, normalizeDebrief, claimTexts, type PersonaDebrief } from './debrief.js';
 import {
   TEMPLATES, PERSONA_TEMPLATES, RESPONSE_LENGTHS, RESPONSE_LENGTH_NOTES, PERSONA_FIELD_KEYS,
   type PersonaTemplate, type ResponseLength,
@@ -90,6 +94,10 @@ export interface Persona {
   /** '' = the deployment default. */
   model: string;
   material_ids: number[];
+  /** A simulated patient's or client's fixed facts (casefile.ts). Never sent to a student's browser. */
+  case_record: CaseRecord;
+  /** A thinker's vetted quotations, misattributions and reading list (quotebook.ts). */
+  quote_book: QuoteBook;
   status: PersonaStatus;
   created_by: number | null;
   created_at: string;
@@ -158,6 +166,8 @@ export const PersonaInput = z.object({
   public_max_turns: z.preprocess(blankToUndefined, z.coerce.number().int().min(4).max(200).default(40)),
   model: z.string().trim().max(60).default('').refine((m) => m === '' || isKnownModel(m), 'unknown model'),
   material_ids: z.array(z.number().int().positive()).max(40).default([]),
+  case_record: CaseRecord.default(CaseRecord.parse({})),
+  quote_book: QuoteBook.default(QuoteBook.parse({})),
   status: z.enum(['draft', 'published', 'archived']).default('draft'),
 });
 export type PersonaInput = z.infer<typeof PersonaInput>;
@@ -206,15 +216,20 @@ async function validMaterialIds(ids: number[], scope: Scope): Promise<number[]> 
 const COLUMNS = [
   'template', 'title', 'subtitle', 'summary', 'student_role', 'setting', 'student_brief', 'character', 'voice', 'behaviour',
   'hidden', 'guardrails', 'historical_cutoff', 'raw_instructions', 'objectives', 'debrief_guidance', 'opening', 'opening_line',
-  'response_length', 'voice_pref', 'coach', 'gradebook', 'visibility', 'public_daily_usd', 'public_max_turns', 'model', 'material_ids', 'status',
+  'response_length', 'voice_pref', 'coach', 'gradebook', 'visibility', 'public_daily_usd', 'public_max_turns', 'model', 'material_ids',
+  'case_record', 'quote_book', 'status',
 ] as const;
+const JSONB_COLUMNS = new Set<string>(['case_record', 'quote_book']);
+/** Placeholder and value for column c at position n: objects go to jsonb as text (pg would turn arrays into Postgres arrays). */
+const placeholder = (c: string, n: number) => (JSONB_COLUMNS.has(c) ? `$${n}::jsonb` : `$${n}`);
+const paramFor = (c: string, v: unknown) => (JSONB_COLUMNS.has(c) ? JSON.stringify(v ?? {}) : v);
 
 export async function createPersona(scope: Scope, input: PersonaInput, createdBy: number | null): Promise<Persona> {
   const values = { ...input, material_ids: await validMaterialIds(input.material_ids, scope) };
-  const params = COLUMNS.map((c) => values[c]);
+  const params = COLUMNS.map((c) => paramFor(c, values[c]));
   const rows = await query<Persona>(
     `insert into persona (lti_iss, lti_context_id, ${COLUMNS.join(', ')}, created_by)
-     values ($1, $2, ${COLUMNS.map((_, i) => `$${i + 3}`).join(', ')}, $${COLUMNS.length + 3}) returning *`,
+     values ($1, $2, ${COLUMNS.map((c, i) => placeholder(c, i + 3)).join(', ')}, $${COLUMNS.length + 3}) returning *`,
     [scope.iss, scope.contextId, ...params, createdBy]
   );
   return applyAccess(rows[0]!, input);
@@ -245,9 +260,9 @@ export async function getPersonaBySlug(slug: string): Promise<Persona | null> {
 
 export async function updatePersona(id: number, scope: Scope, input: PersonaInput): Promise<Persona | null> {
   const values = { ...input, material_ids: await validMaterialIds(input.material_ids, scope) };
-  const params = COLUMNS.map((c) => values[c]);
+  const params = COLUMNS.map((c) => paramFor(c, values[c]));
   const rows = await query<Persona>(
-    `update persona set ${COLUMNS.map((c, i) => `${c} = $${i + 4}`).join(', ')}, updated_at = now()
+    `update persona set ${COLUMNS.map((c, i) => `${c} = ${placeholder(c, i + 4)}`).join(', ')}, updated_at = now()
      where id = $1 and lti_iss = $2 and lti_context_id = $3 returning *`,
     [id, scope.iss, scope.contextId, ...params]
   );
@@ -324,10 +339,19 @@ function section(heading: string, body: string, preface = ''): string {
   return `\n## ${heading}\n${preface ? preface + '\n' : ''}${b}\n`;
 }
 
-/** The persona block: everything specific to this persona and this student. */
-export function personaBlock(p: Persona, studentName: string): string {
+/**
+ * The persona block: everything specific to this persona and this
+ * conversation. `givenName` is a name the student chose for this activity
+ * (the open-web gate asks for one); a course launch passes '' so the LMS
+ * display name never reaches the persona, and the persona uses only a name
+ * the student gives in the conversation. The case file's age is computed
+ * from `now`.
+ */
+export function personaBlock(p: Persona, givenName = '', now: Date = new Date()): string {
   const head = `# PERSONA: ${p.title}${p.subtitle ? ` (${p.subtitle})` : ''}\n`;
   const body =
+    caseFileBlock(caseRecordOf(p.case_record), now) +
+    quoteBookBlock(quoteBookOf(p.quote_book)) +
     section('Who you are', p.character) +
     section('How you talk', p.voice) +
     section('How you engage', p.behaviour) +
@@ -339,7 +363,9 @@ export function personaBlock(p: Persona, studentName: string): string {
     '\n# THE CONVERSATION',
     p.student_role ? `The student is ${p.student_role}.` : '',
     p.setting ? `Setting: ${p.setting}` : '',
-    `The student's name is ${studentName || 'the student'}.`,
+    givenName
+      ? `The student asked to be called ${givenName}.`
+      : 'You do not know the student\'s name. Use a name only once the student tells you it in this conversation, and only that name.',
     RESPONSE_LENGTH_NOTES[p.response_length] ?? RESPONSE_LENGTH_NOTES.medium,
     p.opening === 'persona'
       ? `You speak first.${p.opening_line ? ` Open with this, or close to it: ${p.opening_line}` : ' Introduce yourself briefly in character, establish the setting, ask what the student would like to talk about, and wait.'}`
@@ -348,12 +374,55 @@ export function personaBlock(p: Persona, studentName: string): string {
   return head + body + conv;
 }
 
-export function personaSystem(p: Persona, materials: Material[], studentName: string, mode: GroundingMode = groundingModeFor(materials)): Anthropic.TextBlockParam[] {
+export function personaSystem(p: Persona, materials: Material[], givenName = '', mode: GroundingMode = groundingModeFor(materials), now: Date = new Date()): Anthropic.TextBlockParam[] {
   const system: Anthropic.TextBlockParam[] = [{ type: 'text', text: TEMPLATES[p.template].rules }];
   const sources = mode === 'retrieve' ? sourcesIndexBlock(materials) : mode === 'stuff' ? sourcesBlock(materials) : null;
   if (sources) system.push({ type: 'text', text: sources, cache_control: { type: 'ephemeral' } });
-  system.push({ type: 'text', text: personaBlock(p, studentName), cache_control: { type: 'ephemeral' } });
+  system.push({ type: 'text', text: personaBlock(p, givenName, now), cache_control: { type: 'ephemeral' } });
   return system;
+}
+
+/**
+ * One persona turn as an API request, from turns already in hand: no
+ * database, so the replay harness builds exactly what a live turn sends.
+ * Consecutive same-role turns are merged (the API needs alternation);
+ * retrieved passages ride in the last user message only, so earlier turns
+ * keep their exact text and the cached prefix holds; the transcript prefix is
+ * then cached for the next turn.
+ */
+export function personaTurnRequest(params: {
+  persona: Persona;
+  materials: Material[];
+  turns: Pick<Turn, 'role' | 'content'>[];
+  givenName?: string;
+  passages?: Passage[];
+  mode?: GroundingMode;
+  now?: Date;
+}): Anthropic.MessageCreateParamsNonStreaming {
+  const { persona, materials, turns } = params;
+  const passages = params.passages ?? [];
+  const mode = params.mode ?? groundingModeFor(materials);
+  const messages: Anthropic.MessageParam[] = [];
+  for (const t of turns) {
+    const prev = messages[messages.length - 1];
+    if (prev && prev.role === t.role && typeof prev.content === 'string') prev.content = `${prev.content}\n\n${t.content}`;
+    else messages.push({ role: t.role, content: t.content });
+  }
+  const last = messages[messages.length - 1];
+  if (last && typeof last.content === 'string') {
+    const titles = new Map(materials.map((m) => [m.id, m.title]));
+    const text = passages.length > 0 ? `${passagesBlock(passages, titles)}\n\n---\nThe student says:\n${last.content}` : last.content;
+    last.content = [{ type: 'text', text, cache_control: { type: 'ephemeral' } }];
+  }
+  const model = modelFor(persona);
+  return { model, max_tokens: TURN_MAX_TOKENS, system: personaSystem(persona, materials, params.givenName ?? '', mode, params.now), messages, ...turnOptionsFor(model) };
+}
+
+/** Quotations in a reply, checked against the materials and the vetted quote book; out-of-character notes are not checked. */
+export function checkReplyQuotes(persona: Persona, materials: Material[], reply: string): QuoteCheck | null {
+  const sources = [...materials, ...quoteBookSources(quoteBookOf(persona.quote_book))];
+  const words = personaWords(reply);
+  return sources.length > 0 && words ? checkQuotes(words, sources) : null;
 }
 
 // ─── Sessions ───────────────────────────────────────────────────────────────
@@ -372,6 +441,10 @@ export interface PersonaSession {
   debrief: PersonaDebrief | null;
   coach_session_id: number | null;
   debrief_generated_at: string | null;
+  /** none | generating | ready | failed (debrief.ts). */
+  debrief_state: 'none' | 'generating' | 'ready' | 'failed';
+  debrief_started_at: string | null;
+  debrief_error: string | null;
   reflection: string;
   reflection_at: string | null;
   grade_posted_at: string | null;
@@ -414,7 +487,14 @@ export async function startPersonaSession(persona: Persona, studentId: number, m
   return rows[0]!;
 }
 
-export async function endPersonaSession(ps: PersonaSession): Promise<PersonaSession> {
+/**
+ * End a conversation. `finalMessage` is what the student typed when they
+ * asked to end it ("thanks, that's all. End simulation"): kept as their last
+ * turn for the transcript and the debrief, without a persona reply.
+ */
+export async function endPersonaSession(ps: PersonaSession, finalMessage = ''): Promise<PersonaSession> {
+  const last = finalMessage.trim().slice(0, 8000);
+  if (last && ps.status !== 'ended') await appendTurn(ps.session_id, 'user', last);
   await endSession(ps.session_id);
   const rows = await query<PersonaSession>(
     `update persona_session set status = 'ended', ended_at = coalesce(ended_at, now()) where id = $1 returning *`,
@@ -433,12 +513,13 @@ export async function streamPersonaReply(params: {
   persona: Persona;
   scope: Scope;
   session: PersonaSession;
-  studentName: string;
+  /** A name the student chose for this activity, or '' (never the LMS display name). */
+  givenName: string;
   userMessage: string;
   onChunk: (text: string) => void;
   attribution: Attribution;
 }): Promise<{ assistantText: string; refused: boolean; quotes: QuoteCheck | null; passages: number }> {
-  const { persona, scope, session, studentName, userMessage, onChunk, attribution } = params;
+  const { persona, scope, session, givenName, userMessage, onChunk, attribution } = params;
   const sessionId = session.session_id;
 
   await appendTurn(sessionId, 'user', userMessage);
@@ -459,29 +540,12 @@ export async function streamPersonaReply(params: {
     }
   }
 
-  // Merge consecutive same-role turns (the API requires alternation).
-  const messages: Anthropic.MessageParam[] = [];
-  for (const t of turns) {
-    const prev = messages[messages.length - 1];
-    if (prev && prev.role === t.role && typeof prev.content === 'string') prev.content = `${prev.content}\n\n${t.content}`;
-    else messages.push({ role: t.role, content: t.content });
-  }
-  // Retrieved passages ride in this turn's user message only, so earlier
-  // turns keep their exact text and the cached prefix holds. Then cache the
-  // transcript prefix so the next turn re-reads it from cache.
-  const last = messages[messages.length - 1];
-  if (last && typeof last.content === 'string') {
-    const titles = new Map(materials.map((m) => [m.id, m.title]));
-    const text = passages.length > 0 ? `${passagesBlock(passages, titles)}\n\n---\nThe student says:\n${last.content}` : last.content;
-    last.content = [{ type: 'text', text, cache_control: { type: 'ephemeral' } }];
-  }
-
-  const system = personaSystem(persona, materials, studentName, mode);
-  const model = modelFor(persona);
+  const request = personaTurnRequest({ persona, materials, turns, givenName, passages, mode });
+  const model = request.model;
 
   const client = getAnthropic();
   const t0 = Date.now();
-  const stream = client.messages.stream({ model, max_tokens: TURN_MAX_TOKENS, system, messages, ...turnOptionsFor(model) });
+  const stream = client.messages.stream(request);
 
   let assistantText = '';
   for await (const event of stream) {
@@ -500,7 +564,7 @@ export async function streamPersonaReply(params: {
   } catch {
     // stream errored mid-flight; the partial reply is already persisted
   }
-  const quotes = materials.length > 0 && assistantText ? checkQuotes(assistantText, materials) : null;
+  const quotes = assistantText ? checkReplyQuotes(persona, materials, assistantText) : null;
   return { assistantText, refused, quotes, passages: passages.length };
 }
 
@@ -574,71 +638,10 @@ export async function draftPersona(params: { text: string; template: PersonaTemp
   });
 }
 
-// ─── The debrief ────────────────────────────────────────────────────────────
-//
-// Written by a separate call, not by the persona: a coach's voice, judging
-// the conversation against the instructor's objectives, with the hidden
-// layer in view so it can say what was elicited and what was left on the
-// table. Stored on the session; regenerated only if the instructor clears it.
-
-const lines = (max: number) => z.preprocess(
-  (v) => (Array.isArray(v) ? v.map((x) => String(x ?? '').trim()).filter(Boolean) : String(v ?? '').split('\n').map((x) => x.trim()).filter(Boolean)).slice(0, max),
-  z.array(z.string().max(600))
-);
-
-export const PersonaDebrief = z.object({
-  overview: z.string().trim().max(2500),
-  by_objective: z.preprocess((v) => (Array.isArray(v) ? v : []), z.array(z.object({
-    objective: z.string().trim().max(300),
-    observation: z.string().trim().max(1200),
-  })).max(12)),
-  strengths: lines(8),
-  explore_further: lines(8),
-  one_question: z.string().trim().max(600).default(''),
-});
-export type PersonaDebrief = z.infer<typeof PersonaDebrief>;
+// ─── The debrief: debrief.ts ────────────────────────────────────────────────
 
 function transcriptText(turns: Turn[], studentName: string, personaName: string): string {
   return visibleTurns(turns).map((t) => `${t.role === 'user' ? studentName : personaName}: ${t.content}`).join('\n\n');
-}
-
-function debriefSystemFor(p: Persona): string {
-  const spec = TEMPLATES[p.template];
-  const objectives = p.objectives.split('\n').map((s) => s.trim()).filter(Boolean);
-  return `You write the debrief after ${spec.debriefFrame}. You are not the persona; you write as a supportive, observant coach, to the student by first name. The student's role: ${p.student_role || 'a student'}. Setting: ${p.setting || 'unspecified'}.
-
-Judge the conversation that actually happened, with examples from it, against these learning objectives:
-${objectives.length ? objectives.map((o, i) => `${i + 1}. ${o}`).join('\n') : '(the instructor set no explicit objectives; judge the quality of the student\'s questions and thinking)'}
-
-${p.hidden.trim() ? `What the persona was holding back (the student never saw this; use it to say what they drew out and what they could have reached with a better question):\n${p.hidden}\n` : ''}
-${p.debrief_guidance.trim() ? `The instructor's guidance for this debrief:\n${p.debrief_guidance}\n` : ''}
-Never assign grades, scores, percentages or predictions of marks. Be specific and honest; praise only what the transcript supports. Where the student did not reach something, say what question or approach would have reached it, without lecturing.
-
-Return ONLY a JSON object, no code fences, with exactly these keys:
-{
-  "overview": "3 to 5 sentences on how the conversation went, addressed to the student",
-  "by_objective": [{ "objective": "the objective, short", "observation": "1 to 3 sentences with an example from the conversation" }],
-  "strengths": ["up to 5 specific things the student did well"],
-  "explore_further": ["up to 5 cues, topics or moves the student could have pursued, each tied to the conversation"],
-  "one_question": "one question for the student to carry away"
-}`;
-}
-
-export async function getOrGenerateDebrief(params: { persona: Persona; session: PersonaSession; studentName: string; attribution: Attribution }): Promise<PersonaDebrief> {
-  const { persona, session, studentName, attribution } = params;
-  if (session.debrief) return session.debrief;
-  const turns = await getSessionTurns(session.session_id);
-  const transcript = transcriptText(turns, studentName, persona.title);
-  const debrief = await jsonCall({
-    schema: PersonaDebrief,
-    system: debriefSystemFor(persona),
-    userPrompt: `Student's first name: ${studentName.split(' ')[0] || 'the student'}\n\nTranscript:\n${transcript || '(the student said nothing)'}\n\nWrite the debrief JSON now.`,
-    maxTokens: 3000,
-    attribution: { ...attribution, endpoint: 'persona.debrief' },
-    endpoint: 'persona.debrief',
-  });
-  await query(`update persona_session set debrief = $2::jsonb, debrief_generated_at = now() where id = $1`, [session.id, JSON.stringify(debrief)]);
-  return debrief;
 }
 
 export async function saveReflection(sessionId: number, text: string): Promise<void> {
@@ -653,14 +656,24 @@ export async function saveReflection(sessionId: number, text: string): Promise<v
 // answers with questions and options rather than scripts. Its own exchanges
 // live in a second session so they never enter the persona's transcript.
 
-function coachSystemFor(p: Persona): string {
+/** Habits the coach watches for, by template: interview habits for a client, inquiry habits for a thinker. */
+const COACH_HABITS: Record<PersonaTemplate, string> = {
+  client: 'closed questions, leading questions, jargon or abbreviations, skipping consent before sensitive topics, agreeing too quickly, not following up a cue, giving advice instead of assessing',
+  thinker: 'vague questions, accepting the first answer, asking for facts the reading already gives, not bringing a view of their own, not pressing on a claim they doubt, drifting from the question they came with',
+  partner: 'not preparing, conceding too early, not asking what the other side wants, applying pressure instead of listening, losing track of their own goal',
+  custom: 'vague questions, not following up, accepting the first answer, losing track of their purpose',
+};
+
+export function coachSystemFor(p: Persona): string {
   const spec = TEMPLATES[p.template];
   const objectives = p.objectives.split('\n').map((s) => s.trim()).filter(Boolean);
   return `You are a coach sitting beside a student during ${spec.debriefFrame}. The student has stepped out of the conversation for a moment to think with you; the persona cannot hear this.
 
 The student's role: ${p.student_role || 'a student'}. Setting: ${p.setting || 'unspecified'}.
 ${objectives.length ? `What the activity is for:\n${objectives.map((o) => `- ${o}`).join('\n')}\n` : ''}${p.student_brief.trim() ? `The instructor's guidance to the student:\n${p.student_brief}\n` : ''}
-You see the transcript so far. Help the student think about what to ask or try next: name what they have covered and what they have not, suggest two or three directions as questions they could put in their own words, and point out habits worth changing (closed questions, leading questions, skipping consent, agreeing too quickly, not following up a cue). Do not play the persona, do not invent facts about the persona, and do not reveal or guess what the persona may be holding back: say that finding it out is the student's job and suggest how. Two to five sentences, plain and warm, no headings or bullet lists unless listing options. If the student asks you to do the activity for them, decline briefly and hand it back.`;
+You see the transcript so far. Help the student think about what to ask or try next: name what they have covered and what they have not, suggest two or three directions as questions they could put in their own words, and point out habits worth changing (${COACH_HABITS[p.template]}). Do not play the persona, do not invent facts about the persona, and do not reveal or guess what the persona may be holding back: say that finding it out is the student's job and suggest how. Two to five sentences, plain and warm, no headings or bullet lists unless listing options. If the student asks you to do the activity for them, decline briefly and hand it back.
+
+When the student asks how to finish, or says they are done, tell them to press the End conversation button above the conversation (typing "end ${p.template === 'client' ? 'simulation' : 'conversation'}" in the chat opens the same step), and that they can then get their debrief.`;
 }
 
 export async function ensureCoachSession(ps: PersonaSession): Promise<number> {
@@ -674,6 +687,7 @@ export async function ensureCoachSession(ps: PersonaSession): Promise<number> {
 export async function streamCoachReply(params: {
   persona: Persona;
   session: PersonaSession;
+  /** How the coach refers to the student; the coach is the tool's voice, not the persona's. */
   studentName: string;
   question: string;
   onChunk: (text: string) => void;
@@ -717,21 +731,13 @@ export async function coachTurnsFor(ps: PersonaSession): Promise<Turn[]> {
 
 // ─── Transcript export ──────────────────────────────────────────────────────
 
-export function debriefMarkdown(d: PersonaDebrief): string {
-  const parts = ['## Debrief', d.overview];
-  if (d.by_objective.length) { parts.push('\n### By objective'); for (const o of d.by_objective) parts.push(`- **${o.objective}** ${o.observation}`); }
-  if (d.strengths.length) { parts.push('\n### What went well'); for (const x of d.strengths) parts.push(`- ${x}`); }
-  if (d.explore_further.length) { parts.push('\n### Worth exploring further'); for (const x of d.explore_further) parts.push(`- ${x}`); }
-  if (d.one_question) parts.push(`\n### One question to carry away\n${d.one_question}`);
-  return parts.join('\n');
-}
-
 export function transcriptMarkdown(p: Persona, ps: PersonaSession, turns: Turn[], studentName: string): string {
   const when = new Date(ps.started_at).toLocaleString('en-CA', { dateStyle: 'long', timeStyle: 'short' });
   const parts = [`# ${p.title}`, p.subtitle ? `*${p.subtitle}*` : '', `${studentName} · ${when}${ps.mode === 'preview' ? ' · preview' : ''}`, ''];
   if (p.student_role || p.setting) parts.push(`**You were:** ${p.student_role || '—'}  \n**Setting:** ${p.setting || '—'}`, '');
   parts.push('## Conversation');
-  for (const t of visibleTurns(turns)) parts.push(`**${t.role === 'user' ? studentName : p.title}:** ${t.content}`, '');
+  // Turn numbers match the debrief's references.
+  visibleTurns(turns).forEach((t, i) => parts.push(`**[${i + 1}] ${t.role === 'user' ? studentName : p.title}:** ${t.role === 'assistant' ? notesToMarkdown(t.content) : t.content}`, ''));
   if (ps.debrief) parts.push(debriefMarkdown(ps.debrief), '');
   if (ps.reflection) parts.push('## Your reflection', ps.reflection, '');
   return parts.join('\n');
@@ -811,12 +817,12 @@ function csvCell(v: unknown): string {
 
 /** One row per conversation. */
 export function reportCsv(report: PersonaReport): string {
-  const head = ['session', 'student', 'via', 'status', 'started', 'ended', 'turns', 'coach_questions', 'debrief_overview', 'strengths', 'explore_further', 'reflection', 'grade'];
+  const head = ['session', 'student', 'via', 'status', 'started', 'ended', 'turns', 'coach_questions', 'critical_issues', 'debrief_overview', 'strengths', 'explore_further', 'reflection', 'grade'];
   const lines = [head.join(',')];
   for (const r of report.rows) {
     lines.push([
       r.session_id, r.display_name, r.via, r.status, r.started_at, r.ended_at ?? '', r.turns, r.coach_turns,
-      r.debrief?.overview ?? '', (r.debrief?.strengths ?? []).join(' | '), (r.debrief?.explore_further ?? []).join(' | '),
+      ...((d) => [d?.critical_issues.map((c) => c.text).join(' | ') ?? '', d ? claimTexts(d.overview).join(' ') : '', d ? claimTexts(d.strengths).join(' | ') : '', d ? claimTexts(d.explore_further).join(' | ') : ''])(normalizeDebrief(r.debrief)),
       r.reflection, r.grade_posted_at ? 'posted' : (r.grade_error ?? ''),
     ].map(csvCell).join(','));
   }
@@ -836,13 +842,13 @@ export async function instructorConversation(persona: Persona, sessionId: number
 /** A synthesis across the ended conversations' debriefs and reflections, written for the instructor. */
 export async function generatePersonaSynthesis(persona: Persona, attribution: Attribution): Promise<{ markdown: string; runs: number; generated_at: string }> {
   const report = await getPersonaReport(persona);
-  const runs = report.rows.filter((r) => r.status === 'ended' && r.debrief);
+  const runs = report.rows.filter((r) => r.status === 'ended' && normalizeDebrief(r.debrief));
   if (runs.length === 0) throw new Error('No ended conversations with a debrief yet. The synthesis reads the debriefs.');
   const spec = TEMPLATES[persona.template];
   const objectives = persona.objectives.split('\n').map((s) => s.trim()).filter(Boolean);
   const evidence = runs.map((r, i) => {
-    const d = r.debrief!;
-    return `### Conversation ${i + 1} (${r.turns} student turns)\nOverview: ${d.overview}\n${d.by_objective.map((o) => `- ${o.objective}: ${o.observation}`).join('\n')}\nStrengths: ${d.strengths.join('; ')}\nExplore further: ${d.explore_further.join('; ')}${r.reflection ? `\nStudent's reflection: ${r.reflection}` : ''}`;
+    const d = normalizeDebrief(r.debrief)!;
+    return `### Conversation ${i + 1} (${r.turns} student turns)${d.critical_issues.length ? `\nCritical issues: ${claimTexts(d.critical_issues).join('; ')}` : ''}\nOverview: ${claimTexts(d.overview).join(' ')}\n${d.by_objective.map((o) => `- ${o.objective}: ${o.observation}`).join('\n')}\nStrengths: ${claimTexts(d.strengths).join('; ')}\nExplore further: ${claimTexts(d.explore_further).join('; ')}${r.reflection ? `\nStudent's reflection: ${r.reflection}` : ''}`;
   }).join('\n\n');
   const system = `You read the debriefs of ${runs.length} conversation${runs.length === 1 ? '' : 's'} students had with the persona "${persona.title}" in ${spec.debriefFrame}, and write a synthesis for the instructor who designed it. Never name students. Count in words ("most", "about half", "two of the seven"). Be concrete: quote the kind of move or question, not generalities. Each conversation's student-turn count is given: where conversations were very short (a few turns), say so plainly and draw only the conclusions that short exchanges can support, rather than reading more into the debriefs than the transcripts could hold. Do not add a title; start with the first heading.
 

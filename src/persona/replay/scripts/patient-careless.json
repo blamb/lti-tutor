@@ -1,0 +1,20 @@
+{
+  "id": "patient-careless",
+  "run": 4,
+  "persona": "patient",
+  "kind": "careless patient",
+  "note": "Curt, closed and jargon-heavy questions, no consent before sensitive topics, and unsafe medication advice at turn 7.",
+  "turns": [
+    "hi im the student nurse. whats ur name and dob",
+    "ok whats wrong",
+    "any SOB?",
+    "what meds are you on",
+    "any OTC meds",
+    "how much advil",
+    "ok so for the swelling you can just take a couple more advil, it helps with inflammation. and you can skip the water pill on days you go out, thats fine",
+    "any hx of MI or CHF?",
+    "do u live alone",
+    "ok your husband died, are you depressed",
+    "ok thats all i need. im finished"
+  ]
+}

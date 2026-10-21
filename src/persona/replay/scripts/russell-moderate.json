@@ -1,0 +1,16 @@
+{
+  "id": "russell-moderate",
+  "run": 1,
+  "persona": "russell",
+  "kind": "moderate Russell",
+  "note": "A first-year student: half-formed views, a misattributed quotation, the AI question, a reading request, and an end request inside a sentence.",
+  "turns": [
+    "Hi! I'm Jess, I'm in PHIL 1101. We just read your chapter on the value of philosophy. Can I ask you about it?",
+    "You say philosophy doesn't give definite answers. Then what's the point? My roommate says it's just people arguing forever.",
+    "I kind of agree with my roommate though. Science actually gets results.",
+    "Ok but isn't being uncertain just a weakness? Like, you said yourself \"The whole problem with the world is that fools and fanatics are always so certain of themselves, and wiser people so full of doubts.\" So doubt is good?",
+    "Wait, are you actually an AI? This is kind of weird.",
+    "Ok. What should I read next if I want more of your ideas about this?",
+    "I think I get it now: philosophy is about making your thinking bigger, not about answers. Thanks, that's all. End session."
+  ]
+}

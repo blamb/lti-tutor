@@ -42,11 +42,23 @@ The common rules, in every template: stay in character; describe non-verbal cues
 ```
 [template rules]            fixed per template, uncached
 [sources]                   the attached materials, cached
-[persona + student]         the persona block and the student's name, cached
+[persona]                   the case file or quote book, the persona block, cached
 [transcript]                the conversation so far; the tail is cached
 ```
 
 Short material sets (up to about 80,000 characters in total) go into the cached sources block whole. Longer sets, such as a thinker's collected works, are handled by retrieval: the sources block then lists only the titles, and each turn searches the materials for the passages that match what the student just said (and, if that finds little, the persona's last reply too). The passages ride inside that turn's user message, so the cached prefix and the earlier transcript are untouched. Materials are split on paragraph boundaries into chunks of about a thousand characters and indexed with Postgres full-text search (`material_chunk`, `core/chunks.ts`), so nothing beyond Postgres itself is needed on the server. Neighbouring hits are merged back into contiguous passages, up to about 14,000 characters a turn.
+
+The persona never receives the LMS display name. A course launch tells it that it does not know the student's name and may use only a name the student gives in the conversation; an open-web visitor's chosen name (from the link's gate) is passed as one they chose.
+
+### Case files and quote books
+
+A simulated client carries a **case file** (`persona.case_record`, `casefile.ts`): name and date of birth, presenting complaint, referral source, history, medications with over-the-counter ones apart and the words the patient uses for each, allergies, home and social life, planted cues and disclosure rules. It goes into the persona block as canonical facts, so every session gives the same answers to "who sent you in?" or "what medications are you on?". Age is never stored: it is computed from the date of birth when the prompt is built (78 in October 2026 for a 1948-03-04 birth).
+
+A thinker carries a **quote book** (`persona.quote_book`, `quotebook.ts`): vetted quotations with source and year, known misattributions with the answer to give, and the only reading it may recommend. Vetted quotations also count as sources for the quotation check, so they get the same chip as a quotation found in the materials.
+
+### Out-of-character notes and end requests
+
+Whatever the activity says rather than the persona (an honest answer to "are you an AI?", declining to write graded work, stopping for safety) is written between `[[note]]` and `[[/note]]`; the page shows it as a styled note from the tool, the export marks it as a blockquote, and quotation checks and read-aloud skip it (`signals.ts`). A message such as "thanks, that's all. End simulation" never reaches the persona: the page catches it before sending and opens the same accessible dialog as *End conversation*, and the turn route checks again with the same pattern (`END_INTENT`, kept in step with the page by a unit test). Confirming keeps the message as the student's last turn.
 
 ### Verified quotations
 
@@ -61,7 +73,7 @@ An instructor who already has a Custom GPT pastes its instructions and knowledge
 - **Pre-brief, then the conversation.** The card opens a brief: who the student is, the setting, who speaks first, the instructor's guidance and the objectives. The conversation streams, with quotation chips under replies when sources are attached.
 - **Voice.** Push-to-talk through the browser's speech recognition (Chrome, Edge, Safari; the LMS iframe blocks the microphone, so the page points to Full screen), and read-aloud sentence by sentence through the device's voices, ranked so the natural ones come first. The instructor can lean the automatic choice feminine or masculine per persona; the student can pick any installed voice. Stage directions in italics are not read aloud.
 - **Stepping out.** *Step out and ask the coach* opens a side panel the persona cannot hear. The coach sees the pre-brief, the objectives and the transcript so far, never the hidden layer, and answers with questions and options in the student's own terms. Its exchanges are kept in a separate session, so they never enter the persona's transcript. The instructor can switch the coach off per persona for assessment-like runs.
-- **The debrief.** After *End conversation*, *Get your debrief* makes one separate call in a coach's voice, not the persona's, against each objective, with the hidden layer in view so it can say what the student drew out and what a better question would have reached. No grades. It is stored on the session and shown again whenever the student reopens it.
+- **The debrief.** After *End conversation*, *Get your debrief* makes a separate call in a coach's voice, not the persona's, with the hidden layer and case file in view (`debrief.ts`). The transcript goes to it with numbered turns; every claim under *How it went*, *What went well* and *Worth exploring* carries the turns it rests on, shown as links to those turns. A second call then checks each claim against its turns and drops what they do not show, what the student already asked, and counterfactuals about facts already stated. *Critical issues* sits at the top, empty unless the student gave unsafe advice, asked for ghostwriting or another integrity breach, or breached consent. Only the persona's configured objectives are reported, under their exact names. No grades. The state (none, generating, ready, failed) lives on the session: a spinner while it is written, an error with *Retry* on failure, and an aborted request or a closed tab never loses the debrief or the button.
 - **Reflection and export.** A short reflection the student writes for themselves (and the instructor can see later), then a download of the whole record as a standalone HTML page or Markdown, or print.
 
 ## For the instructor afterwards
@@ -81,6 +93,14 @@ The routes live in `src/persona/server/public.ts`, mounted before ltijs's sessio
 ## Models and cost
 
 `PERSONA_MODEL` sets the deployment default (Haiku 5.5). The designer view offers a per-persona choice with list prices per million tokens: Haiku 5.5, Sonnet 5.5, Opus 5.5 and Haiku 4.5. Every call is recorded in `api_call` with its cost, as in the tutor; `/admin/costs?token=…` summarises it.
+
+## The regression harness
+
+```bash
+npm run replay:persona
+```
+
+Replays the saved student scripts in `src/persona/replay/scripts` (moderate and expert Russell; moderate and careless patient; plus the stored run whose debrief went wrong, for a fixed-input debrief replay) against the fixtures in `src/persona/replay/personas` with the real model, writes the debrief, and checks the October report's items 1 to 7: end requests caught, debrief state against Postgres, grounded debriefs (no re-suggested questions, critical issues for the medication advice and the ghostwriting), case-file consistency over five fresh sessions, disclosure by technique, no LMS names, Russell in the first person with notes and the soft word cap, and replies in about 1 to 4 seconds. Output goes to `replays/<timestamp>/` (gitignored); the exit code is 1 on any failure. Run it after every prompt or model change; `-- <id>` runs one script, `-- --no-db` skips the Postgres check. It uses the deployment's default models whatever `.env` pins (`REPLAY_PERSONA_MODEL` / `REPLAY_GEN_MODEL` to try others).
 
 ## Testing without Moodle
 

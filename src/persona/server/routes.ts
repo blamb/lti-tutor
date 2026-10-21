@@ -5,12 +5,13 @@
  * Student
  *   POST /api/fullscreen-init                    -> { url }
  *   GET  /api/me                                 -> { name, role, course }
- *   GET  /api/personas                           -> { personas: [public fields + my latest conversation] }
+ *   GET  /api/personas                           -> { personas: [public fields + my latest conversation] }   (only the placed persona when the launch names one)
  *   POST /api/personas/:id/start                 { fresh?, preview? } -> { persona, session, turns }
- *   POST /api/personas/session/:sid/turn         { message } | { begin: true } -> SSE chunk | notice | quotes | done | error
+ *   POST /api/personas/session/:sid/turn         { message, continue? } | { begin: true } -> SSE chunk | notice | quotes | end_intent | done | error
  *   GET  /api/personas/session/:sid              -> { persona, session, turns, coach_turns }   (reopen, including an ended one)
- *   POST /api/personas/session/:sid/end          -> { session, grade }   (posts completion to the gradebook where set up)
- *   POST /api/personas/session/:sid/debrief      -> { debrief }   (generated once the conversation has ended)
+ *   POST /api/personas/session/:sid/end          { final_message? } -> { session, grade }   (posts completion to the gradebook where set up)
+ *   POST /api/personas/session/:sid/debrief      -> { state, debrief, error }   (writes it once the conversation has ended; 'generating' if already under way)
+ *   GET  /api/personas/session/:sid/debrief      -> { state, debrief, error }   (none | generating | ready | failed)
  *   POST /api/personas/session/:sid/coach        { question } -> SSE chunk | done | error   (step out and ask the coach)
  *   POST /api/personas/session/:sid/reflection   { text } -> { ok }
  *   GET  /api/personas/session/:sid/transcript.html | .md   (?download=1)
@@ -59,9 +60,11 @@ import {
   PersonaInput, PERSONA_MODELS, publicPersona, designerPersona, listPersonas, getPersona, createPersona, updatePersona, deletePersona, detachMaterial,
   startPersonaSession, getPersonaSession, endPersonaSession, getSessionTurns, visibleTurns, streamPersonaReply, draftPersona,
   latestSessionsForStudent, START_MARKER, DRAFT_MAX_CHARS, PERSONA_MATERIAL_MAX_CHARS, modelFor,
-  getOrGenerateDebrief, streamCoachReply, coachTurnsFor, saveReflection, transcriptHtml, transcriptMarkdown,
+  streamCoachReply, coachTurnsFor, saveReflection, transcriptHtml, transcriptMarkdown,
   recordGradeResult, getPersonaReport, reportCsv, instructorConversation, generatePersonaSynthesis,
 } from './personas.js';
+import { requestDebrief, debriefStatus, clientSession, normalizeDebrief } from './debrief.js';
+import { hasEndIntent } from './signals.js';
 import { postCompletion, type GradeResult } from '../../core/grades.js';
 
 // The course-import commit sends every selected material's text back in one
@@ -114,17 +117,26 @@ lti.app.get('/api/me', async (req: Request, res: Response) => {
 
 // ─── Student ────────────────────────────────────────────────────────────────
 
+/** The persona a course activity was placed for (deep link custom parameter), or null for the home launch. */
+function placedPersonaId(token: IdToken): number | null {
+  const raw = String(token.platformContext.custom?.persona_id ?? '');
+  return /^\d+$/.test(raw) ? Number(raw) : null;
+}
+
 lti.app.get('/api/personas', async (req: Request, res: Response) => {
   try {
     const token = tokenOf(res);
     const scope = scopeOf(token);
     const me = await studentFromToken(token);
-    const personas = await listPersonas(scope, { publishedOnly: true });
+    // A placed activity is one persona: list only it, so a course with several never shows the others under this activity's name.
+    const placed = placedPersonaId(token);
+    const personas = (await listPersonas(scope, { publishedOnly: true })).filter((p) => placed === null || p.id === placed);
     const latest = await latestSessionsForStudent(me.id);
     res.json({
+      placed,
       personas: personas.map((p) => {
         const s = latest.get(p.id);
-        return { ...publicPersona(p), my_session: s ? { id: s.id, status: s.status, started_at: s.started_at, ended_at: s.ended_at } : null };
+        return { ...publicPersona(p), my_session: s ? { id: s.id, status: s.status, started_at: s.started_at, ended_at: s.ended_at, debrief_state: debriefStatus(s).state } : null };
       }),
     });
   } catch (e) {
@@ -145,7 +157,7 @@ lti.app.post('/api/personas/:id/start', async (req: Request, res: Response) => {
     const me = await studentFromToken(token);
     const session = await startPersonaSession(persona, me.id, preview ? 'preview' : 'live', { fresh: !!req.body?.fresh });
     const turns = visibleTurns(await getSessionTurns(session.session_id));
-    res.json({ persona: { ...publicPersona(persona), model: isTeacher(token) ? modelFor(persona) : undefined }, session, turns, coach_turns: await coachTurnsFor(session) });
+    res.json({ persona: { ...publicPersona(persona), model: isTeacher(token) ? modelFor(persona) : undefined }, session: clientSession(session), turns, coach_turns: await coachTurnsFor(session) });
   } catch (e) {
     fail(res, e, 'POST /api/personas/:id/start');
   }
@@ -180,7 +192,7 @@ lti.app.get('/api/personas/session/:sid', async (req: Request, res: Response) =>
     const { token, session, persona } = owned;
     res.json({
       persona: { ...publicPersona(persona), model: isTeacher(token) ? modelFor(persona) : undefined },
-      session, turns: visibleTurns(await getSessionTurns(session.session_id)), coach_turns: await coachTurnsFor(session),
+      session: clientSession(session), turns: visibleTurns(await getSessionTurns(session.session_id)), coach_turns: await coachTurnsFor(session),
     });
   } catch (e) {
     fail(res, e, 'GET /api/personas/session/:sid');
@@ -203,8 +215,13 @@ lti.app.post('/api/personas/session/:sid/turn', async (req: Request, res: Respon
       send('done', { already_started: true });
       return res.end();
     }
+    // "End simulation" never reaches the persona: the page asks the student to confirm. `continue` is their "keep talking".
+    if (!begin && !req.body?.continue && hasEndIntent(message)) {
+      send('end_intent', { message });
+      return res.end();
+    }
     const out = await streamPersonaReply({
-      persona, scope, session, studentName: me.display_name, userMessage: message,
+      persona, scope, session, givenName: '', userMessage: message,
       onChunk: (text) => send('chunk', { text }),
       attribution: attr(token, me.id, session.session_id, 'persona.turn'),
     });
@@ -225,7 +242,7 @@ lti.app.post('/api/personas/session/:sid/end', async (req: Request, res: Respons
     if (!owned) return res.status(404).json({ error: 'conversation not found' });
     const { token, persona } = owned;
     const wasEnded = owned.session.status === 'ended';
-    const session = wasEnded ? owned.session : await endPersonaSession(owned.session);
+    const session = wasEnded ? owned.session : await endPersonaSession(owned.session, String(req.body?.final_message ?? ''));
     let grade: GradeResult | null = null;
     // Completion counts once, for live conversations, where a column exists or is wanted.
     const deepLinked = String(token.platformContext.custom?.persona_id ?? '') === String(persona.id);
@@ -238,7 +255,7 @@ lti.app.post('/api/personas/session/:sid/end', async (req: Request, res: Respons
       session.grade_posted_at = grade.posted ? new Date().toISOString() : session.grade_posted_at;
       session.grade_error = grade.posted ? null : (grade.error ?? null);
     }
-    res.json({ session, grade });
+    res.json({ session: clientSession(session), grade });
   } catch (e) {
     fail(res, e, 'POST /api/personas/session/:sid/end');
   }
@@ -250,10 +267,19 @@ lti.app.post('/api/personas/session/:sid/debrief', async (req: Request, res: Res
     if (!owned) return res.status(404).json({ error: 'conversation not found' });
     const { token, me, session, persona } = owned;
     if (session.status !== 'ended') return res.status(400).json({ error: 'End the conversation first; the debrief looks back at the whole of it.' });
-    const debrief = await getOrGenerateDebrief({ persona, session, studentName: me.display_name, attribution: attr(token, me.id, session.session_id, 'persona.debrief') });
-    res.json({ debrief });
+    res.json(await requestDebrief({ persona, session, attribution: attr(token, me.id, session.session_id, 'persona.debrief') }));
   } catch (e) {
     fail(res, e, 'POST /api/personas/session/:sid/debrief');
+  }
+});
+
+lti.app.get('/api/personas/session/:sid/debrief', async (req: Request, res: Response) => {
+  try {
+    const owned = await ownedSession(req, res);
+    if (!owned) return res.status(404).json({ error: 'conversation not found' });
+    res.json(debriefStatus(owned.session));
+  } catch (e) {
+    fail(res, e, 'GET /api/personas/session/:sid/debrief');
   }
 });
 
@@ -419,6 +445,7 @@ lti.app.get('/api/teacher/personas/:id/report', async (req: Request, res: Respon
     const t = await teacherPersona(req, res);
     if (!t) return;
     const report = await getPersonaReport(t.persona);
+    report.rows = report.rows.map((r) => ({ ...r, debrief: normalizeDebrief(r.debrief) }));
     res.json({ persona: { id: t.persona.id, title: t.persona.title, subtitle: t.persona.subtitle, objectives: t.persona.objectives, gradebook: t.persona.gradebook, status: t.persona.status }, ...report });
   } catch (e) {
     fail(res, e, 'GET /api/teacher/personas/:id/report');
@@ -445,7 +472,7 @@ lti.app.get('/api/teacher/personas/:id/conversations/:sid', async (req: Request,
     const sid = idParam(req, 'sid');
     const conv = sid ? await instructorConversation(t.persona, sid) : null;
     if (!conv) return res.status(404).json({ error: 'conversation not found' });
-    res.json(conv);
+    res.json({ ...conv, session: clientSession(conv.session) });
   } catch (e) {
     fail(res, e, 'GET /api/teacher/personas/:id/conversations/:sid');
   }

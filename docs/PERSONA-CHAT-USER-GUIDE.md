@@ -72,6 +72,10 @@ Long documents (a reading, a novel) belong under Materials, not in the paste box
 
 **The hidden layer is the heart of a simulation.** A line such as "Only reveal if asked about sleep habits or routine: stays up late scrolling on her phone" is exactly right. It gives the persona a cue to drop ("I'm so exhausted by the time the kids are asleep that I just crash"), a follow-up, and the condition. The student who asks well reaches it; the student who does not gets told so in the debrief. A thinker usually has an empty hidden layer.
 
+**A simulated patient needs a case file.** For the *simulated client or patient* template, the **Case file** section holds the facts every student must meet the same way: name and date of birth (the age is worked out on the day), why they came in, who sent them, history, medications one per line (mark over-the-counter ones *OTC* and give the words the patient uses), home life (who does the cooking), planted cues and disclosure rules. Without it the model improvises, and five students hear five different answers to "what medications are you on?".
+
+**A thinker needs a quote book.** For the *thinker* template, **Quotations and reading** holds quotations you have checked, with source and year, the misattributed lines students tend to bring and what the thinker should say about them, and the only books the thinker may recommend.
+
 **Objectives drive the debrief.** Each line becomes a heading the debrief reports under, with examples from the conversation. Five is plenty. "Therapeutic communication" and "Recognise tensions and counterarguments" are the right grain.
 
 ### Conduct
@@ -104,7 +108,7 @@ Students launch in a new window, which is what voice needs; inside Moodle's own 
 1. **The card and the pre-brief**: who they are in this, the setting, who speaks first, your *How to use* text, the objectives, and a plain disclosure that this is an AI playing a part.
 2. **The conversation.** Typed or spoken (**Speak**, then **Done speaking**, then check the text and send). Replies can be read aloud. Quotation chips appear under replies that quote.
 3. **Step out and ask the coach.** A side panel the persona cannot hear: "What haven't I covered?", "How could I put that better?". The coach sees the brief, the objectives and the transcript so far, never the hidden layer, and answers with questions and options. Its exchanges stay out of the persona's transcript.
-4. **End conversation**, then **Get your debrief**: how it went, each objective with an example, what went well, what was worth exploring further, one question to carry away. No grades.
+4. **End conversation** (or typing something like "end simulation" or "I'm finished", which asks the same question), then **Get your debrief**: any critical issues first (unsafe advice, a request to have work written for them, a breach of consent), then how it went, each objective with an example, what went well, what was worth exploring further, one question to carry away. Every point links to the turns it rests on. No grades. If writing the debrief fails or is interrupted, **Retry** stays on the page.
 5. **One thing to take from this**: a short reflection, saved with the conversation.
 6. **Download** the whole record as a web page or Markdown, or print it.
 

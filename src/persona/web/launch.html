@@ -157,7 +157,23 @@
   .bk-unit { margin: .5rem 0 .75rem; }
   .bk-unit .bk-head { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-bottom: .25rem; }
   .bk-preview { white-space: pre-wrap; margin: .3rem 0; max-height: 12rem; overflow: auto; font-size: .8rem; }
-  @media (prefers-reduced-motion: reduce) { .mic-btn.listening { animation: none; outline: 3px solid var(--bad); outline-offset: 2px; } *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; } }
+  .turn.assistant { flex-direction: column; align-items: flex-start; gap: .35rem; }
+  .turn:focus { outline: none; } .turn:focus-visible .bubble, .turn.flash .bubble, .turn.flash .sys-note { outline: 3px solid var(--focus); outline-offset: 2px; }
+  .turns.numbered .turn[data-n]::before { content: attr(data-n); color: var(--muted); font-size: .72rem; font-variant-numeric: tabular-nums; align-self: flex-start; margin: .2rem .4rem 0 0; }
+  .turns.numbered .turn.user[data-n] { gap: .4rem; } .turns.numbered .turn.user[data-n]::before { order: 2; margin: .2rem 0 0 .4rem; }
+  .sys-note { max-width: 90%; padding: .5rem .8rem; border: 1px solid var(--warn); border-left-width: 4px; background: var(--warn-bg); color: var(--fg); border-radius: 6px; font-size: .88rem; white-space: pre-wrap; }
+  .sys-note .sys-note-label { display: block; font-weight: 600; font-size: .75rem; color: var(--warn); margin-bottom: .1rem; }
+  .critical { border: 1px solid var(--bad); border-left-width: 4px; background: var(--bad-bg); border-radius: 6px; padding: .5rem .85rem; margin: .5rem 0 .75rem; }
+  .critical h3 { color: var(--bad); margin: .1rem 0 .3rem; }
+  .debrief .refs { color: var(--muted); font-size: .8rem; white-space: nowrap; }
+  .turn-ref { color: var(--accent); }
+  .spinner { display: inline-block; width: 1em; height: 1em; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -.15em; margin-right: .45rem; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, .5); display: flex; align-items: center; justify-content: center; padding: 1rem; z-index: 200; }
+  .modal { background: var(--card); color: var(--fg); border: 1px solid var(--border); border-radius: 10px; width: 100%; max-width: 460px; padding: 1.1rem 1.25rem; box-shadow: 0 12px 32px rgba(0, 0, 0, .35); }
+  .modal h2 { margin: 0 0 .5rem; font-size: 1.1rem; } .modal p { margin: 0; }
+  .modal .form-row { justify-content: flex-end; margin-top: 1.1rem; }
+  @media (prefers-reduced-motion: reduce) { .mic-btn.listening { animation: none; outline: 3px solid var(--bad); outline-offset: 2px; } .spinner { animation: none; border-top-color: var(--accent); border-right-color: var(--accent); } *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; } }
   @media print {
     body { padding: 0; background: #fff; color: #000; }
     header .header-actions, .compose, .chat-toolbar, .voice-row, .coach, .reflect textarea, button, .skip-link { display: none !important; }
@@ -263,7 +279,7 @@
 
       <aside class="coach" id="coach-panel" hidden aria-labelledby="coach-h">
         <h3 id="coach-h">Thinking it over with the coach</h3>
-        <p class="muted" style="margin:0 0 .5rem">The persona cannot hear this. Ask what to try next, whether you have covered what matters, or how a question could be put better. The coach will not tell you what the persona is holding back; finding that out is the point.</p>
+        <p class="muted" style="margin:0 0 .5rem" id="coach-blurb">The persona cannot hear this. Ask what to try next, whether you have covered what matters, or how a question could be put better.</p>
         <div class="turns" id="coach-turns" aria-label="Conversation with the coach"></div>
         <form class="compose" id="coach-compose">
           <label for="coach-input" class="visually-hidden">Your question to the coach</label>
@@ -337,6 +353,41 @@
             </details>
 
             <div id="editor-sections"></div>
+
+            <fieldset class="sec hidden-sec" id="sec-casefile" hidden>
+              <legend>Case file</legend>
+              <p class="sec-blurb">The fixed facts every student meets, so five sessions give the same answers. Never shown to students; the persona treats them as canonical and still reveals them only as the questions earn. Age is worked out from the date of birth on the day of each conversation. List fields take one item per line.</p>
+              <div class="form-grid">
+                <div class="form-row">
+                  <label style="flex:2;min-width:200px">Full name<input type="text" name="cf_name"></label>
+                  <label style="flex:1;min-width:140px">Goes by<input type="text" name="cf_preferred_name"></label>
+                  <label style="flex:1;min-width:160px">Date of birth<input type="date" name="cf_date_of_birth"></label>
+                </div>
+                <div class="form-row">
+                  <label style="flex:1;min-width:140px">Sex<input type="text" name="cf_sex"></label>
+                  <label style="flex:1;min-width:140px">Pronouns<input type="text" name="cf_pronouns"></label>
+                </div>
+                <label>Background<span class="hint">Culture, language, faith, occupation, anything that shapes how they talk and what matters to them.</span><textarea name="cf_background"></textarea></label>
+                <label>Presenting complaint<span class="hint">Why they are here today, in the facts behind it.</span><textarea name="cf_presenting_complaint"></textarea></label>
+                <label>Referral source<span class="hint">Who sent them in, and how, e.g. "Dr. Mehta, her family doctor, after her daughter phoned the clinic".</span><input type="text" name="cf_referral_source"></label>
+                <label>Health history<textarea name="cf_history" class="tall"></textarea></label>
+                <label>Medications<span class="hint">One per line: name and strength | how taken | what for | in their own words | OTC (write OTC for anything bought without a prescription). Example: ibuprofen 200 mg (Advil) | 2 tablets up to three times a day | back pain | "my Advil" | OTC</span><textarea name="cf_medications" class="tall"></textarea></label>
+                <label>Allergies<input type="text" name="cf_allergies"></label>
+                <label>Home and social life<span class="hint">Who they live with, who does the cooking and shopping, work, supports, habits.</span><textarea name="cf_social_history" class="tall"></textarea></label>
+                <label>Planted cues<span class="hint">One per line: what they say or do | what lies behind it | when to disclose it.</span><textarea name="cf_planted_cues" class="tall"></textarea></label>
+                <label>Disclosure rules<span class="hint">One per line, e.g. "Mentions the Advil only when asked about painkillers or anything bought over the counter."</span><textarea name="cf_disclosure_rules"></textarea></label>
+              </div>
+            </fieldset>
+
+            <fieldset class="sec" id="sec-quotebook" hidden>
+              <legend>Quotations and reading</legend>
+              <p class="sec-blurb">Vetted by you: the persona quotes these word for word, corrects a student who brings a misattributed line, and recommends only the reading listed. Vetted quotations are also checked like the sources. One item per line.</p>
+              <div class="form-grid">
+                <label>Vetted quotations<span class="hint">quotation | source | year. Example: The fundamental cause of the trouble is that in the modern world the stupid are cocksure while the intelligent are full of doubt. | The Triumph of Stupidity | 1933</span><textarea name="qb_quotes" class="tall"></textarea></label>
+                <label>Known misattributions<span class="hint">the wording students bring | what the persona should say about it.</span><textarea name="qb_misattributions"></textarea></label>
+                <label>Reading the persona may recommend<span class="hint">title | year | a short note.</span><textarea name="qb_reading"></textarea></label>
+              </div>
+            </fieldset>
 
             <fieldset class="sec" id="sec-conduct">
               <legend>Conduct</legend>
@@ -524,6 +575,18 @@
   </main>
 </div>
 
+<!-- One accessible confirmation dialog for the whole page (replaces window.confirm): focus stays inside, Esc cancels. -->
+<div class="modal-backdrop" id="confirm-modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-body">
+    <h2 id="confirm-title"></h2>
+    <p id="confirm-body"></p>
+    <div class="form-row">
+      <button type="button" class="btn-ghost btn" id="confirm-cancel"></button>
+      <button type="button" class="btn" id="confirm-ok"></button>
+    </div>
+  </div>
+</div>
+
 <script type="module">
   const params = new URLSearchParams(location.search);
   const LTIK = params.get('ltik') || '';
@@ -568,6 +631,63 @@
   function announce(text) { liveRegion.textContent = ''; setTimeout(() => { liveRegion.textContent = String(text || ''); }, 30); }
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+  // ─── Confirmation dialog ───
+  // Resolves true for the confirming button, false for cancel, Esc or a click outside. Tab and Shift+Tab stay on its two buttons;
+  // the page behind is inert while it is open, and focus returns to whatever opened it.
+  function confirmDialog({ title, body, ok, cancel = 'Cancel' }) {
+    return new Promise((resolve) => {
+      const modal = $('#confirm-modal'), wrap = $('.wrap'), okBtn = $('#confirm-ok'), cancelBtn = $('#confirm-cancel');
+      const opener = document.activeElement;
+      $('#confirm-title').textContent = title; $('#confirm-body').textContent = body;
+      okBtn.textContent = ok; cancelBtn.textContent = cancel;
+      modal.hidden = false; wrap.inert = true; wrap.setAttribute('aria-hidden', 'true');
+      const buttons = [cancelBtn, okBtn];
+      const close = (value) => {
+        modal.hidden = true; wrap.inert = false; wrap.removeAttribute('aria-hidden');
+        document.removeEventListener('keydown', onKey, true); modal.removeEventListener('click', onClick);
+        if (opener && opener.isConnected && typeof opener.focus === 'function') opener.focus();
+        resolve(value);
+      };
+      const onKey = (e) => {
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(false); }
+        else if (e.key === 'Tab') { e.preventDefault(); const i = buttons.indexOf(document.activeElement); buttons[(i + (e.shiftKey ? -1 : 1) + buttons.length) % buttons.length].focus(); }
+      };
+      const onClick = (e) => { if (e.target === okBtn) close(true); else if (e.target === cancelBtn || e.target === modal) close(false); };
+      document.addEventListener('keydown', onKey, true); modal.addEventListener('click', onClick);
+      okBtn.focus();
+    });
+  }
+
+  // ─── Signals in the text (same patterns as server/signals.ts: change both together) ───
+  const END_INTENT = /\b(?:end(?:ing)?\s+(?:the\s+|this\s+|our\s+)?(?:simulation|session|conversation|interview|chat|role[\s-]?play)|i(?:['’]?m|\s+am|['’]?ve|\s+have)\s+(?:all\s+)?finished|that['’]?s\s+all\s+(?:of\s+)?my\s+questions)\b/i;
+  const hasEndIntent = (text) => END_INTENT.test(String(text || ''));
+  /** Persona words and out-of-character notes ([[note]] … [[/note]]); an unclosed note runs to the end. */
+  function splitNotes(text) {
+    const parts = []; const re = /\[\[note\]\]([\s\S]*?)(?:\[\[\/note\]\]|$)/gi; let last = 0; const src = String(text || '');
+    for (const m of src.matchAll(re)) {
+      const before = src.slice(last, m.index).trim(); if (before) parts.push({ kind: 'persona', text: before });
+      const note = (m[1] || '').trim(); if (note) parts.push({ kind: 'note', text: note });
+      last = m.index + m[0].length;
+    }
+    const rest = src.slice(last).trim(); if (rest) parts.push({ kind: 'persona', text: rest });
+    return parts;
+  }
+  const personaWords = (text) => splitNotes(text).filter((p) => p.kind === 'persona').map((p) => p.text).join('\n\n');
+  /** Fill an assistant turn: the persona's words in its bubble, each note as a system note. A half-streamed marker is held back. */
+  function renderReply(turnEl, raw, speaker, { streaming = false } = {}) {
+    const text = streaming ? String(raw || '').replace(/\[\[?\/?[note]{0,4}\]?$/i, '') : String(raw || '');
+    turnEl.querySelectorAll('.bubble, .sys-note').forEach((el) => el.remove());
+    const parts = splitNotes(text);
+    if (!parts.length) { const b = document.createElement('div'); b.className = 'bubble'; b.dataset.speaker = speaker; turnEl.appendChild(b); return; }
+    for (const part of parts) {
+      if (part.kind === 'note') {
+        const n = document.createElement('div'); n.className = 'sys-note'; n.setAttribute('role', 'note');
+        n.innerHTML = `<span class="sys-note-label">Note from ${esc(TOOL_NAME)} (not the persona)</span>`; n.appendChild(document.createTextNode(part.text));
+        turnEl.appendChild(n);
+      } else { const b = document.createElement('div'); b.className = 'bubble'; b.dataset.speaker = speaker; setMd(b, part.text); turnEl.appendChild(b); }
+    }
+  }
+
   // ─── Markdown: plain text until marked + DOMPurify load from this origin ───
   let mdLibsReady = false; const mdRegistry = new Set();
   function mdToHtml(text) {
@@ -609,6 +729,7 @@
     try {
       const data = await api('/api/personas');
       homePersonas = data.personas || [];
+      if (data.placed) { $('#home-h').textContent = 'This activity'; }
       if (!homePersonas.length) {
         list.innerHTML = `<div class="empty">${isTeacher ? 'No published personas yet. Open the Designer view to create one.' : 'No personas yet. Your instructor has not published any for this course.'}</div>`;
         return;
@@ -644,6 +765,8 @@
     const ended = p.my_session && p.my_session.status === 'ended';
     $('#brief-start').textContent = inProgress ? 'Continue the conversation' : ended ? 'Start a new conversation' : 'Start the conversation';
     $('#brief-review').hidden = !ended;
+    const ds = p.my_session && p.my_session.debrief_state;
+    $('#brief-review').textContent = ds === 'ready' ? 'See your last conversation and debrief' : ds === 'generating' ? 'See your last conversation (debrief being written)' : 'See your last conversation and get your debrief';
     $('#brief-restart').hidden = !inProgress;
     $('#brief-status').textContent = preview ? 'Preview: this conversation is not counted or reported.' : '';
     $('#brief-err').textContent = '';
@@ -653,17 +776,28 @@
   if (PUBLIC) { $('#brief-back').hidden = true; }
   $('#brief-start').addEventListener('click', () => startChat({ fresh: !!(current.persona.my_session && current.persona.my_session.status === 'ended') }));
   $('#brief-review').addEventListener('click', () => openSession(current.persona.my_session.id));
-  $('#brief-restart').addEventListener('click', () => { if (confirm('Start this conversation over from the beginning? The earlier one is kept but will not continue.')) startChat({ fresh: true }); });
+  $('#brief-restart').addEventListener('click', async () => {
+    if (await confirmDialog({ title: 'Start over?', body: 'The conversation starts again from the beginning. The earlier one is kept but will not continue.', ok: 'Start over', cancel: 'Keep the current one' })) startChat({ fresh: true });
+  });
 
   // ─── Chat ───
-  const chat = { session: null, busy: false };
+  const chat = { session: null, busy: false, turnNo: 0, keepTalking: '', debriefBusy: false, pollTimer: null };
   const chatTurns = $('#chat-turns'), chatInput = $('#chat-input'), chatSend = $('#chat-send'), chatErr = $('#chat-err');
+  /** Append a turn and return its element. User and persona turns are numbered as the debrief numbers them (turn-1, turn-2…). */
   function appendTurn(role, text) {
     const t = document.createElement('div'); t.className = 'turn ' + role;
-    const b = document.createElement('div'); b.className = 'bubble';
-    if (role === 'assistant') { b.dataset.speaker = current?.persona?.title || 'Persona'; setMd(b, text); } else b.textContent = text;
-    t.appendChild(b); chatTurns.appendChild(t); chatTurns.scrollTop = chatTurns.scrollHeight;
-    return b;
+    if (role === 'user' || role === 'assistant') { chat.turnNo += 1; t.id = 'turn-' + chat.turnNo; t.dataset.n = chat.turnNo; t.tabIndex = -1; }
+    if (role === 'assistant') { t._raw = text; renderReply(t, text, current?.persona?.title || 'Persona'); }
+    else { const b = document.createElement('div'); b.className = 'bubble'; b.textContent = text; t.appendChild(b); }
+    chatTurns.appendChild(t); chatTurns.scrollTop = chatTurns.scrollHeight;
+    return t;
+  }
+  /** Keep the brief and the gallery in step with the server without a reload. */
+  function rememberSession(s) {
+    if (!current?.persona || !s) return;
+    const mine = { id: s.id, status: s.status, started_at: s.started_at, ended_at: s.ended_at, debrief_state: s.debrief_state || 'none' };
+    current.persona.my_session = mine;
+    const h = homePersonas.find((x) => x.id === current.persona.id); if (h) h.my_session = mine;
   }
   async function startChat({ fresh }) {
     const p = current.persona; $('#brief-err').textContent = '';
@@ -687,8 +821,12 @@
     $('#chat-setting').textContent = p.setting || '';
     current.model = data.persona.model || '';
     const mode = $('#chat-mode'); mode.hidden = !current.preview; mode.textContent = current.preview ? `Preview · ${current.model}` : '';
-    chatTurns.innerHTML = ''; chatErr.textContent = ''; $('#coach-err').textContent = '';
+    chatTurns.innerHTML = ''; chatErr.textContent = ''; $('#coach-err').textContent = ''; chat.turnNo = 0; chat.keepTalking = '';
+    clearTimeout(chat.pollTimer);
     for (const t of data.turns) appendTurn(t.role, t.content);
+    $('#coach-blurb').textContent = p.template === 'client'
+      ? 'The persona cannot hear this. Ask what to try next, whether you have covered what matters, or how a question could be put better. The coach will not tell you what the persona is holding back; finding that out is the point.'
+      : 'The persona cannot hear this. Ask what to try next, whether you have covered what matters, or how a question could be put better.';
     $('#coach-turns').innerHTML = '';
     for (const t of data.coach_turns || []) appendCoachTurn(t.role, t.content);
     $('#coach-panel').hidden = true;
@@ -697,25 +835,27 @@
     $('#reflect-text').value = data.session.reflection || ''; $('#reflect-status').textContent = '';
     setEnded(data.session.status === 'ended');
     $('#chat-ended').textContent = data.session.grade_posted_at ? 'This conversation has ended. Completion has been recorded in the course gradebook.' : 'This conversation has ended.';
-    if (data.session.status === 'ended' && data.session.debrief) renderDebrief(data.session.debrief);
+    if (data.session.status === 'ended') renderDebriefState({ state: data.session.debrief_state || (data.session.debrief ? 'ready' : 'none'), debrief: data.session.debrief });
     if (window.speechSynthesis) fillVoiceMenu();
     showView('chat');
   }
   function setEnded(ended) {
+    chatTurns.classList.toggle('numbered', ended);
     $('#chat-after').hidden = !ended; $('#chat-compose').hidden = ended; $('#chat-voice-row').hidden = ended;
     $('#chat-end').hidden = ended; $('#chat-coach-btn').hidden = ended || current.persona.coach === 'off';
     if (ended) $('#coach-panel').hidden = true;
   }
-  async function chatStream({ begin = false, message = '' } = {}) {
+  async function chatStream({ begin = false, message = '', keepTalking = false } = {}) {
     if (!chat.session || chat.busy) return;
     chat.busy = true; chatSend.disabled = true; chatErr.textContent = '';
     announce(`${current.persona.title} is replying.`);
-    if (!begin) appendTurn('user', message);
-    const bubble = appendTurn('assistant', '');
+    const userTurn = begin ? null : appendTurn('user', message);
+    const bubble = appendTurn('assistant', ''); bubble._raw = '';
+    let endIntent = false;
     try {
       const resp = await fetch(apiUrl(`/api/personas/session/${chat.session.id}/turn`), {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-        body: JSON.stringify(begin ? { begin: true } : { message }),
+        body: JSON.stringify(begin ? { begin: true } : { message, continue: keepTalking }),
       });
       if (!resp.ok) throw new Error('Server returned ' + resp.status);
       const reader = resp.body.getReader(); const decoder = new TextDecoder(); let buf = '';
@@ -726,23 +866,27 @@
         let idx;
         while ((idx = buf.indexOf('\n\n')) !== -1) {
           const evt = parseSSE(buf.slice(0, idx)); buf = buf.slice(idx + 2);
-          if (evt.event === 'chunk') { bubble._raw = (bubble._raw || '') + (evt.data.text || ''); setMd(bubble, bubble._raw); chatTurns.scrollTop = chatTurns.scrollHeight; }
+          if (evt.event === 'chunk') { bubble._raw = (bubble._raw || '') + (evt.data.text || ''); renderReply(bubble, bubble._raw, current.persona.title, { streaming: true }); chatTurns.scrollTop = chatTurns.scrollHeight; }
           else if (evt.event === 'notice') { appendTurn('notice', evt.data.message || ''); }
           else if (evt.event === 'quotes') { renderQuotes(bubble, evt.data); }
+          else if (evt.event === 'end_intent') { endIntent = true; }
           else if (evt.event === 'done') {
-            announce(`${current.persona.title}: ${bubble._raw || ''}`);
+            renderReply(bubble, bubble._raw, current.persona.title);
+            announce(`${current.persona.title}: ${(bubble._raw || '').replace(/\[\[\/?note\]\]/gi, ' ')}`);
             if (current.preview && evt.data.passages) $('#chat-mode').textContent = `Preview · ${current.model || ''} · ${evt.data.passages} passage${evt.data.passages === 1 ? '' : 's'} retrieved`;
           }
           else if (evt.event === 'error') { chatErr.textContent = friendlyError(evt.data.message); }
         }
       }
-      if (!bubble._raw) bubble.closest('.turn').remove();
-      else if ($('#chat-tts').checked) speakText(bubble._raw);
+      if (!bubble._raw) { bubble.remove(); chat.turnNo -= 1; }
+      else if ($('#chat-tts').checked) speakText(personaWords(bubble._raw));
     } catch (e) { chatErr.textContent = 'Send failed: ' + friendlyError(e); }
-    finally { chat.busy = false; chatSend.disabled = false; if (!listening) chatInput.focus(); }
+    finally { chat.busy = false; chatSend.disabled = false; if (!listening && !endIntent) chatInput.focus(); }
+    // The server caught an end request the page missed: take the message back out and ask, as the button does.
+    if (endIntent) { if (userTurn) { userTurn.remove(); chat.turnNo -= 1; } await askToEnd(message); }
   }
-  function renderQuotes(bubble, q) {
-    const turn = bubble.closest('.turn'); if (!turn) return;
+  function renderQuotes(turn, q) {
+    if (!turn) return;
     const all = [...(q.verified || []).map((v) => ({ ok: true, v })), ...(q.unverified || []).map((u) => ({ ok: false, u }))];
     if (!all.length) return;
     const box = document.createElement('div'); box.className = 'quotes';
@@ -763,38 +907,114 @@
   $('#chat-compose').addEventListener('submit', async (e) => {
     e.preventDefault(); const msg = chatInput.value.trim(); if (!msg) return;
     if (listening) stopListening(false);
-    stopSpeaking(); chatInput.value = ''; await chatStream({ message: msg });
+    stopSpeaking(); chatInput.value = '';
+    // "End simulation" and the like open the end dialog instead of going to the persona, unless the student already chose to keep talking with this text.
+    const keepTalking = !!chat.keepTalking && chat.keepTalking === msg; chat.keepTalking = '';
+    if (!keepTalking && hasEndIntent(msg)) { await askToEnd(msg); return; }
+    await chatStream({ message: msg, keepTalking });
   });
   chatInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('#chat-compose').requestSubmit(); } });
   $('#chat-back').addEventListener('click', () => { if (current?.preview) showView('teacher'); else { showView('home'); loadHome(); } });
   $('#chat-print').addEventListener('click', () => window.print());
-  $('#chat-end').addEventListener('click', async () => {
-    if (!chat.session || chat.busy) return;
-    if (!confirm('End this conversation? You can get your debrief afterwards, and start a new one any time.')) return;
+  $('#chat-end').addEventListener('click', () => askToEnd(''));
+  /**
+   * The one way a conversation ends: the End conversation button, or a message such as "thanks, that's all. End simulation".
+   * Confirming ends it (the message is kept as the student's last turn, with no persona reply). Cancelling a typed request
+   * puts the message back in the box; sending it again then goes to the persona.
+   */
+  async function askToEnd(finalMessage) {
+    if (!chat.session || chat.busy || chat.session.status === 'ended') return;
+    const typed = !!finalMessage;
+    const ok = await confirmDialog({
+      title: 'End this conversation?',
+      body: (typed ? 'Your message sounds like you are finishing. ' : '') + 'Once it ends you can get your debrief, and you can start a new conversation any time.',
+      ok: 'End conversation', cancel: 'Keep talking',
+    });
+    if (ok) { await endConversation(finalMessage); return; }
+    if (typed) { chatInput.value = finalMessage; chat.keepTalking = finalMessage; chatErr.textContent = ''; $('#chat-voice-hint').textContent = 'Your message is back in the box. Press Send to say it to the persona.'; }
+    chatInput.focus();
+  }
+  async function endConversation(finalMessage) {
     stopChatVoice();
-    try { const d = await api(`/api/personas/session/${chat.session.id}/end`, { method: 'POST' }); chat.session = d.session; setEnded(true); $('#chat-ended').textContent = d.grade && d.grade.posted ? 'This conversation has ended. Completion has been recorded in the course gradebook.' : 'This conversation has ended.'; announce('The conversation has ended. You can get your debrief now.'); $('#debrief-btn').focus(); }
-    catch (e) { chatErr.textContent = friendlyError(e); }
-  });
+    try {
+      const d = await api(`/api/personas/session/${chat.session.id}/end`, { body: { final_message: finalMessage || '' } });
+      if (finalMessage) appendTurn('user', finalMessage);
+      chat.session = d.session; rememberSession(d.session); setEnded(true);
+      $('#chat-ended').textContent = d.grade && d.grade.posted ? 'This conversation has ended. Completion has been recorded in the course gradebook.' : 'This conversation has ended.';
+      renderDebriefState({ state: d.session.debrief_state || 'none', debrief: d.session.debrief });
+      announce('The conversation has ended. You can get your debrief now.'); $('#debrief-btn').focus();
+    } catch (e) { chatErr.textContent = friendlyError(e); if (finalMessage) chatInput.value = finalMessage; }
+  }
   $('#chat-again').addEventListener('click', () => startChat({ fresh: true }));
-  $('#chat-back').addEventListener('click', stopChatVoice);
+  $('#chat-back').addEventListener('click', () => { stopChatVoice(); clearTimeout(chat.pollTimer); });
 
   // ─── After the conversation: debrief, reflection, export ───
-  $('#debrief-btn').addEventListener('click', async () => {
-    if (!chat.session) return;
-    const btn = $('#debrief-btn'); btn.disabled = true; $('#debrief-status').textContent = 'Writing your debrief… about 20 seconds.';
+  // The server keeps the state (none → generating → ready | failed); the button is never hidden until a debrief is stored.
+  function renderDebriefState(st) {
+    const btn = $('#debrief-btn'), status = $('#debrief-status');
+    clearTimeout(chat.pollTimer);
+    if (st.state === 'ready' && st.debrief) { chat.session.debrief = st.debrief; renderDebrief(st.debrief); status.textContent = ''; return; }
+    btn.hidden = false; $('#debrief-body').hidden = true; $('#reflect').hidden = true;
+    if (st.state === 'generating') {
+      btn.disabled = true; btn.textContent = 'Writing your debrief…';
+      status.innerHTML = '<span class="spinner" aria-hidden="true"></span>Writing your debrief. It takes about 15 to 30 seconds; you can leave this page and come back.';
+      if (!chat.debriefBusy) { const sid = chat.session.id; chat.pollTimer = setTimeout(() => pollDebrief(sid), 3000); }
+    } else if (st.state === 'failed') {
+      btn.disabled = false; btn.textContent = 'Retry';
+      status.innerHTML = `<span class="err" style="margin:0">${esc(st.error || 'The debrief could not be written.')} Your conversation is saved. Press Retry to try again.</span>`;
+    } else { btn.disabled = false; btn.textContent = 'Get your debrief'; status.textContent = ''; }
+  }
+  async function pollDebrief(sid) {
+    if (!chat.session || chat.session.id !== sid || chat.debriefBusy) return;
     try {
-      const d = await api(`/api/personas/session/${chat.session.id}/debrief`, { method: 'POST' });
-      chat.session.debrief = d.debrief; renderDebrief(d.debrief); $('#debrief-status').textContent = ''; announce('Your debrief is ready.');
-    } catch (e) { $('#debrief-status').textContent = friendlyError(e); btn.disabled = false; }
+      const st = await api(`/api/personas/session/${sid}/debrief`);
+      if (chat.session?.id !== sid) return;
+      rememberSession({ ...chat.session, debrief_state: st.state }); renderDebriefState(st);
+      if (st.state === 'ready') announce('Your debrief is ready.');
+    } catch { chat.pollTimer = setTimeout(() => pollDebrief(sid), 5000); }
+  }
+  $('#debrief-btn').addEventListener('click', async () => {
+    if (!chat.session || chat.debriefBusy) return;
+    const sid = chat.session.id;
+    chat.debriefBusy = true; renderDebriefState({ state: 'generating' }); announce('Writing your debrief.');
+    const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 120000); chat.debriefAbort = ctl;
+    let st;
+    try {
+      const r = await fetch(apiUrl(`/api/personas/session/${sid}/debrief`), { method: 'POST', credentials: 'include', signal: ctl.signal });
+      const d = await r.json().catch(() => ({}));
+      st = r.ok ? d : { state: 'failed', error: friendlyError(d.error || `Server returned ${r.status}`) };
+    } catch (e) {
+      // Aborted, timed out or the connection dropped. The server may still finish; Retry asks again and picks up its work.
+      st = { state: 'failed', error: e && e.name === 'AbortError' ? 'The request for your debrief was interrupted.' : friendlyError(e) };
+    } finally { clearTimeout(timer); chat.debriefBusy = false; chat.debriefAbort = null; }
+    if (chat.session?.id !== sid) return;
+    if (st.state !== 'failed') rememberSession({ ...chat.session, debrief_state: st.state });
+    renderDebriefState(st);
+    announce(st.state === 'ready' ? 'Your debrief is ready.' : st.state === 'failed' ? 'The debrief could not be written. Press Retry.' : 'Your debrief is being written.');
+  });
+  const KIND_LABEL = { unsafe_advice: 'Unsafe advice', integrity: 'Academic integrity', consent: 'Consent' };
+  /** The debrief as HTML; turn references link to the numbered turns (ids `${prefix}N`). Accepts debriefs stored before turn references. */
+  function debriefHtml(d, prefix) {
+    const refs = (turns) => (turns && turns.length ? ` <span class="refs">(${turns.map((n) => `<a class="turn-ref" href="#${prefix}${n}" data-target="${prefix}${n}">turn ${n}</a>`).join(', ')})</span>` : '');
+    const item = (x) => (typeof x === 'string' ? esc(x) : esc(x.text) + refs(x.turns));
+    const list = (xs) => `<ul>${xs.map((x) => `<li>${item(x)}</li>`).join('')}</ul>`;
+    const overview = Array.isArray(d.overview) ? d.overview : d.overview ? [d.overview] : [];
+    return (d.critical_issues && d.critical_issues.length ? `<section class="critical" aria-labelledby="${prefix}critical-h"><h3 id="${prefix}critical-h">Critical issues</h3><ul>${d.critical_issues.map((c) => `<li><strong>${esc(KIND_LABEL[c.kind] || 'Issue')}.</strong> ${item(c)}</li>`).join('')}</ul></section>` : '') +
+      (overview.length ? `<h3>How it went</h3><p>${overview.map(item).join(' ')}</p>` : '') +
+      (d.by_objective && d.by_objective.length ? `<h3>By objective</h3>${d.by_objective.map((o) => `<div class="obj"><strong>${esc(o.objective)}</strong> ${esc(o.observation)}${refs(o.turns)}</div>`).join('')}` : '') +
+      (d.strengths && d.strengths.length ? `<h3>What went well</h3>${list(d.strengths)}` : '') +
+      (d.explore_further && d.explore_further.length ? `<h3>Worth exploring further</h3>${list(d.explore_further)}` : '') +
+      (d.one_question ? `<h3>One question to carry away</h3><p>${esc(d.one_question)}</p>` : '');
+  }
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest && e.target.closest('a.turn-ref'); if (!a) return;
+    const el = document.getElementById(a.dataset.target); if (!el) return;
+    e.preventDefault(); el.scrollIntoView({ block: 'center' }); el.focus({ preventScroll: true });
+    el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1600);
   });
   function renderDebrief(d) {
     const box = $('#debrief-body'); box.hidden = false; $('#debrief-btn').hidden = true;
-    const li = (xs) => xs.map((x) => `<li>${esc(x)}</li>`).join('');
-    box.innerHTML = `<h3>How it went</h3><p>${esc(d.overview)}</p>` +
-      (d.by_objective && d.by_objective.length ? `<h3>By objective</h3>${d.by_objective.map((o) => `<div class="obj"><strong>${esc(o.objective)}</strong> ${esc(o.observation)}</div>`).join('')}` : '') +
-      (d.strengths && d.strengths.length ? `<h3>What went well</h3><ul>${li(d.strengths)}</ul>` : '') +
-      (d.explore_further && d.explore_further.length ? `<h3>Worth exploring further</h3><ul>${li(d.explore_further)}</ul>` : '') +
-      (d.one_question ? `<h3>One question to carry away</h3><p>${esc(d.one_question)}</p>` : '');
+    box.innerHTML = debriefHtml(d, 'turn-');
     $('#reflect').hidden = false;
   }
   $('#reflect-save').addEventListener('click', async () => {
@@ -983,7 +1203,7 @@
       tbody.appendChild(tr);
     }
   }
-  const toPublic = (p) => ({ id: p.id, template: p.template, title: p.title, subtitle: p.subtitle, summary: p.summary, student_role: p.student_role, setting: p.setting, student_brief: p.student_brief, opening: p.opening, status: p.status, objectives: p.objectives, my_session: null });
+  const toPublic = (p) => ({ id: p.id, template: p.template, title: p.title, subtitle: p.subtitle, summary: p.summary, student_role: p.student_role, setting: p.setting, student_brief: p.student_brief, opening: p.opening, status: p.status, objectives: p.objectives, voice_pref: p.voice_pref, coach: p.coach, my_session: null });
 
   function buildTemplatePicker() {
     const grid = $('#tpl-grid'); grid.innerHTML = '';
@@ -1034,6 +1254,8 @@
       host.appendChild(fs);
     }
     const ol = spec.fields.find((f) => f.key === 'opening_line'); $('#hint-opening_line').textContent = ol ? ol.hint : '';
+    // The case file belongs to simulated clients, the quote book to thinkers; what is typed in a hidden one is kept but not saved.
+    $('#sec-casefile').hidden = template !== 'client'; $('#sec-quotebook').hidden = template !== 'thinker';
     // restore typed values, then seed what is still empty
     for (const [k, v] of Object.entries(prior)) { const el = form.elements[k]; if (el && typeof v === 'string' && !(el instanceof RadioNodeList)) el.value = v; }
     if (seedEmpty) {
@@ -1043,9 +1265,42 @@
   }
   function formValues() {
     const out = {};
-    for (const el of form.elements) { if (el.name && el.type !== 'radio' && el.type !== 'checkbox') out[el.name] = el.value; }
+    for (const el of form.elements) { if (el.name && el.type !== 'radio' && el.type !== 'checkbox' && !/^(cf|qb)_/.test(el.name)) out[el.name] = el.value; }
     out.gradebook = !!form.elements.gradebook.checked;
     return out;
+  }
+  // Case file and quote book: structured on the server, one item per line here, columns split on " | ".
+  const lines = (v) => String(v || '').split('\n').map((x) => x.trim()).filter(Boolean);
+  const cols = (line, n) => { const c = line.split('|').map((x) => x.trim()); while (c.length < n) c.push(''); return c; };
+  const CF_TEXT = ['name', 'preferred_name', 'date_of_birth', 'sex', 'pronouns', 'background', 'presenting_complaint', 'referral_source', 'history', 'allergies', 'social_history'];
+  function caseRecordFromForm() {
+    const f = form.elements; const out = {};
+    for (const k of CF_TEXT) out[k] = f['cf_' + k].value.trim();
+    out.medications = lines(f.cf_medications.value).map((l) => { const [name, how_taken, purpose, patient_words, otc] = cols(l, 5); return { name, how_taken, purpose, patient_words: patient_words.replace(/^["“]|["”]$/g, ''), otc: /^otc$/i.test(otc) }; });
+    out.planted_cues = lines(f.cf_planted_cues.value).map((l) => { const [cue, follow_up, condition] = cols(l, 3); return { cue, follow_up, condition }; });
+    out.disclosure_rules = lines(f.cf_disclosure_rules.value);
+    return out;
+  }
+  function fillCaseRecord(c) {
+    const f = form.elements; c = c || {};
+    for (const k of CF_TEXT) f['cf_' + k].value = c[k] || '';
+    f.cf_medications.value = (c.medications || []).map((m) => [m.name, m.how_taken, m.purpose, m.patient_words ? `"${m.patient_words}"` : '', m.otc ? 'OTC' : ''].join(' | ').replace(/( \| )+$/, '')).join('\n');
+    f.cf_planted_cues.value = (c.planted_cues || []).map((p) => [p.cue, p.follow_up, p.condition].join(' | ').replace(/( \| )+$/, '')).join('\n');
+    f.cf_disclosure_rules.value = (c.disclosure_rules || []).join('\n');
+  }
+  function quoteBookFromForm() {
+    const f = form.elements;
+    return {
+      quotes: lines(f.qb_quotes.value).map((l) => { const [text, source, year] = cols(l, 3); return { text: text.replace(/^["“]|["”]$/g, ''), source, year, note: '' }; }),
+      misattributions: lines(f.qb_misattributions.value).map((l) => { const [text, verdict] = cols(l, 2); return { text: text.replace(/^["“]|["”]$/g, ''), verdict }; }),
+      reading: lines(f.qb_reading.value).map((l) => { const [title, year, note] = cols(l, 3); return { title, year, note }; }),
+    };
+  }
+  function fillQuoteBook(b) {
+    const f = form.elements; b = b || {};
+    f.qb_quotes.value = (b.quotes || []).map((q) => [q.text, q.source, q.year].join(' | ').replace(/( \| )+$/, '')).join('\n');
+    f.qb_misattributions.value = (b.misattributions || []).map((m) => [m.text, m.verdict].join(' | ')).join('\n');
+    f.qb_reading.value = (b.reading || []).map((r) => [r.title, r.year, r.note].join(' | ').replace(/( \| )+$/, '')).join('\n');
   }
   function showPublicLink(p) {
     const box = $('#public-link'); const url = p && p.public_url;
@@ -1073,6 +1328,7 @@
     applyTemplate(template, { seedEmpty: !p });
     if (p) for (const [k, v] of Object.entries(p)) { const el = form.elements[k]; if (el && (typeof v === 'string' || typeof v === 'number') && !(el instanceof RadioNodeList) && el.type !== 'checkbox') el.value = v; }
     form.elements.gradebook.checked = !!(p && p.gradebook);
+    fillCaseRecord(p && p.case_record); fillQuoteBook(p && p.quote_book);
     form.elements.passcode.value = '';
     $('#passcode-hint').textContent = p && p.has_passcode ? 'A passcode is set. Leave empty to keep it, or type a new one.' : 'Needed only for "link and a passcode". Share it with students alongside the link.';
     showPublicLink(p);
@@ -1108,7 +1364,7 @@
         const grade = reportPersona.gradebook || r.grade_posted_at || r.grade_error ? (r.grade_posted_at ? '<span class="chip done">posted</span>' : r.grade_error ? `<span class="chip draft" title="${esc(r.grade_error)}">not posted</span>` : '—') : '—';
         tr.innerHTML = `<td>${esc(r.display_name)}${r.via === 'web' ? ' <span class="chip">web</span>' : ''}</td><td class="muted">${esc(new Date(r.started_at).toLocaleString())}</td>
           <td><span class="chip ${r.status === 'ended' ? 'done' : 'live'}">${r.status === 'ended' ? 'ended' : 'in progress'}</span></td>
-          <td>${r.turns}</td><td>${r.coach_turns || ''}</td><td>${r.debrief ? '✓' : ''}</td><td>${r.reflection ? '✓' : ''}</td><td>${grade}</td>
+          <td>${r.turns}</td><td>${r.coach_turns || ''}</td><td>${r.debrief ? (r.debrief.critical_issues && r.debrief.critical_issues.length ? '<span class="chip draft" title="This debrief lists critical issues">✓ critical</span>' : '✓') : ''}</td><td>${r.reflection ? '✓' : ''}</td><td>${grade}</td>
           <td><button type="button" class="link-btn">Open</button></td>`;
         tr.querySelector('button').addEventListener('click', () => openConversation(r));
         tbody.appendChild(tr);
@@ -1132,12 +1388,17 @@
     try {
       const d = await api(`/api/teacher/personas/${reportPersona.id}/conversations/${r.session_id}`);
       $('#conv-h').textContent = `${d.display_name} · ${new Date(d.session.started_at).toLocaleString()}`;
-      const turns = $('#conv-turns'); turns.innerHTML = '';
-      for (const t of d.turns) { const el = document.createElement('div'); el.className = 'turn ' + t.role; const b = document.createElement('div'); b.className = 'bubble'; if (t.role === 'assistant') { b.dataset.speaker = reportPersona.title; setMd(b, t.content); } else b.textContent = t.content; el.appendChild(b); turns.appendChild(el); }
+      const turns = $('#conv-turns'); turns.innerHTML = ''; turns.classList.add('numbered');
+      d.turns.forEach((t, i) => {
+        const el = document.createElement('div'); el.className = 'turn ' + t.role; el.id = 'conv-turn-' + (i + 1); el.dataset.n = i + 1; el.tabIndex = -1;
+        if (t.role === 'assistant') renderReply(el, t.content, reportPersona.title);
+        else { const b = document.createElement('div'); b.className = 'bubble'; b.textContent = t.content; el.appendChild(b); }
+        turns.appendChild(el);
+      });
       const coach = $('#conv-coach'); const ct = $('#conv-coach-turns'); ct.innerHTML = ''; coach.hidden = !(d.coach_turns && d.coach_turns.length);
       for (const t of d.coach_turns || []) { const el = document.createElement('div'); el.className = 'turn ' + t.role; const b = document.createElement('div'); b.className = 'bubble'; if (t.role === 'assistant') setMd(b, t.content); else b.textContent = t.content; el.appendChild(b); ct.appendChild(el); }
       const db = $('#conv-debrief'); db.hidden = !d.session.debrief;
-      if (d.session.debrief) { const x = d.session.debrief; const li = (xs) => xs.map((v) => `<li>${esc(v)}</li>`).join(''); db.innerHTML = `<h3>Debrief</h3><p>${esc(x.overview)}</p>${(x.by_objective || []).map((o) => `<div class="obj"><strong>${esc(o.objective)}</strong> ${esc(o.observation)}</div>`).join('')}${x.strengths?.length ? `<h3>What went well</h3><ul>${li(x.strengths)}</ul>` : ''}${x.explore_further?.length ? `<h3>Worth exploring further</h3><ul>${li(x.explore_further)}</ul>` : ''}`; }
+      if (d.session.debrief) db.innerHTML = `<h3>Debrief</h3>${debriefHtml(d.session.debrief, 'conv-turn-')}`;
       const rf = $('#conv-reflection'); rf.hidden = !d.session.reflection; rf.querySelector('span').textContent = d.session.reflection || '';
       $('#conv-h').focus();
     } catch (e) { $('#report-err').textContent = friendlyError(e); }
@@ -1148,7 +1409,13 @@
   $('#editor-back').addEventListener('click', () => { $('#persona-editor').hidden = true; $('#personas-admin').hidden = false; loadPersonasAdmin(); });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const payload = { ...formValues(), template: selectedTemplate(), material_ids: $$('input[name=material]:checked').map((c) => Number(c.value)) };
+    const template = selectedTemplate();
+    const payload = {
+      ...formValues(), template, material_ids: $$('input[name=material]:checked').map((c) => Number(c.value)),
+      // Only the section the template shows is saved; another template's record stays as it was stored.
+      case_record: template === 'client' ? caseRecordFromForm() : (editing && editing.case_record) || {},
+      quote_book: template === 'thinker' ? quoteBookFromForm() : (editing && editing.quote_book) || {},
+    };
     $('#editor-err').textContent = ''; $('#editor-status').textContent = 'Saving…';
     try {
       const d = editing ? await api(`/api/teacher/personas/${editing.id}`, { method: 'PUT', body: payload }) : await api('/api/teacher/personas', { body: payload });
@@ -1159,7 +1426,7 @@
   });
   $('#persona-try').addEventListener('click', () => { if (editing) openBrief(toPublic(editing), { preview: true }); });
   $('#persona-delete').addEventListener('click', async () => {
-    if (!editing || !confirm(`Delete "${editing.title}" and every conversation with it? This cannot be undone.`)) return;
+    if (!editing || !(await confirmDialog({ title: `Delete "${editing.title}"?`, body: 'Every conversation with it is deleted too. This cannot be undone.', ok: 'Delete', cancel: 'Keep it' }))) return;
     try { await api(`/api/teacher/personas/${editing.id}`, { method: 'DELETE' }); editing = null; $('#editor-back').click(); }
     catch (err) { $('#editor-err').textContent = friendlyError(err); }
   });
@@ -1191,7 +1458,7 @@
           <td class="muted">${m.source_url ? `<a href="${esc(m.source_url)}" target="_blank" rel="noopener">${esc(safeHost(m.source_url))}</a>` : m.source_key ? 'Moodle course' : 'pasted or uploaded'}${m.unit ? ` · ${esc(m.unit)}` : ''}${m.license ? ` · ${esc(m.license)}` : ''}</td>
           <td>${Math.round(m.chars / 1000)}k chars</td><td><button type="button" class="link-btn">Delete</button></td>`;
         tr.querySelector('button').addEventListener('click', async () => {
-          if (!confirm(`Delete "${m.title}"? Personas that use it will stop citing it.`)) return;
+          if (!(await confirmDialog({ title: `Delete "${m.title}"?`, body: 'Personas that use it will stop citing it.', ok: 'Delete', cancel: 'Keep it' }))) return;
           try { await api(`/api/teacher/materials/${m.id}`, { method: 'DELETE' }); await loadMaterials(); } catch (e) { $('#materials-err').textContent = friendlyError(e); }
         });
         tbody.appendChild(tr);

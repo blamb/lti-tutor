@@ -23,10 +23,12 @@ import { launchHtmlLoader, escapeHtml } from '../../core/lti-provider.js';
 import type { Attribution } from '../../core/costs.js';
 import {
   getPersonaBySlug, publicPersona, passcodeHash, startPersonaSession, getPersonaSession, endPersonaSession, getSessionTurns, visibleTurns,
-  streamPersonaReply, streamCoachReply, coachTurnsFor, getOrGenerateDebrief, saveReflection, transcriptHtml, transcriptMarkdown,
+  streamPersonaReply, streamCoachReply, coachTurnsFor, saveReflection, transcriptHtml, transcriptMarkdown,
   publicSpendToday, studentTurnCount, visitorSessionsToday, PUBLIC_ISS, PUBLIC_SESSIONS_PER_DAY, START_MARKER,
   type Persona, type PersonaSession,
 } from './personas.js';
+import { requestDebrief, debriefStatus, clientSession } from './debrief.js';
+import { hasEndIntent } from './signals.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const loadLaunchHtml = launchHtmlLoader(join(HERE, '..', 'web', 'launch.html'));
@@ -196,7 +198,7 @@ export function registerPublicRoutes(server: Express): void {
       const c = await openCtx(req, res);
       if (!c) return;
       const mine = await latestSession(c.persona.id, c.student.id);
-      res.json({ personas: [{ ...publicPersona(c.persona), my_session: mine ? { id: mine.id, status: mine.status, started_at: mine.started_at, ended_at: mine.ended_at } : null }] });
+      res.json({ personas: [{ ...publicPersona(c.persona), my_session: mine ? { id: mine.id, status: mine.status, started_at: mine.started_at, ended_at: mine.ended_at, debrief_state: debriefStatus(mine).state } : null }] });
     } catch (e) { fail(res, e, 'GET /api/public/:slug/personas'); }
   });
 
@@ -212,7 +214,7 @@ export function registerPublicRoutes(server: Express): void {
       }
       if (startsNew) { const over = await overSpend(c.persona); if (over) return res.status(429).json({ error: over }); }
       const session = await startPersonaSession(c.persona, c.student.id, 'live', { fresh });
-      res.json({ persona: publicPersona(c.persona), session, turns: visibleTurns(await getSessionTurns(session.session_id)), coach_turns: await coachTurnsFor(session) });
+      res.json({ persona: publicPersona(c.persona), session: clientSession(session), turns: visibleTurns(await getSessionTurns(session.session_id)), coach_turns: await coachTurnsFor(session) });
     } catch (e) { fail(res, e, 'POST /api/public/:slug/start'); }
   });
 
@@ -220,7 +222,7 @@ export function registerPublicRoutes(server: Express): void {
     try {
       const o = await ownedSession(req, res);
       if (!o) return;
-      res.json({ persona: publicPersona(o.persona), session: o.session, turns: visibleTurns(await getSessionTurns(o.session.session_id)), coach_turns: await coachTurnsFor(o.session) });
+      res.json({ persona: publicPersona(o.persona), session: clientSession(o.session), turns: visibleTurns(await getSessionTurns(o.session.session_id)), coach_turns: await coachTurnsFor(o.session) });
     } catch (e) { fail(res, e, 'GET /api/public/:slug/session/:sid'); }
   });
 
@@ -235,13 +237,16 @@ export function registerPublicRoutes(server: Express): void {
       const message = begin ? `${START_MARKER}\nThe student has just arrived. Begin.` : String(req.body?.message ?? '').trim().slice(0, 8000);
       if (!message) { send('error', { message: 'message is required' }); return res.end(); }
       if (begin && ((await getSessionTurns(session.session_id)).length > 0 || persona.opening !== 'persona')) { send('done', { already_started: true }); return res.end(); }
+      if (!begin && !req.body?.continue && hasEndIntent(message)) { send('end_intent', { message }); return res.end(); }
       if (!begin && (await studentTurnCount(session.session_id)) >= persona.public_max_turns) {
         send('error', { message: `This conversation has reached its limit of ${persona.public_max_turns} messages. End it to get your debrief, then start a new one if you like.` }); return res.end();
       }
       const over = await overSpend(persona);
       if (over) { send('error', { message: over }); return res.end(); }
       const out = await streamPersonaReply({
-        persona, scope: { iss: persona.lti_iss, contextId: persona.lti_context_id }, session, studentName: student.display_name === 'Visitor' ? 'the student' : student.display_name,
+        persona, scope: { iss: persona.lti_iss, contextId: persona.lti_context_id }, session,
+        // The name a visitor typed at the gate is one they chose for this activity; 'Visitor' and the skip value 'there' are not names.
+        givenName: ['Visitor', 'there'].includes(student.display_name) ? '' : student.display_name,
         userMessage: message, onChunk: (text) => send('chunk', { text }), attribution: attribution(persona, student.id, session.session_id, 'persona.turn'),
       });
       if (out.refused) send('notice', { message: 'The persona declined to continue in that direction. Try a different question, or end the conversation.' });
@@ -277,8 +282,8 @@ export function registerPublicRoutes(server: Express): void {
     try {
       const o = await ownedSession(req, res);
       if (!o) return;
-      const session = o.session.status === 'ended' ? o.session : await endPersonaSession(o.session);
-      res.json({ session, grade: null });
+      const session = o.session.status === 'ended' ? o.session : await endPersonaSession(o.session, String(req.body?.final_message ?? ''));
+      res.json({ session: clientSession(session), grade: null });
     } catch (e) { fail(res, e, 'POST /api/public/:slug/session/:sid/end'); }
   });
 
@@ -288,9 +293,16 @@ export function registerPublicRoutes(server: Express): void {
       if (!o) return;
       if (o.session.status !== 'ended') return res.status(400).json({ error: 'End the conversation first; the debrief looks back at the whole of it.' });
       if (!o.session.debrief) { const over = await overSpend(o.persona); if (over) return res.status(429).json({ error: over }); }
-      const debrief = await getOrGenerateDebrief({ persona: o.persona, session: o.session, studentName: o.student.display_name, attribution: attribution(o.persona, o.student.id, o.session.session_id, 'persona.debrief') });
-      res.json({ debrief });
+      res.json(await requestDebrief({ persona: o.persona, session: o.session, attribution: attribution(o.persona, o.student.id, o.session.session_id, 'persona.debrief') }));
     } catch (e) { fail(res, e, 'POST /api/public/:slug/session/:sid/debrief'); }
+  });
+
+  server.get('/api/public/:slug/session/:sid/debrief', async (req, res) => {
+    try {
+      const o = await ownedSession(req, res);
+      if (!o) return;
+      res.json(debriefStatus(o.session));
+    } catch (e) { fail(res, e, 'GET /api/public/:slug/session/:sid/debrief'); }
   });
 
   server.post('/api/public/:slug/session/:sid/reflection', json, async (req, res) => {
