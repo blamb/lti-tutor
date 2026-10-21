@@ -168,7 +168,12 @@ export interface ConceptRow {
   concept_id: number | null;
   status: ConceptStatus;
   last_seen: string;
+  /** The session that wrote the row, so rows from one session are judged together. */
+  source_tutorial_session_id?: number | null;
 }
+
+/** Rows written within this long of each other, with no session recorded, count as one session. */
+export const SAME_SESSION_MS = 2 * 60 * 1000;
 
 export interface ConceptAggregate {
   /** null for an unmapped wording. */
@@ -191,11 +196,20 @@ const CONCERN: Record<ConceptStatus, number> = { misconception: 0, fragile: 1, d
 function aggregate(groups: Map<string, { concept_id: number | null; concept: string; rows: ConceptRow[] }>): ConceptAggregate[] {
   const out: ConceptAggregate[] = [];
   for (const g of groups.values()) {
+    // Each learner's status comes from their most recent session for this concept; when that session
+    // wrote several rows for it (a misconception, then an idea the tutor explained), the more concerning
+    // one is shown. Same session = same session id, or within SAME_SESSION_MS when none is recorded.
+    const byStudent = new Map<number, ConceptRow[]>();
+    for (const r of g.rows) byStudent.set(r.student_id, [...(byStudent.get(r.student_id) ?? []), r]);
+    const time = (r: ConceptRow) => Date.parse(r.last_seen.replace(' ', 'T').replace(/([+-]\d\d)$/, '$1:00')) || 0;
     const latest = new Map<number, ConceptRow>();
-    for (const r of g.rows) {
-      const prev = latest.get(r.student_id);
-      // Latest wins; rows from the same session tie, and then the more concerning status is shown.
-      if (!prev || r.last_seen > prev.last_seen || (r.last_seen === prev.last_seen && CONCERN[r.status] < CONCERN[prev.status])) latest.set(r.student_id, r);
+    for (const [student, rows] of byStudent) {
+      const newest = rows.reduce((a, b) => (time(b) > time(a) ? b : a));
+      const sameSession = rows.filter((r) =>
+        newest.source_tutorial_session_id != null && r.source_tutorial_session_id != null
+          ? Number(r.source_tutorial_session_id) === Number(newest.source_tutorial_session_id)
+          : time(newest) - time(r) <= SAME_SESSION_MS);
+      latest.set(student, sameSession.reduce((a, b) => (CONCERN[b.status] < CONCERN[a.status] ? b : a)));
     }
     const a: ConceptAggregate = {
       concept_id: g.concept_id, concept: g.concept, learners: latest.size,
@@ -228,7 +242,7 @@ export function aggregateConcepts(rows: ConceptRow[], canon: CourseConcept[]): {
 export async function courseConceptReport(ctx: Scope): Promise<{ concepts: ConceptAggregate[]; unmapped: ConceptAggregate[]; canonical: CourseConcept[] }> {
   const canon = await listCourseConcepts(ctx);
   const rows = await query<ConceptRow>(
-    `select student_id, concept, concept_id, status, last_seen::text from learner_model where lti_iss = $1 and lti_context_id = $2`,
+    `select student_id, concept, concept_id, status, last_seen::text, source_tutorial_session_id from learner_model where lti_iss = $1 and lti_context_id = $2`,
     [ctx.iss, ctx.contextId]
   );
   return { ...aggregateConcepts(rows.map((r) => ({ ...r, student_id: Number(r.student_id), concept_id: r.concept_id === null ? null : Number(r.concept_id) })), canon), canonical: canon };

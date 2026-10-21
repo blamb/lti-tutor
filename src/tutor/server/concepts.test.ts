@@ -143,3 +143,20 @@ test('the fixture is the real data: 18 rows from one student, 19 from the other'
   assert.equal(ROWS.filter((r) => r.student === A).length, 18);
   assert.equal(ROWS.filter((r) => r.student === B).length, 19);
 });
+
+test('within one session the more concerning row shows, even when the timestamps differ by microseconds (as in production)', () => {
+  const at = (t: string) => `2026-10-21 02:20:${t}+00`;
+  const rows: ConceptRow[] = [
+    { student_id: B, concept: 'Separate libc copies per process', status: 'misconception', last_seen: at('02.338100'), concept_id: 11, source_tutorial_session_id: 40 },
+    { student_id: B, concept: 'Shared read-only code pages', status: 'secure', last_seen: at('02.341807'), concept_id: 11, source_tutorial_session_id: 40 },
+  ];
+  const canon = [{ id: 11, label: 'Shared libraries in memory' }];
+  assert.deepEqual(pick(aggregateConcepts(rows, canon).concepts[0]!), [1, 0, 1]);
+  // Without session ids, rows minutes apart are different sessions: the later one wins.
+  const later = rows.map((r, i) => ({ ...r, source_tutorial_session_id: null, last_seen: i ? '2026-10-21 02:40:00.1+00' : r.last_seen }));
+  assert.deepEqual(pick(aggregateConcepts(later, canon).concepts[0]!), [1, 1, 0]);
+  // A later session that shows the idea secure replaces an earlier misconception.
+  const next = [...rows, { ...rows[1]!, concept: 'shared pages', last_seen: '2026-10-22 10:00:00+00', source_tutorial_session_id: 41 }];
+  assert.deepEqual(pick(aggregateConcepts(next, canon).concepts[0]!), [1, 1, 0]);
+});
+const pick = (c: { learners: number; secure: number; misconception: number }) => [c.learners, c.secure, c.misconception];
