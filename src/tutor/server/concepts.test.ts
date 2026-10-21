@@ -116,12 +116,14 @@ test('a corrected or believed claim in a grounded sticking point becomes a misco
       { text: 'Believed each process gets its own copy of libc', quote: 'Every process gets its own copy of libc in RAM' },
       { text: 'Claimed static binaries are smaller', quote: 'static binaries are smaller and faster to start' },
       { text: 'Unsure how to start', quote: 'nothing needs resolving' },
+      { text: 'Predicted static binaries are smaller, which contradicts Learning Activity 5 Step 4', quote: 'static binaries are smaller and faster' },
     ],
   });
   assert.deepEqual(added.map((a) => [a.concept, a.status]), [
     ['Believed each process gets its own copy of libc', 'misconception'],
     ['Claimed static binaries are smaller', 'misconception'],
   ]);
+  // A second sticking point on the same words is not recorded twice.
 });
 
 test('a misconception the brief lists, stated by the student, is recorded once', () => {

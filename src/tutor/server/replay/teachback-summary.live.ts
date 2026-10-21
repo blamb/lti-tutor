@@ -62,7 +62,7 @@ test('Finding 4: "yes" to a recap does not complete the teach-back', { skip: !li
 
 test('Finding 2: a session ending in "yes" gets no restating credit and no teach-back', { skip: !live }, async () => {
   const turns = [...round1ToRecap, t('user', ROUND_1_YES)];
-  const { summary, dropped } = await summarizeRun({ tutorial: hero, brief: await briefFor(hero, ctx), turns, studentName: 'Test Student1', attribution });
+  const { summary, dropped } = await summarizeRun({ tutorial: hero, brief: await briefFor(hero, ctx), turns, studentName: 'Test Student1', attribution, materials: MATERIALS });
   console.log('\nround 1 summary:', JSON.stringify(summary, null, 1), '\ndropped:', dropped);
   const all = JSON.stringify(summary);
   assert.doesNotMatch(all, /accurately restated|self-correct|caught yourself|in your mind/i);
@@ -71,7 +71,7 @@ test('Finding 2: a session ending in "yes" gets no restating credit and no teach
 });
 
 test('Finding 2: a real teach-back is credited', { skip: !live }, async () => {
-  const { summary, dropped } = await summarizeRun({ tutorial: hero, brief: await briefFor(hero, ctx), turns: round2, studentName: 'Test Student2', attribution });
+  const { summary, dropped } = await summarizeRun({ tutorial: hero, brief: await briefFor(hero, ctx), turns: round2, studentName: 'Test Student2', attribution, materials: MATERIALS });
   console.log('\nround 2 summary:', JSON.stringify(summary, null, 1), '\ndropped:', dropped);
   assert.notEqual((summary as unknown as { teachback: string }).teachback, NO_TEACH_BACK);
   assert.ok(summary.understood.length >= 2, 'the student explained several things in their own words');

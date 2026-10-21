@@ -110,3 +110,51 @@ export const round2: Turn[] = [
   t('user', 'Each .c file becomes an object file on its own, with promises and offers. The compiler trusts the prototype, so main.c compiles even if nobody defines add_member. Then the linker has to match every promise, every undefined symbol, to exactly one definition in some object file. Leave out members.c and nothing offers add_member, so ld reports an undefined reference even though everything compiled.'),
   t('assistant', 'That is a clear explanation, with the linker doing the matching and add_member as your example. You can click "Finish tutorial" to get your summary.'),
 ];
+
+/**
+ * The live "Getting started on Assignment 3 Part B" brief (tutorial 8 on
+ * moodbox course 14), read through the instructor API on 2026-10-20. Its
+ * FIRST-STEP note says not to correct the prediction, which is where round 2's
+ * "shop_a will be noticeably smaller" was left standing (Finding 1).
+ */
+export const partB: Tutorial = {
+  ...hero,
+  id: 8,
+  kind: 'assignment_start',
+  title: 'Getting started on Assignment 3 Part B (linking questions)',
+  learning_goal: 'When they leave, the student can say in their own words what the linking part of Assignment 3 Part B asks for (diagnose multi-file programs with symbol conflicts or undefined references; explain the static versus dynamic trade-off; back every claim with terminal evidence), has chosen an order of attack, and has taken one real first step themselves: a prediction, a build command, or a one-sentence claim.',
+  opening_question: 'You are about to start the linking part of Assignment 3 Part B. Before any code: in your own words, what are the two kinds of thing it asks you to produce, and what counts as evidence for each?',
+  ta_brief: `What the assignment requires (from the module's own description; the full assignment page is not in the materials, so do not invent programs, marks or criteria): (1) diagnose multi-file C programs that contain symbol conflicts, undefined references or run-time errors; (2) explain the trade-offs between static and dynamic linking; (3) written explanations supported by terminal evidence of compilation, linking and execution. Module 9 adds exceptions and processes; this session covers only the linking part. If the student asks what specific programs they will be given, say the assignment page has them and that the module's Learning Activity 3 and 5 programs are the model.
+
+UNPACK: ask them to restate the task. Probe the one part students miss: "supported by terminal evidence" means the build commands and their output, not a description of them. Ask what evidence of a failed link looks like (the ld message, the nm listing) and what evidence of the trade-off looks like (ls -l sizes, ldd output, the before-and-after run of Learning Activity 5 Step 5).
+
+CONNECT: which activity bears on which part? Learning Activity 3 (library program: Scenarios A, B, C; nm; Step 5 dialog cards "Compiler or Linker?") for the diagnosis part. Learning Activity 5 (shop_a, shop_full, shop_so; Step 4 sizes and ldd; Step 5 update only the libraries; Step 7 self-check scenarios) for the trade-off part. Topic 3 "Symbol Resolution" and Topic 6 for the passages. Ask what they remember of each before sending them there; do not summarise it.
+
+PLAN: have them name the parts in order. A sound plan: for each broken program, predict, build, capture the message, read it from the inside out, run nm, explain, fix; then for the trade-off, build both versions, collect sizes and ldd, update the library, rerun, and write the claim the evidence supports.
+
+FIRST-STEP: pick a prompt from the first-step prompts below and have them do it now, in words. Respond with one strength and one question. Do not correct the prediction; tell them to run the build to settle it.
+
+Decline any request to write an explanation, a diagnosis or a paragraph in one sentence, then ask the question that lets them write it. Never say what mark the work would get.`,
+  misconceptions: `"If my code compiles, it will link." Question: you declared a function but defined it in no file; which program catches that, and when?
+"Terminal evidence means saying what I ran." Question: if a marker wanted to check your diagnosis, what would they need to see on the page?
+"Updating a shared library fixes every program that uses it." Question: after rebuilding only libdeal.so in Learning Activity 5, which of shop_a and shop_so printed the new price, and why?
+"The trade-off is just that dynamic is better." Question: in the Learning Activity 5 self-check, why was static linking the right choice for the medical device?
+"The assignment wants me to fix the program as fast as possible." Question: what does the assignment ask you to submit, the fixed program or the explanation of why it failed?`,
+  success_criteria: `Ready to continue alone: restates both parts of the task and names terminal output as the evidence; maps Learning Activity 3 to the diagnosis part and Learning Activity 5 to the trade-off part without being told; has an ordered plan (predict, build, capture, read, nm, explain, fix; then sizes, ldd, update, rerun, claim); and has made one real prediction or written one real claim in their own words.
+Developing: understands the task but the plan is a list of topics rather than steps, or the first step is vague.
+Needs work: thinks the deliverable is a working program, or cannot say which activity bears on which part.`,
+  practice_prompts: `(From Learning Activity 3, Scenario A) Before building the library program without members.c, write one sentence predicting which program reports the error and exactly what it says.
+(From Learning Activity 3, Scenario B) Remove static from log_count in both files. Predict the message, then say in one sentence which fix you would choose and why: extern, or static in both.
+(From Learning Activity 3, Step 2) Name one symbol that is U in main.o and say which file you expect to define it, before you run nm on that file.
+(From Learning Activity 5, Step 5) Write the one-sentence claim you will defend about which of shop_a and shop_so picks up a rebuilt libdeal.so, and list the two commands whose output would prove it.
+(From Learning Activity 5, Step 7) Pick one of the three scenarios and state, in one sentence, which kind of linking you would choose and the single strongest reason.
+List, in order, the terminal commands you would run to collect the evidence for one diagnosis, from building to reading the symbol table.`,
+  target_minutes: 15,
+};
+
+/** Round 2, Part B start: the student states the false size claim twice. */
+export const partBRound2: Turn[] = [
+  t('assistant', 'Hi Test, this session is for getting started on the linking part of Assignment 3 Part B, not for writing it. Before any code: in your own words, what are the two kinds of thing it asks you to produce, and what counts as evidence for each?'),
+  t('user', 'First, diagnose the broken multi-file programs: the evidence is the actual ld error and the nm listing. Second, explain static versus dynamic linking. For the second I\'d show that static binaries are smaller and faster to start because nothing needs resolving at load time, using ls -l and time.'),
+];
+export const PART_B_SIZE_PREDICTION = 'My first prediction: shop_a will be noticeably smaller than shop_so on disk.';

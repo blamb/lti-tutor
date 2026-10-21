@@ -479,7 +479,9 @@ function buildTutorialRules(d: Delivery, kind: TutorialKind): string {
   const spec = KINDS[kind];
   const shared = [
     'One question per turn. Never stack questions.',
-    'Don\'t hand over answers the student could be guided to. When they\'re wrong, ask the question that exposes the contradiction rather than saying "no".',
+    'Don\'t hand over answers the student could be guided to. When their reasoning goes wrong, ask the question that exposes the contradiction rather than saying "no".',
+    'Before you acknowledge a student turn, check every factual claim in it against the course materials and the misconceptions in the brief. If a claim is false, do not praise or agree with that turn (no "good", "exactly", "right direction", "spot on", "I like that") and never build on the claim. Unless the kind-specific rules below say to note misconceptions without correcting them, say plainly in one sentence what is actually the case ("Actually, …" or "Not quite: …"), then ask one question that lets them apply it. Pushing back with only a question is not enough for a false fact: they must hear the correct fact from you in that same reply. You may still credit a different part of the turn that is right, by name ("the first part is right"), before the correction.',
+    'A prediction the student is about to test may be left for their output to settle if the brief says so, but never call a false prediction good or likely, never plan the next step as if it were true, and tell them to check it against what the terminal shows.',
     "Use the student's own words back to them when probing.",
     'Vary technique: definition-probing, counter-example, cause-effect chain, zooming in and out between detail and big picture, analogy stress-test.',
     "If the student raises something correct that's adjacent to the goal, credit it briefly before steering back.",
@@ -582,6 +584,9 @@ function askedAt(turns: Pick<Turn, 'role' | 'content'>[]): number | null {
 /** The progress note, the one uncached block: changes at stage transitions and while a teach-back is held. */
 export function progressNote(studentTurns: number, target: number, stage: string, teachBack: TeachBackState): string {
   let note = `# PROGRESS NOTE\nStudent turns so far: ${studentTurns} of about ${target}. Current stage: ${stage}.`;
+  if (studentTurns > 0) {
+    note += "\nBefore you reply, check each statement of fact in the student's last message against the materials. If one is false, your reply opens by stating the correct fact in one plain sentence (\"Actually, …\"), with no praise for that part, unless the kind-specific rules say to note misconceptions without correcting them. A prediction they are about to test is not a statement of fact: follow the brief, never call it good, and send them to check it against their output.";
+  }
   if (stage === 'TEACH-BACK' && teachBack === 'not_reached') {
     note += "\nUnless the student's last answer left a question open, this is the turn to ask for the teach-back: one open question asking them to explain the core idea in their own words, as the brief describes. Do not explain anything yourself.";
   } else if (teachBack === 'waiting') {
@@ -842,6 +847,7 @@ Evidence rules. These matter more than anything else here:
 - An idea the tutor stated first, which the student only agreed with or repeated, is "agreed" or "told", never "explained".
 - Never claim the student corrected themselves, worked something out "in their mind", did something "on their own" or ran anything, unless a quoted student turn shows exactly that.
 - A topic only the tutor raised is not one of the student's sticking points.
+- Check what the student claimed against the course materials. A false claim they made and did not give up by the end of the transcript is a sticking point worded "Holds the false belief that …", quoting them. It is never something they understood, never part of their plan, and never their next step, even if the tutor let it pass.
 
 Return ONLY a JSON object, no code fences, with exactly these keys:
 {
@@ -873,12 +879,17 @@ export async function summarizeRun(params: {
   turns: Turn[];
   studentName: string;
   attribution: Attribution;
+  /** The session's materials, so the summary can check the student's claims against them (Finding 1). */
+  materials?: Material[];
 }): Promise<{ summary: TutorialSummary; dropped: string[]; evidence: GroundedEvidence; studentTexts: string[] }> {
   const { tutorial, brief, turns, studentName, attribution } = params;
   const texts = studentTexts(turns);
+  const system: Anthropic.TextBlockParam[] = [{ type: 'text', text: summarySystemFor(tutorial.kind) }];
+  const grounding = materialsBlock(params.materials ?? []);
+  if (grounding) system.push({ type: 'text', text: grounding, cache_control: { type: 'ephemeral' } });
   const draft = await jsonCall({
     schema: DraftSummary,
-    system: summarySystemFor(tutorial.kind),
+    system,
     userPrompt:
       `${brief}\n\n# TRANSCRIPT\n${transcriptText(turns, studentName) || '(the student did not say anything)'}\n\nWrite the JSON summary now.`,
     maxTokens: 1500,
@@ -905,6 +916,7 @@ export async function completeTutorialSession(params: {
   const turns = await getSessionTurns(tutorialSession.session_id);
   const { summary, dropped, evidence, studentTexts: texts } = await summarizeRun({
     tutorial, brief: await briefFor(tutorial, ctx), turns, studentName: student.display_name, attribution,
+    materials: await getMaterials(tutorial.material_ids, ctx),
   });
   if (dropped.length) console.info(`summary grounding, tutorial_session ${tutorialSession.id}: dropped ${dropped.length} unsupported item(s)`);
 

@@ -207,7 +207,7 @@ export function listedClaims(misconceptions: string): string[] {
   return out;
 }
 
-const CORRECTED = /\b(corrected|believed|thought|assumed|claimed|insisted|mix(ed)?[- ]?up|misconception|confus(ed|es|ing)\b.*\bwith)\b/i;
+const CORRECTED = /\b(corrected|believed|thought|assumed|claimed|insisted|false belief|contradicts?|incorrect|mix(ed)?[- ]?up|misconception|confus(ed|es|ing)\b.*\bwith)\b/i;
 
 export interface GuardContext {
   kind: Tutorial['kind'];

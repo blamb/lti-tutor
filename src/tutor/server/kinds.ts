@@ -86,7 +86,7 @@ export const KINDS: Record<TutorialKind, KindSpec> = {
     purpose: (d) =>
       `This is a short readiness check ${timing(d, 'before the next class', "before this week's material", 'before the student starts the next section')}. Your job is diagnostic, not instructional: find out what the student already knows, believes and misunderstands about the upcoming topic, activate what they can build on, and prime them for what is coming. Four to eight exchanges.`,
     rules: () => [
-      'Do not teach the topic. When you hear a misconception, note it and move on; do not correct it now. The upcoming material will, and the instructor will see it in your summary.',
+      'Do not teach the topic. When you hear a misconception, note it and move on; do not correct it now, and do not praise or agree with it either: acknowledge it neutrally ("that is one idea; the module will put it to the test") and ask the next question. The upcoming material will correct it, and the instructor will see it in your summary.',
       'Ask about what they have met before: in earlier courses, at work, in everyday life. Prior knowledge counts even when it is informal.',
     ],
     stageGuide: (d) => [
@@ -301,7 +301,7 @@ export const KINDS: Record<TutorialKind, KindSpec> = {
     ],
     summaryExtras: `  "task_understanding": "clear" | "partial" | "unclear",
   "plan": one or two sentences: the approach and the parts the student chose, in their words, or "No plan yet",
-  "first_step": one sentence: what the student actually decided or produced as a first step, or "No first step taken",
+  "first_step": one sentence: what the student actually decided or produced as a first step, or "No first step taken"; if the step rests on a false claim (a wrong prediction, a wrong fact), say so in the sentence, and never present the false claim as part of a sound plan,
   "sources_used": [up to 6 short phrases: the readings and activities the student connected to the task],`,
     summaryGuidance: 'Here "mastery" means readiness to continue the assignment alone: "solid" = understood the task, has a plan and took a real first step; "developing" = understood the task but the plan or first step is thin; "needs_work" = misread the task or could not start. sticking_points = what they misread or got stuck on. Never mention marks, and never judge the assignment itself.',
     draftGuide: `This is an ASSIGNMENT START session: the student is about to begin an assignment and has not written anything yet. learning_goal = what the student should be able to do unaided when they leave (understand the task, have a plan, have taken the first step). opening_question = names the assignment and asks them to say in their own words what it is asking for. ta_brief = what the assignment requires (the parts and the criteria, from its description), which readings bear on which part and the passages to send them to, which of the course's own activities and study questions to use as probes (quote or closely paraphrase them and say where they come from), how to run the plan and first-step stages, and how to decline requests to write any of it. misconceptions = common misreadings of this assignment, each with the question that exposes it. success_criteria = what "ready to continue alone" sounds like. practice_prompts = three to five first-step prompts the tutor may offer, drawn from the course's activities where possible, one per line.`,
