@@ -29,7 +29,10 @@
  *   POST       /api/teacher/materials/upload     multipart 'file' -> { material, truncated, original_chars }
  *   POST       /api/teacher/materials/import-backup         multipart 'file' (.mbz) -> preview { course, units, skipped }
  *   POST       /api/teacher/materials/import-backup/commit  { items: [...] } -> { created, updated, materials }
- *   GET/POST   /api/teacher/tutorials, PUT/DELETE /api/teacher/tutorials/:id
+ *   GET/POST   /api/teacher/tutorials, PUT/DELETE /api/teacher/tutorials/:id   (each with key_concepts, one per line)
+ *   GET        /api/teacher/concepts             -> { concepts (by canonical concept), unmapped, canonical, by_week }
+ *   POST       /api/teacher/concepts/map         { wording, concept_id|null } -> { updated }   (review an unmapped wording)
+ *   POST       /api/teacher/concepts/remap       -> { mapped, unmapped }   (match every unmapped wording)
  *   POST       /api/teacher/tutorials/draft      { material_ids, topic, pitch? } -> { draft }
  *   GET        /api/teacher/tutorials/:id/report -> TutorialReport (+ stored debrief, delivery state)
  *   GET        /api/teacher/tutorials/:id/report.csv -> one row per run, no names
@@ -58,7 +61,8 @@ import { courseCtxFromToken, CourseSettingsInput, upsertCourseSettings, courseCt
 import { deleteMyData } from './retention.js';
 import { TRUFLEX_MODES, deliveryLabels } from './delivery.js';
 import { isTutorialKind, kindCatalog, titledForKind, KINDS } from './kinds.js';
-import { listLearnerModel, deleteLearnerEntry, courseConceptReport, courseConceptsByWeek } from './learner.js';
+import { listLearnerModel, deleteLearnerEntry, courseConceptsByWeek } from './learner.js';
+import { courseConceptReport, setWordingConcept, remapUnmapped, keyConceptsText } from './concepts.js';
 import { importFromUrl, extractFromFile, fitMaterial, ImportError, MAX_BOOK_CHAPTERS } from '../../core/importers.js';
 import { ensurePrintScript, printScriptHtml, personalDebriefHtml, buildCoursePack } from './print.js';
 import {
@@ -574,13 +578,42 @@ lti.app.get('/api/teacher/concepts', async (req: Request, res: Response) => {
   try {
     const t = await teacherCtx(res);
     if (!t) return;
-    const concepts = await courseConceptReport(t.ctx);
+    const report = await courseConceptReport(t.ctx);
     const byWeek = t.ctx.delivery.hasFixedDates && t.ctx.settings.course_start
       ? await courseConceptsByWeek(t.ctx, t.ctx.settings.course_start)
       : null;
-    res.json({ concepts, by_week: byWeek, course_start: t.ctx.settings.course_start, has_fixed_dates: t.ctx.delivery.hasFixedDates });
+    res.json({ ...report, by_week: byWeek, course_start: t.ctx.settings.course_start, has_fixed_dates: t.ctx.delivery.hasFixedDates });
   } catch (e) {
     fail(res, e, 'GET /api/teacher/concepts');
+  }
+});
+
+const ConceptMapInput = z.object({ wording: z.string().trim().min(1).max(200), concept_id: z.number().int().positive().nullable() });
+
+lti.app.post('/api/teacher/concepts/map', async (req: Request, res: Response) => {
+  try {
+    const t = await teacherCtx(res);
+    if (!t) return;
+    const { wording, concept_id } = ConceptMapInput.parse(req.body ?? {});
+    try {
+      res.json({ updated: await setWordingConcept(t.ctx, wording, concept_id) });
+    } catch (e) {
+      if ((e as { status?: number }).status === 400) return res.status(400).json({ error: (e as Error).message });
+      throw e;
+    }
+  } catch (e) {
+    fail(res, e, 'POST /api/teacher/concepts/map');
+  }
+});
+
+lti.app.post('/api/teacher/concepts/remap', async (req: Request, res: Response) => {
+  try {
+    const t = await teacherCtx(res);
+    if (!t) return;
+    const me = await studentFromToken(t.token);
+    res.json(await remapUnmapped(t.ctx, attr(t.token, me.id, null, 'tutorial.concept_match')));
+  } catch (e) {
+    fail(res, e, 'POST /api/teacher/concepts/remap');
   }
 });
 
@@ -765,8 +798,9 @@ lti.app.get('/api/teacher/tutorials', async (req: Request, res: Response) => {
       [tutorials.map((x) => x.id)]
     );
     const byId = new Map(counts.map((c) => [c.tutorial_id, c]));
+    const withConcepts = await Promise.all(tutorials.map(async (x) => ({ ...x, key_concepts: await keyConceptsText(x.concept_ids ?? [], t.ctx) })));
     res.json({
-      tutorials: tutorials.map((x) => ({ ...x, started: byId.get(x.id)?.started ?? 0, completed: byId.get(x.id)?.completed ?? 0 })),
+      tutorials: withConcepts.map((x) => ({ ...x, started: byId.get(x.id)?.started ?? 0, completed: byId.get(x.id)?.completed ?? 0 })),
       ags_available: !!t.token.platformContext.endpoint,
     });
   } catch (e) {
@@ -779,7 +813,8 @@ lti.app.post('/api/teacher/tutorials', async (req: Request, res: Response) => {
     const t = await teacherCtx(res);
     if (!t) return;
     const me = await studentFromToken(t.token);
-    res.json({ tutorial: await createTutorial(t.ctx, TutorialInput.parse(req.body ?? {}), me.id) });
+    const tutorial = await createTutorial(t.ctx, TutorialInput.parse(req.body ?? {}), me.id);
+    res.json({ tutorial: { ...tutorial, key_concepts: await keyConceptsText(tutorial.concept_ids, t.ctx) } });
   } catch (e) {
     fail(res, e, 'POST /api/teacher/tutorials');
   }
@@ -793,7 +828,7 @@ lti.app.put('/api/teacher/tutorials/:id', async (req: Request, res: Response) =>
     if (!id) return res.status(400).json({ error: 'bad tutorial id' });
     const tutorial = await updateTutorial(id, t.ctx, TutorialInput.parse(req.body ?? {}));
     if (!tutorial) return res.status(404).json({ error: 'tutorial not found' });
-    res.json({ tutorial });
+    res.json({ tutorial: { ...tutorial, key_concepts: await keyConceptsText(tutorial.concept_ids, t.ctx) } });
   } catch (e) {
     fail(res, e, 'PUT /api/teacher/tutorials/:id');
   }

@@ -44,6 +44,7 @@ import type { Delivery } from './delivery.js';
 import { KINDS, TUTORIAL_KINDS, stageForRun, keyTermsFor, teachBackAskedAt, type TeachBackState, type TutorialKind } from './kinds.js';
 import { jsonCall, textOf } from '../../core/llm.js';
 import { listLearnerModel, learnerModelBlock, recallCandidates, recallCandidatesBlock, updateLearnerModelFromSummary } from './learner.js';
+import { ensureCourseConcepts, parseConceptLines, listCourseConcepts } from './concepts.js';
 
 export type { CourseCtx } from './courses.js';
 // Materials live in core (both apps store them the same way); re-exported so
@@ -81,6 +82,8 @@ export interface Tutorial {
   week: number | null;
   due_at: string | null;
   material_ids: number[];
+  /** Canonical concepts this brief covers (concepts.ts), in the instructor's order. */
+  concept_ids: number[];
   target_minutes: number;
   gradebook: boolean;
   status: TutorialStatus;
@@ -239,6 +242,8 @@ export const TutorialInput = z.object({
   week: z.number().int().min(1).max(60).nullable().default(null),
   due_at: z.string().nullable().default(null).refine((v) => v === null || Number.isFinite(Date.parse(v)), 'due_at must be a date'),
   material_ids: z.array(z.number().int().positive()).max(20).default([]),
+  /** Key concepts, one per line; stored as canonical concept ids shared across the course. */
+  key_concepts: z.string().max(6000).nullable().default('').transform((v) => v ?? ''),
   target_minutes: z.number().int().min(5).max(60).default(15),
   gradebook: z.boolean().default(false),
   status: z.enum(['draft', 'published', 'archived']).default('draft'),
@@ -339,17 +344,18 @@ export async function createTutorial(ctx: CourseCtx, input: TutorialInput, creat
   const materialIds = await validMaterialIds(input.material_ids, ctx);
   const recallIds = await validRecallIds(input.recall_tutorial_ids, ctx, null);
   const after = await validSuggestedAfter(input.suggested_after_tutorial_id, ctx, null);
+  const conceptIds = await ensureCourseConcepts(ctx, parseConceptLines(input.key_concepts));
   const rows = await query<Tutorial>(
     `insert into tutorial
        (lti_iss, lti_context_id, title, learning_goal, opening_question, ta_brief, misconceptions,
         success_criteria, pitch, kind, practice_prompts, recall_tutorial_ids, material_ids,
-        target_minutes, gradebook, status, created_by, suggested_after_tutorial_id, week, due_at)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::bigint[],$13::bigint[],$14,$15,$16,$17,$18,$19,$20::timestamptz) returning *`,
+        target_minutes, gradebook, status, created_by, suggested_after_tutorial_id, week, due_at, concept_ids)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::bigint[],$13::bigint[],$14,$15,$16,$17,$18,$19,$20::timestamptz,$21::bigint[]) returning *`,
     [
       ctx.iss, ctx.contextId, input.title, input.learning_goal, input.opening_question,
       input.ta_brief, input.misconceptions, input.success_criteria, input.pitch,
       input.kind, input.practice_prompts, recallIds, materialIds,
-      input.target_minutes, input.gradebook, input.status, createdBy, after, input.week, input.due_at,
+      input.target_minutes, input.gradebook, input.status, createdBy, after, input.week, input.due_at, conceptIds,
     ]
   );
   return rows[0]!;
@@ -359,18 +365,19 @@ export async function updateTutorial(id: number, ctx: CourseCtx, input: Tutorial
   const materialIds = await validMaterialIds(input.material_ids, ctx);
   const recallIds = await validRecallIds(input.recall_tutorial_ids, ctx, id);
   const after = await validSuggestedAfter(input.suggested_after_tutorial_id, ctx, id);
+  const conceptIds = await ensureCourseConcepts(ctx, parseConceptLines(input.key_concepts));
   const rows = await query<Tutorial>(
     `update tutorial set
        title = $4, learning_goal = $5, opening_question = $6, ta_brief = $7, misconceptions = $8,
        success_criteria = $9, pitch = $10, kind = $11, practice_prompts = $12, recall_tutorial_ids = $13::bigint[],
        material_ids = $14::bigint[], target_minutes = $15, gradebook = $16, status = $17,
-       suggested_after_tutorial_id = $18, week = $19, due_at = $20::timestamptz, updated_at = now()
+       suggested_after_tutorial_id = $18, week = $19, due_at = $20::timestamptz, concept_ids = $21::bigint[], updated_at = now()
      where id = $1 and lti_iss = $2 and lti_context_id = $3 returning *`,
     [
       id, ctx.iss, ctx.contextId, input.title, input.learning_goal, input.opening_question,
       input.ta_brief, input.misconceptions, input.success_criteria, input.pitch,
       input.kind, input.practice_prompts, recallIds, materialIds,
-      input.target_minutes, input.gradebook, input.status, after, input.week, input.due_at,
+      input.target_minutes, input.gradebook, input.status, after, input.week, input.due_at, conceptIds,
     ]
   );
   return rows[0] ?? null;
@@ -755,7 +762,7 @@ function sentences(s: string): string[] {
 export function groundSummary(
   draft: DraftSummary,
   opts: { turns: Pick<Turn, 'role' | 'content'>[]; studentName: string; teachBack: TeachBackState }
-): { summary: Omit<TutorialSummary, 'turns'>; dropped: string[] } {
+): { summary: Omit<TutorialSummary, 'turns'>; dropped: string[]; evidence: GroundedEvidence } {
   const turns = opts.turns.filter((t) => !t.content.startsWith(START_MARKER));
   const said = turns.map((t) => (t.role === 'user' ? norm(t.content) : null));
   const turnOf = (q: string) => { const n = norm(q); return n.length ? said.findIndex((t) => t !== null && t.includes(n)) : -1; };
@@ -775,12 +782,14 @@ export function groundSummary(
 
   const understood: string[] = [];
   const told: string[] = [];
+  const evidence: GroundedEvidence = { understood: [], sticking: [] };
   for (const it of draft.understood) {
     if (SELF_CORRECTION.test(it.text)) { dropped.push(`understood: ${it.text} (self-correction claim)`); continue; }
     const found = inStudentTurn(it.quote);
     const credit = EXPLAINING_CREDIT.test(it.text);
     if (it.source === 'explained' && found && wordCount(it.quote) >= EXPLAINED_QUOTE_MIN_WORDS && !echoesTutor(it.quote) && (passedTeachBack || !credit)) {
       understood.push(it.text);
+      evidence.understood.push({ text: it.text, quote: it.quote });
     } else if (credit) {
       dropped.push(`understood: ${it.text} (explaining credit without a teach-back)`);
     } else if (it.source !== 'explained' || found) {
@@ -791,7 +800,7 @@ export function groundSummary(
   }
   const sticking: string[] = [];
   for (const it of draft.sticking_points) {
-    if (inStudentTurn(it.quote)) sticking.push(it.text);
+    if (inStudentTurn(it.quote)) { sticking.push(it.text); evidence.sticking.push({ text: it.text, quote: it.quote }); }
     else dropped.push(`sticking: ${it.text} (quote not in any student turn)`);
   }
 
@@ -814,7 +823,13 @@ export function groundSummary(
     (summary as unknown as { teachback: string }).teachback =
       opts.teachBack === 'explained' ? draft.teachback : opts.teachBack === 'not_reached' ? TEACH_BACK_NOT_REACHED : NO_TEACH_BACK;
   }
-  return { summary, dropped };
+  return { summary, dropped, evidence };
+}
+
+/** The kept items with the student's quotes: passed to the learner model in memory, never stored (instructors never see transcript text). */
+export interface GroundedEvidence {
+  understood: Array<{ text: string; quote: string }>;
+  sticking: Array<{ text: string; quote: string }>;
 }
 
 function summarySystemFor(kind: TutorialKind): string {
@@ -858,7 +873,7 @@ export async function summarizeRun(params: {
   turns: Turn[];
   studentName: string;
   attribution: Attribution;
-}): Promise<{ summary: TutorialSummary; dropped: string[] }> {
+}): Promise<{ summary: TutorialSummary; dropped: string[]; evidence: GroundedEvidence; studentTexts: string[] }> {
   const { tutorial, brief, turns, studentName, attribution } = params;
   const texts = studentTexts(turns);
   const draft = await jsonCall({
@@ -873,8 +888,8 @@ export async function summarizeRun(params: {
     preprocess: (raw) => (raw && typeof raw === 'object' ? { ...(raw as object), kind: tutorial.kind } : raw),
   });
   const { teachBack } = stageForRun(tutorial.kind, texts, tutorial.target_minutes, keyTermsFor(tutorial), askedAt(turns));
-  const { summary, dropped } = groundSummary(draft, { turns, studentName, teachBack });
-  return { summary: { ...summary, turns: texts.length } as TutorialSummary, dropped };
+  const { summary, dropped, evidence } = groundSummary(draft, { turns, studentName, teachBack });
+  return { summary: { ...summary, turns: texts.length } as TutorialSummary, dropped, evidence, studentTexts: texts };
 }
 
 export async function completeTutorialSession(params: {
@@ -888,7 +903,7 @@ export async function completeTutorialSession(params: {
   if (tutorialSession.status === 'completed' && tutorialSession.summary) return tutorialSession.summary;
 
   const turns = await getSessionTurns(tutorialSession.session_id);
-  const { summary, dropped } = await summarizeRun({
+  const { summary, dropped, evidence, studentTexts: texts } = await summarizeRun({
     tutorial, brief: await briefFor(tutorial, ctx), turns, studentName: student.display_name, attribution,
   });
   if (dropped.length) console.info(`summary grounding, tutorial_session ${tutorialSession.id}: dropped ${dropped.length} unsupported item(s)`);
@@ -903,7 +918,7 @@ export async function completeTutorialSession(params: {
   ]);
   // One more small call: fold the summary into the learner model. Best-effort.
   try {
-    await updateLearnerModelFromSummary({ student, ctx, tutorial, summary, tutorialSessionId: tutorialSession.id, attribution });
+    await updateLearnerModelFromSummary({ student, ctx, tutorial, summary, tutorialSessionId: tutorialSession.id, attribution, studentTexts: texts, evidence });
   } catch (e) {
     console.warn(`learner model: update failed for tutorial_session ${tutorialSession.id}:`, (e as Error).message);
   }
@@ -1248,6 +1263,7 @@ export const DraftBrief = z.object({
   misconceptions: textOrLines(z.string()),
   success_criteria: textOrLines(z.string()),
   practice_prompts: textOrLines(z.string()).default(''),
+  key_concepts: textOrLines(z.string()).default(''),
 });
 export type DraftBrief = z.infer<typeof DraftBrief>;
 
@@ -1271,8 +1287,11 @@ Return ONLY a JSON object, no code fences. Every value is a single string (never
   "opening_question": the first thing the tutor asks — open, concrete, not yes/no,
   "ta_brief": 150–300 words in the instructor's voice,
   "misconceptions": 3–5 lines in one string, each a misconception (or common error) and the question that exposes it,
-  "success_criteria": 2–4 lines in one string${practiceKey}
-}`;
+  "success_criteria": 2–4 lines in one string${practiceKey},
+  "key_concepts": 3–8 lines in one string, each a key concept this session covers, as a short noun phrase (2–6 words), the way the instructor would name it across the course (for example "Reading nm output", not "The student can read nm output")
+}
+
+If the course already has concepts listed below, reuse their exact wording for the same ideas.`;
 }
 
 export async function draftTutorialBrief(params: {
@@ -1285,6 +1304,7 @@ export async function draftTutorialBrief(params: {
   attribution: Attribution;
 }): Promise<DraftBrief> {
   const materials = await getMaterials(params.materialIds, params.ctx);
+  const existing = await listCourseConcepts(params.ctx);
   const system: Anthropic.TextBlockParam[] = [{ type: 'text', text: draftSystemFor(params.kind) }];
   const grounding = materialsBlock(materials);
   if (grounding) system.push({ type: 'text', text: grounding, cache_control: { type: 'ephemeral' } });
@@ -1296,6 +1316,7 @@ export async function draftTutorialBrief(params: {
     userPrompt:
       `Course: ${params.ctx.title || '(untitled)'}${level}` +
       (pitch ? `\nPitch (reading level and tone): ${pitch}` : '') +
+      (existing.length ? `\n\nConcepts the course already names (reuse this wording for the same ideas):\n${existing.map((c) => `- ${c.label}`).join('\n')}` : '') +
       `\n\nTopic / rough notes from the instructor:\n${params.topic}\n\nDraft the ${KINDS[params.kind].label.toLowerCase()} brief JSON now.`,
     maxTokens: 2048,
     attribution: params.attribution,

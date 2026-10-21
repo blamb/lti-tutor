@@ -12,7 +12,7 @@ function tut(p: Partial<Tutorial> & { id: number; title: string }): Tutorial {
   return {
     lti_iss: 'i', lti_context_id: 'c', learning_goal: '', opening_question: '', ta_brief: '', misconceptions: '', success_criteria: '',
     pitch: '', kind: 'concept', practice_prompts: '', recall_tutorial_ids: [], suggested_after_tutorial_id: null, week: null, due_at: null,
-    material_ids: [], target_minutes: 15, gradebook: false, status: 'published', created_by: null, created_at: '', updated_at: '', ...p,
+    material_ids: [], concept_ids: [], target_minutes: 15, gradebook: false, status: 'published', created_by: null, created_at: '', updated_at: '', ...p,
   };
 }
 function done(id: number, completedAt: string): [number, TutorialSession] {

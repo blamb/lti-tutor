@@ -67,7 +67,7 @@ Predicts Scenarios A, B and C correctly and gives the reason for each.
 Chooses extern or static according to intent (one shared variable versus separate private ones), not by guessing.
 In the teach-back, uses an example (add_member, log_count) rather than reciting definitions.`,
   pitch: '', practice_prompts: '', recall_tutorial_ids: [], suggested_after_tutorial_id: null, week: null, due_at: null,
-  material_ids: [1, 2], target_minutes: 15, gradebook: true, status: 'published', created_by: null, created_at: '', updated_at: '',
+  material_ids: [1, 2], concept_ids: [], target_minutes: 15, gradebook: true, status: 'published', created_by: null, created_at: '', updated_at: '',
 };
 
 let turnId = 0;
