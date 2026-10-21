@@ -56,7 +56,7 @@ Two limits worth knowing: a reading that exists in the course only as a link to 
 
 | Kind | Use it when | Length |
 |---|---|---|
-| **Readiness check** | Before a unit: what do they already know or believe? Misconceptions are noted, not corrected. | 4–8 exchanges |
+| **Readiness check** | Before a unit: what do they already know or believe? Misconceptions are noted for you; a plainly false fact gets one correcting sentence, without teaching. | 4–8 exchanges |
 | **Preparation check** | After an assigned reading: did it land? Kind, not a quiz. | 4–8 |
 | **Tutorial** | The core Socratic tutorial on one concept, ending with a teach-back. | 6–24 |
 | **Practice** | They bring a draft or attempt; feedback against your criteria, a revision, one more prompt. Never a mark. | 6–24 |
@@ -106,9 +106,13 @@ The first launch shows an **AI disclosure**: what the tutor is, what it keeps, w
 
 ## 6. Reading the report
 
-Open a session from **Tutorials** and click its report. For each learner you see when they ran it, how many exchanges, a mastery judgement in the kind's own terms (ready / partly ready / not yet; meets the criteria / getting there / needs work), what they showed they understood, where it got sticky, and their own rating of the session and of how well the course material prepared them for it. Download it as CSV.
+Open a session from **Tutorials** and click its report. For each learner you see when they ran it, how many exchanges, a mastery judgement in the kind's own terms (ready / partly ready / not yet; meets the criteria / getting there / needs work), what they showed they understood, where it got sticky, and their own rating of the session and of how well the course material prepared them for it. Download it as CSV (the CSV carries no names).
 
-**Generate debrief brief** turns every run of a session into one short note for you: the sticking points ranked by how often they came up, and what to revise. In a cohort course you can also write a short note back to the whole group and **deliver** it; learners see it under *From your instructor*. The **Concepts** tab does the same across the whole course.
+**Generate debrief brief** turns every run of a session into one short note for you: the sticking points ranked by how often they came up, and what to revise. In a cohort course you can also write a short note back to the whole group and **deliver** it; learners see it under *From your instructor*.
+
+The report shows each learner's name with their summary, ratings and feedback comments; learners are told this, in the same words, on the disclosure, the feedback box and the home page. A summary credits only what the learner said: an idea counts as understood only when their own words in the conversation show it, and ideas they merely agreed with are listed as explained by the tutor. A session in which they did little thinking reads as such. The conversation itself, *About you* and *My learning* are never shown to you.
+
+The **Concepts** tab works across the whole course, without names. Its rows are the **key concepts** you list in each brief (the draft proposes some). What each learner showed is filed under one of them, counting each learner once at their latest status, with the shakiest concepts first. Anything the tool could not place waits under **Unmapped**: assign it by hand or click **Map automatically**. If a wording landed under the wrong concept, its **Move to** menu puts it right.
 
 ---
 
