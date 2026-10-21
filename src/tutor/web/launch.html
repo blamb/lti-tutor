@@ -591,7 +591,7 @@
       <div data-pane="list">
         <p class="muted" style="margin:.25rem 0 .75rem">
           What learners across the course have shown about each key concept, from every completed session, without names.
-          Each learner is counted once per concept, at their latest status. <em>Fragile</em> means recalled only with heavy cues or faded;
+          Each learner is counted once per concept, at their latest status. Open a concept's wordings to move one that was filed under the wrong concept. <em>Fragile</em> means recalled only with heavy cues or faded;
           <em>misconception</em> means a specific wrong idea was heard. Concepts with the most fragile or misconceived entries come first.
         </p>
         <div class="muted" id="concepts-none" hidden style="margin:0 0 .75rem;padding:.5rem .75rem;border-left:3px solid var(--accent);background:var(--accent-soft)">
@@ -1671,9 +1671,8 @@
         `<td class="num"${c.fragile ? ' style="color:#8a5a00"' : ''}>${c.fragile}</td><td class="num"${c.misconception ? ' style="color:var(--bad)"' : ''}>${c.misconception}</td>`;
       for (const c of d.concepts) {
         const tr = document.createElement('tr');
-        const others = (c.wordings || []).filter((w) => w !== c.concept);
-        const wordings = others.length ? `<details style="font-size:.8rem"><summary class="muted">${others.length} wording${others.length === 1 ? '' : 's'}</summary>${others.map((w) => `<div class="muted">${escapeHtml(w)}</div>`).join('')}</details>` : '';
-        tr.innerHTML = `<td>${escapeHtml(c.concept)}${wordings}</td>${counts(c)}<td>${c.last_seen ? new Date(c.last_seen).toLocaleDateString() : ''}</td>`;
+        tr.innerHTML = `<td>${escapeHtml(c.concept)}</td>${counts(c)}<td>${c.last_seen ? new Date(c.last_seen).toLocaleDateString() : ''}</td>`;
+        tr.cells[0].appendChild(wordingsList(c, d.canonical || []));
         tbody.appendChild(tr);
       }
       renderUnmapped(d.unmapped || [], d.canonical || []);
@@ -1688,6 +1687,33 @@
         }
       }
     } catch (e) { tbody.innerHTML = ''; err.textContent = friendlyError(e); }
+  }
+
+  /**
+   * The wordings learners' entries used for a key concept, each movable to another key concept or
+   * back to Unmapped: the model's matching can file a wording under the wrong concept.
+   */
+  function wordingsList(c, canonical) {
+    const words = c.wordings || [];
+    const box = document.createElement('details'); box.className = 'concept-wordings'; box.style.fontSize = '.8rem';
+    box.innerHTML = `<summary class="muted">${words.length} wording${words.length === 1 ? '' : 's'} · move</summary>`;
+    for (const w of words) {
+      const row = document.createElement('div'); row.className = 'form-row'; row.style.cssText = 'gap:.4rem;align-items:center;margin:.2rem 0';
+      row.innerHTML = `<span class="muted" style="flex:1;min-width:10rem">${escapeHtml(w)}</span>` +
+        `<select aria-label="Move “${escapeHtml(w)}” to another key concept" style="max-width:16rem">` +
+        canonical.map((k) => `<option value="${k.id}"${Number(k.id) === Number(c.concept_id) ? ' selected' : ''}>${escapeHtml(k.label)}</option>`).join('') +
+        '<option value="">Unmapped (review later)</option></select>';
+      row.querySelector('select').addEventListener('change', async (ev) => {
+        const sel = ev.currentTarget; sel.disabled = true;
+        try {
+          await api('/api/teacher/concepts/map', { body: { wording: w, concept_id: sel.value ? parseInt(sel.value, 10) : null } });
+          await loadConcepts();
+          announce(sel.value ? `Moved “${w}” to ${sel.options[sel.selectedIndex].text}.` : `Moved “${w}” to Unmapped.`);
+        } catch (e) { sel.disabled = false; $('#concepts-err').textContent = friendlyError(e); }
+      });
+      box.appendChild(row);
+    }
+    return box;
   }
 
   function renderUnmapped(rows, canonical) {

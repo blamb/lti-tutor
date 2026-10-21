@@ -49,3 +49,11 @@ test('the text-size control says what it is, About you fields wrap, and leaving 
   for (const n of ['program', 'goal', 'background', 'struggles', 'interests']) assert.match(html, new RegExp(`<textarea name="${n}" maxlength="\\d+" rows="2" class="short">`), n);
   assert.match(html, /You can stop and come back later: this conversation is saved\./);
 });
+
+test('a wording filed under the wrong key concept can be moved, or sent back to Unmapped', () => {
+  // "Map automatically" filed "Separate libc copies per process" under the static/dynamic trade-off on moodbox.
+  assert.match(html, /function wordingsList\(c, canonical\)/);
+  assert.match(html, /aria-label="Move “\$\{escapeHtml\(w\)\}” to another key concept"/);
+  assert.match(html, /<option value="">Unmapped \(review later\)<\/option>/);
+  assert.match(html, /await api\('\/api\/teacher\/concepts\/map', \{ body: \{ wording: w, concept_id: sel\.value \? parseInt\(sel\.value, 10\) : null \} \}\)/);
+});
