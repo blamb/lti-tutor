@@ -750,6 +750,19 @@ const SELF_CORRECTION = /self[- ]?correct|caught (yourself|themselves|themself|h
 /** Credit for explaining: kept only when the student really explained something (and, for a tutorial, passed the teach-back). */
 const EXPLAINING_CREDIT = /accurately (re)?stat|restated|in (your|their) own words|on (your|their) own|you explained|explained (it|this|that|the (core |main )?idea) back|teach[- ]?back/i;
 
+/** Finding 5: words about a student's attitude or character, which a summary never uses. */
+const ATTITUDE = /\b(dis-?engaged|unengaged|not engaged|unmotivated|lacks? motivation|lazy|rushed|rushing|careless|apathetic|indifferent|uninterested|not trying|didn'?t try|half-hearted|minimal effort|low effort|lack of (effort|engagement|interest)|unwilling)\b/i;
+/** Claims that the student does not know something. */
+const KNOWLEDGE_GAP = /\b(does ?n[o']t|did ?n[o']t|cannot|can'?t|unable to|fails? to) (recogni[sz]e|understand|know|grasp|see|realise|realize|connect)|\bno (clear )?(strategy|understanding|awareness|grasp|knowledge|systematic)\b|\b(conflat|confus|misunderst)\w*|\black(s|ing)? (a |an )?(strategy|understanding|knowledge)/i;
+export const THIN = 'Not enough information in this session.';
+/** The quote and the item share a content word (first four letters), so the quote is about what the item claims. */
+function aboutSameThing(quote: string, text: string): boolean {
+  const stop = new Set(['what', 'when', 'that', 'this', 'with', 'they', 'their', 'them', 'have', 'from', 'would', 'could', 'should', 'just', 'like', 'some', 'more', 'than', 'then', 'about', 'only', 'really', 'probably', 'maybe', 'think', 'want', 'wants', 'need', 'name', 'said', 'says', 'does', 'didn', 'doesn', 'student', 'still', 'hard', 'clear', 'unclear', 'specific', 'reflection', 'session']);
+  const w = (x: string) => new Set((norm(x).match(/[a-z][a-z0-9_]*/g) ?? []).filter((t) => t.length >= 4 && !stop.has(t)).map((t) => t.slice(0, 4)));
+  const q = w(quote);
+  return [...w(text)].some((t) => q.has(t));
+}
+
 function norm(s: string): string {
   return s.toLowerCase().replace(/[‘’“”]/g, "'").replace(/[^a-z0-9']+/g, ' ').trim();
 }
@@ -813,8 +826,15 @@ export function groundSummary(
   }
   const sticking: string[] = [];
   for (const it of draft.sticking_points) {
-    if (inStudentTurn(it.quote)) { sticking.push(it.text); evidence.sticking.push({ text: it.text, quote: it.quote }); }
-    else dropped.push(`sticking: ${it.text} (quote not in any student turn)`);
+    if (!inStudentTurn(it.quote)) { dropped.push(`sticking: ${it.text} (quote not in any student turn)`); continue; }
+    if (ATTITUDE.test(it.text)) { dropped.push(`sticking: ${it.text} (an attitude label)`); continue; }
+    // Finding 5: a claim that they do not know something, and anything a reflection files as still hard,
+    // needs their own words about that topic; "look for a typo" says nothing about linker tools.
+    if ((KNOWLEDGE_GAP.test(it.text) || draft.kind === 'reflection') && !aboutSameThing(it.quote, it.text)) {
+      dropped.push(`sticking: ${it.text} (the quote is not about it)`);
+      continue;
+    }
+    sticking.push(it.text); evidence.sticking.push({ text: it.text, quote: it.quote });
   }
 
   const ownWork = understood.length > 0;
@@ -823,7 +843,7 @@ export function groundSummary(
 
   const creditOk = ownWork && passedTeachBack;
   const kept = sentences(draft.student_note).filter((x) => {
-    const bad = SELF_CORRECTION.test(x) || (!creditOk && EXPLAINING_CREDIT.test(x));
+    const bad = SELF_CORRECTION.test(x) || ATTITUDE.test(x) || (!creditOk && EXPLAINING_CREDIT.test(x));
     if (bad) dropped.push(`student_note: ${x}`);
     return !bad;
   });
@@ -831,6 +851,19 @@ export function groundSummary(
   const student_note = kept.join(' ') || `Thanks for working through this session, ${first}.${draft.next_step ? ` Next: ${draft.next_step}` : ''}`;
 
   const summary = { ...draft, mastery, understood: understood.slice(0, 6), sticking_points: sticking.slice(0, 6), told: told.slice(0, 6), student_note } as Omit<TutorialSummary, 'turns'>;
+  // Finding 5: no attitude labels in any other field either (strategy, plan, next step …).
+  const fields = summary as unknown as Record<string, unknown>;
+  for (const [k, v] of Object.entries(fields)) {
+    if (k === 'kind' || k === 'mastery' || k === 'student_note') continue;
+    if (typeof v === 'string' && ATTITUDE.test(v)) {
+      const left = sentences(v).filter((x) => !ATTITUDE.test(x)).join(' ');
+      dropped.push(`${k}: attitude label removed`);
+      fields[k] = left || THIN;
+    } else if (Array.isArray(v) && v.some((x) => typeof x === 'string' && ATTITUDE.test(x))) {
+      fields[k] = v.filter((x) => !(typeof x === 'string' && ATTITUDE.test(x)));
+      dropped.push(`${k}: attitude label removed`);
+    }
+  }
   if (draft.kind === 'concept') {
     // Decided from the transcript (kinds.ts stageForRun), not from the model's reading of it.
     (summary as unknown as { teachback: string }).teachback =
@@ -855,6 +888,7 @@ Evidence rules. These matter more than anything else here:
 - An idea the tutor stated first, which the student only agreed with or repeated, is "agreed" or "told", never "explained".
 - Never claim the student corrected themselves, worked something out "in their mind", did something "on their own" or ran anything, unless a quoted student turn shows exactly that.
 - A topic only the tutor raised is not one of the student's sticking points.
+- Describe what the student said and did, never their attitude or character: no "disengaged", "rushed", "lazy", "unmotivated", "not trying". Never claim the student does not know, recognise or understand something unless their own words show it; a short, vague or reluctant answer shows only that this session has little evidence. Where the evidence is too thin to judge, write "Not enough information in this session".
 - Check what the student claimed against the course materials. A false claim they made and did not give up by the end of the transcript is a sticking point worded "Holds the false belief that …", quoting them. It is never something they understood, never part of their plan, and never their next step, even if the tutor let it pass.
 
 Return ONLY a JSON object, no code fences, with exactly these keys:
@@ -889,6 +923,8 @@ export async function summarizeRun(params: {
   attribution: Attribution;
   /** The session's materials, so the summary can check the student's claims against them (Finding 1). */
   materials?: Material[];
+  /** Reflections: what the learner showed in earlier sessions (Finding 5), so thin answers are not read as gaps. */
+  earlier?: string;
 }): Promise<{ summary: TutorialSummary; dropped: string[]; evidence: GroundedEvidence; studentTexts: string[] }> {
   const { tutorial, brief, turns, studentName, attribution } = params;
   const texts = studentTexts(turns);
@@ -899,7 +935,9 @@ export async function summarizeRun(params: {
     schema: DraftSummary,
     system,
     userPrompt:
-      `${brief}\n\n# TRANSCRIPT\n${transcriptText(turns, studentName) || '(the student did not say anything)'}\n\nWrite the JSON summary now.`,
+      `${brief}\n\n` +
+      (params.earlier ? `# WHAT THIS LEARNER SHOWED IN EARLIER SESSIONS (context only: never credit it to this session; point to it when this session is thin)\n${params.earlier}\n\n` : '') +
+      `# TRANSCRIPT\n${transcriptText(turns, studentName) || '(the student did not say anything)'}\n\nWrite the JSON summary now.`,
     maxTokens: 1500,
     attribution,
     endpoint: 'tutorial.summary',
@@ -925,6 +963,7 @@ export async function completeTutorialSession(params: {
   const { summary, dropped, evidence, studentTexts: texts } = await summarizeRun({
     tutorial, brief: await briefFor(tutorial, ctx), turns, studentName: student.display_name, attribution,
     materials: await getMaterials(tutorial.material_ids, ctx),
+    earlier: tutorial.kind === 'reflection' ? learnerModelBlock(await listLearnerModel(student.id, ctx)) || undefined : undefined,
   });
   if (dropped.length) console.info(`summary grounding, tutorial_session ${tutorialSession.id}: dropped ${dropped.length} unsupported item(s)`);
 

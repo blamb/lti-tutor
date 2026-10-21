@@ -226,6 +226,7 @@ export const KINDS: Record<TutorialKind, KindSpec> = {
     rules: () => [
       'Do not teach the content. If they raise a content question, acknowledge it in one sentence and bring them back to how they are learning.',
       'Use their own words for strategies. Do not hand them study-skills lectures; ask what they actually did and what happened.',
+      'When they give little ("idk", "not really"), do not press or judge: offer one concrete thing they did in an earlier session, from what this learner has already shown, and ask about that ("in the earlier tutorial you read an nm listing line by line; what helped there?").',
     ],
     stageGuide: () => [
       '- OPEN (first reply only): greet the student by first name in one short sentence, say this is a short reflection on how the unit went for them, then ask the opening question. Nothing else.',
@@ -235,7 +236,7 @@ export const KINDS: Record<TutorialKind, KindSpec> = {
     ],
     summaryExtras: `  "strategy_in_own_words": one or two sentences quoting or closely paraphrasing what the student said about how they learn,
   "suggested_action": the one concrete next action they committed to (or the tutor suggested),`,
-    summaryGuidance: 'Here "mastery" means quality of reflection: "solid" = specific, honest, with a concrete plan; "needs_work" = generic or disengaged. understood = what they said they now grasp; sticking_points = what they said remains hard.',
+    summaryGuidance: 'Here "mastery" means quality of reflection: "solid" = specific, honest, with a concrete plan; "needs_work" = answers too brief or general to show a strategy or a plan (say that, never why). understood = what they said they now grasp; sticking_points = only what they said remains hard, in their own words. A reflection is about how they learn: never conclude from it what content they do not know. When the answers are thin, say "Not enough information in this session" and point to what they showed in earlier sessions instead.',
     draftGuide: `This is a REFLECTION run after a unit. learning_goal = what the student should notice about their own learning by the end. opening_question = the first reflective question (e.g. what was hardest in this unit and why). ta_brief = the probes about strategy, self-monitoring and what to change, and what to listen for. misconceptions = unhelpful beliefs about learning to listen for (e.g. that re-reading equals understanding). success_criteria = what a productive, specific reflection sounds like.`,
     prompts: null,
   },

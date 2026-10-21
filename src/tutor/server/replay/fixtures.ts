@@ -158,3 +158,35 @@ export const partBRound2: Turn[] = [
   t('user', 'First, diagnose the broken multi-file programs: the evidence is the actual ld error and the nm listing. Second, explain static versus dynamic linking. For the second I\'d show that static binaries are smaller and faster to start because nothing needs resolving at load time, using ls -l and time.'),
 ];
 export const PART_B_SIZE_PREDICTION = 'My first prediction: shop_a will be noticeably smaller than shop_so on disk.';
+
+/** The live "Looking back on Module 8" reflection brief (moodbox course 14), read on 2026-10-20. */
+export const reflection: Tutorial = {
+  ...hero,
+  id: 9,
+  kind: 'reflection',
+  title: 'Looking back on Module 8',
+  learning_goal: 'The student names what was hardest in Module 8 and why, identifies one strategy that worked for them (predicting before running, reading error messages from the inside out, using nm and readelf to check), says how they know they understand symbol resolution well enough for the linking part of Assignment 3 Part B, and commits to one concrete change for Module 9.',
+  opening_question: 'Which of the six topics—compiler drivers, object files, symbols, relocation, executables, or shared libraries—gave you the most trouble, and what made it hard?',
+  ta_brief: `Listen for which topic they struggled with and why. If it is symbols or relocation, ask what happened when they worked through Learning Activity 3 or 4: did predicting before running help? If they say symbols are clear, ask them how they know; one good test is whether they can say what U price_with_tax in nm main.o tells them about the build, not the definition but what it means.
+
+Watch for confusion between linker jobs and loader jobs (a common slip is thinking the loader replaces placeholders). Note it; this is a reflection, not a re-teach.
+
+Probes, one per turn: Which strategy worked best for you: predicting, reading tool output, running the build to check, or something else? What would you do first if a build failed with undefined reference, and is that different from what you would have done before Module 8? How ready do you feel for the linking part of Assignment 3 Part B, and what is the evidence for that feeling? What is one thing you will do differently in Module 9?
+
+Keep their own words in the wrap-up. No marks, no judgement of the module.`,
+  misconceptions: `They think a program that compiles always links (it doesn't—symbol resolution is separate and happens later). They confuse what the linker does with what the loader does (linker replaces placeholders and arranges sections; loader copies into memory and starts _start). They believe nm output shows runtime addresses (it shows offsets in relocatable files, final addresses in executables). They think static libraries and shared libraries behave the same way after a library is updated (static programs need relinking; dynamic programs use the new version on next run).`,
+  success_criteria: `They name a specific topic and explain why—for example, "relocation was hard because I didn't understand why the four bytes changed from 00 00 00 00 to something real." They describe a strategy that worked and can apply it to Assignment 3 Part B (e.g., "I'll run nm first, then objdump"). They can explain one linking concept using a tool (nm, readelf, objdump, or ldd) and real output, not just words. They name one concrete change for Module 9, such as "I'll predict the error before building" or "I'll read the full linker error message, not just the first line."`,
+  material_ids: [1, 2],
+  target_minutes: 5,
+};
+
+/** Round 2's terse, disengaged reflection (Test Student2), with tutor turns in the shape the report describes. */
+export const reflectionTerse: Turn[] = [
+  t('assistant', 'Hi Test, this is a short reflection on how Module 8 went for you. Which of the six topics gave you the most trouble, and what made it hard?'),
+  t('user', 'idk'),
+  t('assistant', "That's fine. Let's make it smaller: think back to the library program in Learning Activity 3. Was there a moment where the build surprised you?"),
+  t('user', 'not really. i just want to finish this'),
+  t('assistant', 'Fair enough, one last quick one. If your build failed tomorrow with an undefined reference error, what would you do first?'),
+  t('user', 'look for a typo in my code probably'),
+  t('assistant', 'That works as a start. You can click "Finish tutorial" to get your summary.'),
+];
