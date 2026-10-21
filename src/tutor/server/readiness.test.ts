@@ -7,20 +7,20 @@ import { deliveryOf } from './delivery.js';
 // Usability report, Finding 9: the readiness check ended with a ~170-word
 // preview of Topic 6, Learning Activities 4 and 5 and their programs.
 
-test('the readiness wrap-up is two sentences under the word limit, with no previews', () => {
+test('the readiness wrap-up is two sentences under the word limit, with no previews (plus one correcting a false fact)', () => {
   const guide = KINDS.readiness.stageGuide(deliveryOf(9)).join('\n');
-  assert.match(guide, new RegExp(`two sentences, under ${READINESS_WRAP_UP_WORDS} words`));
+  assert.match(guide, new RegExp(`then two sentences, under ${READINESS_WRAP_UP_WORDS} words`));
+  assert.match(guide, /if their last answer stated something false, one sentence giving the correct fact/);
   assert.match(guide, /never by activity, step, topic number or program name, never previewing what later activities do/);
   const note = progressNote(3, 4, 'WRAP-UP', 'none', 'I think each process gets its own copy of libc.', 'readiness');
-  assert.match(note, /Write exactly two sentences and nothing else/);
+  assert.match(note, /start with one sentence giving the correct fact\. Then write exactly two more sentences and nothing else/);
   assert.doesNotMatch(progressNote(3, 4, 'WRAP-UP', 'none', 'x', 'concept'), /Write exactly two sentences/);
 });
 
-test('a readiness check notes a false claim neutrally instead of correcting it, even at the end', () => {
-  const note = progressNote(3, 4, 'WRAP-UP', 'none', 'I think each process gets its own copy of libc.', 'readiness');
-  assert.match(note, /do not correct it and do not praise or agree with it; acknowledge it neutrally/);
-  assert.doesNotMatch(note, /your reply opens by stating the correct fact/);
-  assert.match(progressNote(3, 10, 'EXPLORE', 'none', 'x', 'concept'), /your reply opens by stating the correct fact/);
+test('a readiness check gets the same per-turn correction note as every other session', () => {
+  const note = progressNote(2, 4, 'PROBE', 'none', 'I think gcc just turns the C into a program in one step.', 'readiness');
+  assert.match(note, /your reply opens by stating the correct fact in one plain sentence/);
+  assert.doesNotMatch(note, /neutrally|do not correct/);
 });
 
 test('the readiness summary keeps at most two things to watch for', () => {

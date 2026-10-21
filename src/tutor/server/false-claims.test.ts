@@ -20,11 +20,12 @@ test('every kind, in every delivery mode, forbids praising or building on a fals
   }
 });
 
-test('the readiness check still notes misconceptions without correcting them, but never agrees with them', () => {
+test('the readiness check corrects a false fact in one sentence, like every session, then moves on without teaching', () => {
   const rules = KINDS.readiness.rules(deliveryOf(9)).join('\n');
-  assert.match(rules, /do not correct it now, and do not praise or agree with it either/);
-  // The shared correction rule defers to it.
-  assert.match(tutorialRulesFor(deliveryOf(9), 'readiness'), /Unless the kind-specific rules below say to note misconceptions without correcting them/);
+  assert.match(rules, /correct it plainly in one sentence, as in every session, then go straight on to the next probe/);
+  assert.doesNotMatch(rules, /do not correct/i);
+  // No kind is exempt from the shared correction rule any more.
+  for (const kind of TUTORIAL_KINDS) assert.doesNotMatch(tutorialRulesFor(deliveryOf(9), kind), /without correcting/, kind);
 });
 
 test('each reply after a student turn is reminded to check that turn, predictions excepted', () => {

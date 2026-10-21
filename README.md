@@ -54,7 +54,7 @@ Open Learning's continuous-entry courses: flexible start, up to 30 weeks, no coh
 
 | TRU engagement type | LTI Tutor |
 |---|---|
-| 1. Uncover prior knowledge and misconceptions before new learning | **Readiness checks**: a 4–8 exchange diagnostic before a section. The tutor probes what they already know, notes misconceptions without correcting them, and ends with what to watch for. Summary records prior knowledge and the misconceptions voiced. |
+| 1. Uncover prior knowledge and misconceptions before new learning | **Readiness checks**: a 4–8 exchange diagnostic before a section. The tutor probes what they already know, corrects a false fact in one plain sentence (as every session does) and moves straight on without teaching the topic, and ends with what to watch for. Summary records prior knowledge and the misconceptions voiced. |
 | 2. Prepare for learning: activate, connect, preview | **Readiness checks** (same session: activating what they can build on and previewing what is coming). |
 | 3. Accountability for preparatory work | **Preparation checks** after an assigned reading: recount the key ideas, connect one to something they know; a learner who has not done the reading is told so kindly and the summary records it. |
 | 4. Engagement with an AI tutor to unpack individual learning | **Tutorials** (the concept kind), worded for a learner working alone: no lectures, no classmates; teach-back is "explain it as if to someone who has never studied this". |

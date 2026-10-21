@@ -94,19 +94,19 @@ export const KINDS: Record<TutorialKind, KindSpec> = {
     purpose: (d) =>
       `This is a short readiness check ${timing(d, 'before the next class', "before this week's material", 'before the student starts the next section')}. Your job is diagnostic, not instructional: find out what the student already knows, believes and misunderstands about the upcoming topic, activate what they can build on, and prime them for what is coming. Four to eight exchanges.`,
     rules: () => [
-      'Do not teach the topic. When you hear a misconception, note it and move on; do not correct it now, and do not praise or agree with it either: acknowledge it neutrally ("that is one idea; the module will put it to the test") and ask the next question. The upcoming material will correct it, and the instructor will see it in your summary.',
+      'Do not teach the topic. When the student states something false, correct it plainly in one sentence, as in every session, then go straight on to the next probe: no further explanation, no follow-up on that point. The upcoming material teaches it, and the instructor will see the misconception in your summary.',
       'Ask about what they have met before: in earlier courses, at work, in everyday life. Prior knowledge counts even when it is informal.',
     ],
     stageGuide: (d) => [
       `- ORIENT (first reply only): greet the student by first name in one short sentence, say this is a quick check-in ${timing(d, 'before the next class', "before this week's material", 'before the next section')} and that it is not graded, then ask the opening question. Nothing else.`,
       '- PROBE: two to four questions, one per turn, working through the probes in the brief. Listen for the misconceptions it lists. Build on what they say.',
-      `- WRAP-UP: two sentences, under ${READINESS_WRAP_UP_WORDS} words in all. The first names at most two ideas to watch for in the upcoming material, given what they said, as ideas: never by activity, step, topic number or program name, never previewing what later activities do, and with no explanations or answers. The second: ${WRAP_UP_FINISH}`,
+      `- WRAP-UP: if their last answer stated something false, one sentence giving the correct fact; then two sentences, under ${READINESS_WRAP_UP_WORDS} words. The first names at most two ideas to watch for in the upcoming material, given what they said, as ideas: never by activity, step, topic number or program name, never previewing what later activities do, and with no explanations or answers. The second: ${WRAP_UP_FINISH}`,
     ],
     summaryExtras: `  "prior_knowledge": "none" | "some" | "solid",
   "misconceptions_found": [up to 6 short phrases: specific misconceptions the student voiced; empty if none],
   "watch_for": [up to 2 short pointers for the upcoming material, as ideas (no activity, step or topic numbers, no answers)],`,
     summaryGuidance: 'Here "mastery" means readiness for the unit: "solid" = relevant prior knowledge and no serious misconceptions; "developing" = some footing; "needs_work" = little to build on or a misconception that will block the unit. Put the misconceptions in sticking_points too.',
-    draftGuide: `This is a READINESS CHECK run before the unit. learning_goal = what we want to find out and activate before the unit (not what they should learn). opening_question = the first diagnostic question: concrete, about something they may already have met. ta_brief = three or four probes targeting the prior knowledge the unit builds on and the misconceptions listed, plus what to tell them to watch for at the end. misconceptions = the ones to listen for (do not correct them). success_criteria = what "ready for this unit" sounds like.`,
+    draftGuide: `This is a READINESS CHECK run before the unit. learning_goal = what we want to find out and activate before the unit (not what they should learn). opening_question = the first diagnostic question: concrete, about something they may already have met. ta_brief = three or four probes targeting the prior knowledge the unit builds on and the misconceptions listed, plus what to tell them to watch for at the end. misconceptions = the ones to listen for (the tutor corrects a false fact in one sentence and moves on; they are recorded for the instructor). success_criteria = what "ready for this unit" sounds like.`,
     prompts: null,
   },
 
