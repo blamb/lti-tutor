@@ -8,6 +8,7 @@
  *   GET  /api/profile                           -> { profile }
  *   DELETE /api/me/data                         -> { deleted: {...} }   (profile, learner model, transcripts, summaries, debriefs for this course)
  *   PUT  /api/profile                           ProfileInput -> { profile }
+ *   POST /api/profile/skip                      -> { ok }   ("Skip for now", remembered so the form is not offered again)
  *   GET  /api/tutorials                         -> { tutorials: [...with my latest run], has_profile }
  *   POST /api/tutorials/:id/start               { fresh? } -> { tutorial, session, turns }
  *   POST /api/tutorials/session/:sid/turn       { message } | { begin: true } -> SSE
@@ -66,7 +67,7 @@ import { courseConceptReport, setWordingConcept, remapUnmapped, keyConceptsText 
 import { importFromUrl, extractFromFile, fitMaterial, ImportError, MAX_BOOK_CHAPTERS } from '../../core/importers.js';
 import { ensurePrintScript, printScriptHtml, personalDebriefHtml, buildCoursePack } from './print.js';
 import {
-  TutorialInput, ProfileInput, MaterialInput, START_MARKER,
+  TutorialInput, ProfileInput, skipProfile, MaterialInput, START_MARKER,
   listMaterials, getMaterials, createMaterial, updateMaterial, deleteMaterial,
   listTutorials, getTutorial, createTutorial, updateTutorial, deleteTutorial,
   getProfile, upsertProfile, latestSessionsForStudent, startTutorialSession,
@@ -162,6 +163,16 @@ lti.app.put('/api/profile', async (req: Request, res: Response) => {
     res.json({ profile: await upsertProfile(student.id, ProfileInput.parse(req.body ?? {})) });
   } catch (e) {
     fail(res, e, 'PUT /api/profile');
+  }
+});
+
+lti.app.post('/api/profile/skip', async (req: Request, res: Response) => {
+  try {
+    const student = await studentFromToken(tokenOf(res));
+    await skipProfile(student.id);
+    res.json({ ok: true });
+  } catch (e) {
+    fail(res, e, 'POST /api/profile/skip');
   }
 });
 

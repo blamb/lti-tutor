@@ -38,6 +38,7 @@
   header h1 { margin: 0 0 .25rem; font-size: 1.4rem; }
   header .sub { color: var(--muted); font-size: .9rem; }
   .header-actions { display: flex; gap: .35rem; flex-wrap: wrap; align-items: flex-start; }
+  #profile-status.saved { color: var(--good); font-weight: 500; }
   .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.25rem; margin-top: 1.25rem; }
   .card h2 { margin: 0 0 .75rem; font-size: 1rem; }
   .view { display: none; } .view.active { display: block; }
@@ -1037,7 +1038,7 @@
   async function openProfile(returnTo = 'home') {
     profileReturnTo = returnTo;
     $('#profile-err').textContent = '';
-    $('#profile-status').textContent = '';
+    $('#profile-status').textContent = ''; $('#profile-status').classList.remove('saved');
     try {
       const p = (await api('/api/profile')).profile || {};
       PROFILE_FIELDS.forEach((n) => { profileForm.elements[n].value = p[n] || ''; });
@@ -1045,14 +1046,16 @@
     if (!profileSkipBtn) {
       profileSkipBtn = document.createElement('button');
       profileSkipBtn.type = 'button'; profileSkipBtn.className = 'btn btn-ghost'; profileSkipBtn.textContent = 'Skip for now';
-      profileSkipBtn.addEventListener('click', () => {
+      profileSkipBtn.addEventListener('click', async () => {
         const id = pendingTutorialId; pendingTutorialId = null;
+        // Remembered for this learner, so the form is not offered before every session.
+        try { await api('/api/profile/skip', { method: 'POST' }); hasProfile = true; } catch { /* offered again next time: harmless */ }
         if (id) openTutorial(id, { skipProfile: true }); else showView(profileReturnTo);
       });
       $('#profile-save').after(profileSkipBtn);
     }
     profileSkipBtn.hidden = !pendingTutorialId;
-    if (pendingTutorialId) $('#profile-status').textContent = 'Takes 30 seconds — then your tutorial opens.';
+    if (pendingTutorialId) $('#profile-status').textContent = 'Optional. Skip it if you like; you can fill it in any time under About you.';
     showView('profile');
   }
   $('#nav-profile').addEventListener('click', () => { pendingTutorialId = null; openProfile('home'); });
@@ -1065,9 +1068,13 @@
     try {
       await api('/api/profile', { method: 'PUT', body: payload });
       hasProfile = true;
-      $('#profile-status').textContent = 'Saved.';
       const id = pendingTutorialId; pendingTutorialId = null;
-      if (id) openTutorial(id, { skipProfile: true }); else showView(profileReturnTo);
+      // A visible confirmation, then on to the session if one is waiting.
+      const st = $('#profile-status');
+      st.textContent = id ? '✓ Saved. Opening your session…' : '✓ Saved. The tutor will use this from your next session.';
+      st.classList.add('saved');
+      announce(st.textContent);
+      if (id) setTimeout(() => openTutorial(id, { skipProfile: true }), 900);
     } catch (err) {
       $('#profile-err').textContent = friendlyError(err);
     } finally { $('#profile-save').disabled = false; }
