@@ -379,6 +379,28 @@
               </div>
             </fieldset>
 
+            <fieldset class="sec hidden-sec" id="sec-factsheet">
+              <legend>Fact sheet</legend>
+              <p class="sec-blurb">The fixed facts for any persona, so every student meets the same person in the same situation. Never shown to students. A few sections every persona has, then sections you name yourself; a preset only suggests section titles. On a simulated patient this sits beside the case file for comparison: fill one or the other, since both reach the prompt if both are filled.</p>
+              <div class="form-grid">
+                <label>Start from<span class="hint" id="ff-preset-hint">Adds suggested section headings to the sections box below; it changes nothing else.</span>
+                  <select name="ff_preset" id="ff-preset"></select></label>
+                <div class="form-row">
+                  <label style="flex:2;min-width:200px">Name<input type="text" name="ff_name"></label>
+                  <label style="flex:1;min-width:140px">Goes by<input type="text" name="ff_preferred_name"></label>
+                  <label style="flex:1;min-width:160px">Date of birth<span class="hint">Optional; age is worked out on the day.</span><input type="date" name="ff_date_of_birth"></label>
+                  <label style="flex:1;min-width:120px">Pronouns<input type="text" name="ff_pronouns"></label>
+                </div>
+                <label>Background<textarea name="ff_background"></textarea></label>
+                <label>Why they are here<span class="hint">Why this conversation is happening today, from their side.</span><textarea name="ff_why_here"></textarea></label>
+                <label>History<span class="hint">What came before that matters to this conversation.</span><textarea name="ff_history"></textarea></label>
+                <label>Circumstances<span class="hint">Home, work, relationships, money: their situation now.</span><textarea name="ff_circumstances"></textarea></label>
+                <label>Your sections<span class="hint">A heading line starting with ## , then one fact per line under it. Example:<br>## Walk-away point<br>Will not go above $48,000 a year; would rather re-tender.</span><textarea name="ff_sections" class="tall"></textarea></label>
+                <label>Cues<span class="hint">One per line: what they say or do | what lies behind it | when to disclose it.</span><textarea name="ff_cues"></textarea></label>
+                <label>Disclosure rules<span class="hint">One per line.</span><textarea name="ff_disclosure_rules"></textarea></label>
+              </div>
+            </fieldset>
+
             <fieldset class="sec" id="sec-quotebook" hidden>
               <legend>Quotations and reading</legend>
               <p class="sec-blurb">Vetted by you: the persona quotes these word for word, corrects a student who brings a misattributed line, and recommends only the reading listed. Vetted quotations are also checked like the sources. One item per line.</p>
@@ -1181,7 +1203,7 @@
   async function loadDesigner() {
     if (!isTeacher) return;
     try {
-      if (!catalog) { catalog = await api('/api/teacher/catalog'); buildTemplatePicker(); buildModelSelect(); }
+      if (!catalog) { catalog = await api('/api/teacher/catalog'); buildTemplatePicker(); buildModelSelect(); buildFactSheetPresets(); }
       await Promise.all([loadPersonasAdmin(), loadMaterials()]);
     } catch (e) { $('#personas-err').textContent = friendlyError(e); }
   }
@@ -1265,7 +1287,7 @@
   }
   function formValues() {
     const out = {};
-    for (const el of form.elements) { if (el.name && el.type !== 'radio' && el.type !== 'checkbox' && !/^(cf|qb)_/.test(el.name)) out[el.name] = el.value; }
+    for (const el of form.elements) { if (el.name && el.type !== 'radio' && el.type !== 'checkbox' && !/^(cf|qb|ff)_/.test(el.name)) out[el.name] = el.value; }
     out.gradebook = !!form.elements.gradebook.checked;
     return out;
   }
@@ -1287,6 +1309,41 @@
     f.cf_medications.value = (c.medications || []).map((m) => [m.name, m.how_taken, m.purpose, m.patient_words ? `"${m.patient_words}"` : '', m.otc ? 'OTC' : ''].join(' | ').replace(/( \| )+$/, '')).join('\n');
     f.cf_planted_cues.value = (c.planted_cues || []).map((p) => [p.cue, p.follow_up, p.condition].join(' | ').replace(/( \| )+$/, '')).join('\n');
     f.cf_disclosure_rules.value = (c.disclosure_rules || []).join('\n');
+  }
+  const FF_TEXT = ['preset', 'name', 'preferred_name', 'date_of_birth', 'pronouns', 'background', 'why_here', 'history', 'circumstances'];
+  function factSheetFromForm() {
+    const f = form.elements; const out = {};
+    for (const k of FF_TEXT) out[k] = f['ff_' + k].value.trim();
+    const sections = []; let cur = null;
+    for (const raw of String(f.ff_sections.value || '').split('\n')) {
+      const line = raw.trim(); if (!line) continue;
+      const h = /^#{1,3}\s*(.+)$/.exec(line);
+      if (h) { cur = { title: h[1].trim(), facts: [] }; sections.push(cur); continue; }
+      if (!cur) { cur = { title: 'Other facts', facts: [] }; sections.push(cur); }
+      cur.facts.push(line.replace(/^[-*•]\s*/, ''));
+    }
+    out.sections = sections.filter((x) => x.facts.length);
+    out.cues = lines(f.ff_cues.value).map((l) => { const [cue, follow_up, condition] = cols(l, 3); return { cue, follow_up, condition }; });
+    out.disclosure_rules = lines(f.ff_disclosure_rules.value);
+    return out;
+  }
+  function fillFactSheet(x) {
+    const f = form.elements; x = x || {};
+    for (const k of FF_TEXT) f['ff_' + k].value = x[k] || '';
+    if (!f.ff_preset.value) f.ff_preset.value = 'general';
+    f.ff_sections.value = (x.sections || []).map((sec) => `## ${sec.title}\n${sec.facts.join('\n')}`).join('\n\n');
+    f.ff_cues.value = (x.cues || []).map((c) => [c.cue, c.follow_up, c.condition].join(' | ').replace(/( \| )+$/, '')).join('\n');
+    f.ff_disclosure_rules.value = (x.disclosure_rules || []).join('\n');
+  }
+  function buildFactSheetPresets() {
+    const sel = $('#ff-preset'); sel.innerHTML = (catalog.fact_sheet_presets || []).map((p) => `<option value="${esc(p.id)}">${esc(p.label)}</option>`).join('');
+    sel.addEventListener('change', () => {
+      const preset = (catalog.fact_sheet_presets || []).find((p) => p.id === sel.value); if (!preset) return;
+      const box = form.elements.ff_sections; const have = new Set([...box.value.matchAll(/^##\s*(.+)$/gm)].map((m) => m[1].trim().toLowerCase()));
+      const add = preset.sections.filter((x) => !have.has(x.title.toLowerCase())).map((x) => `## ${x.title}`);
+      if (add.length) box.value = (box.value.trim() ? box.value.trim() + '\n\n' : '') + add.join('\n\n') + '\n';
+      $('#ff-preset-hint').textContent = preset.sections.length ? preset.sections.map((x) => x.hint ? `${x.title}: ${x.hint}` : x.title).join(' · ') : 'Adds suggested section headings to the sections box below; it changes nothing else.';
+    });
   }
   function quoteBookFromForm() {
     const f = form.elements;
@@ -1328,7 +1385,7 @@
     applyTemplate(template, { seedEmpty: !p });
     if (p) for (const [k, v] of Object.entries(p)) { const el = form.elements[k]; if (el && (typeof v === 'string' || typeof v === 'number') && !(el instanceof RadioNodeList) && el.type !== 'checkbox') el.value = v; }
     form.elements.gradebook.checked = !!(p && p.gradebook);
-    fillCaseRecord(p && p.case_record); fillQuoteBook(p && p.quote_book);
+    fillCaseRecord(p && p.case_record); fillQuoteBook(p && p.quote_book); fillFactSheet(p && p.fact_sheet);
     form.elements.passcode.value = '';
     $('#passcode-hint').textContent = p && p.has_passcode ? 'A passcode is set. Leave empty to keep it, or type a new one.' : 'Needed only for "link and a passcode". Share it with students alongside the link.';
     showPublicLink(p);
@@ -1415,6 +1472,7 @@
       // Only the section the template shows is saved; another template's record stays as it was stored.
       case_record: template === 'client' ? caseRecordFromForm() : (editing && editing.case_record) || {},
       quote_book: template === 'thinker' ? quoteBookFromForm() : (editing && editing.quote_book) || {},
+      fact_sheet: factSheetFromForm(),
     };
     $('#editor-err').textContent = ''; $('#editor-status').textContent = 'Saving…';
     try {

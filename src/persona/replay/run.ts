@@ -36,7 +36,8 @@ const { getAnthropic } = await import('../../core/anthropic.js');
 const { PersonaInput, personaTurnRequest, coachSystemFor, START_MARKER, createPersona, startPersonaSession, endPersonaSession, deletePersona } = await import('../server/personas.js');
 const { generateDebrief, requestDebrief, debriefStatus, debriefMarkdown, objectivesOf } = await import('../server/debrief.js');
 const { hasEndIntent, splitNotes, personaWords, wordCount } = await import('../server/signals.js');
-const { ageOn, caseRecordOf } = await import('../server/casefile.js');
+const { ageOn, caseRecordOf, caseFileBlock } = await import('../server/casefile.js');
+const { factSheetOf, factSheetBlock } = await import('../server/factsheet.js');
 const { checkReplyQuotes } = await import('../server/personas.js');
 const { query, pool } = await import('../../core/db.js');
 const { appendTurn } = await import('../../core/conversations.js');
@@ -62,7 +63,9 @@ function loadPersona(name: string, id: number): Persona {
   const { passcode: _p, ...rest } = parsed;
   return { id, lti_iss: 'replay', lti_context_id: 'replay', created_by: null, created_at: '', updated_at: '', public_slug: '', passcode_hash: '', ...rest };
 }
-const PERSONAS: Record<string, Persona> = { russell: loadPersona('russell', 1), patient: loadPersona('patient', 2) };
+const PERSONAS: Record<string, Persona> = Object.fromEntries(
+  readdirSync(join(HERE, 'personas')).filter((f) => f.endsWith('.json')).sort().map((f, i) => [f.replace(/\.json$/, ''), loadPersona(f.replace(/\.json$/, ''), i + 1)])
+);
 const scriptFiles = readdirSync(join(HERE, 'scripts')).filter((f) => f.endsWith('.json')).sort();
 const all = scriptFiles.map((f) => JSON.parse(readFileSync(join(HERE, 'scripts', f), 'utf8')) as Script & Partial<Recorded>);
 const scripts = all.filter((s) => typeof s.turns[0] === 'string' && s.id.includes(filter)) as Script[];
@@ -238,34 +241,64 @@ async function replayRecorded(r: Recorded): Promise<void> {
 
 // ─── Probes: consistency (item 4) and technique (item 5) ────────────────────
 
-async function probeCaseFile(): Promise<void> {
-  const persona = PERSONAS.patient!;
-  const where = 'patient case file (5 fresh sessions)';
-  const lines = [
+/** Which fixed-facts model a persona uses, how big its block is, and its date of birth. */
+function factsModel(p: Persona): { model: string; chars: number; dob: string } {
+  const cf = caseFileBlock(caseRecordOf(p.case_record));
+  const fs = factSheetBlock(factSheetOf(p.fact_sheet));
+  return { model: [cf ? 'case file' : '', fs ? 'fact sheet' : ''].filter(Boolean).join(' + ') || 'none', chars: cf.length + fs.length, dob: caseRecordOf(p.case_record).date_of_birth || factSheetOf(p.fact_sheet).date_of_birth };
+}
+
+interface Comparison { persona: string; model: string; chars: number; consistent: number; asked: number; technique: string; median_reply_ms: number }
+const comparisons: Comparison[] = [];
+/** Technique results by persona, joined to the consistency rows when the summary is written (the probes finish in any order). */
+const techniqueNotes = new Map<string, string>();
+
+/**
+ * Item 4: the same questions in five fresh sessions must get the fixed facts every time.
+ * Each expectation is a pattern every answer to that line must match, and optionally one none may match (an invented fact).
+ */
+async function probeFacts(key: string, lines: string[], expects: { label: string; must: RegExp; never?: RegExp }[]): Promise<Comparison> {
+  const persona = PERSONAS[key]!;
+  const fm = factsModel(persona);
+  const where = `${key}: ${fm.model} (5 fresh sessions)`;
+  const runs = await Promise.all(Array.from({ length: 5 }, () => converse(persona, lines)));
+  const answers = runs.map((r) => r.turns.filter((t) => t.role === 'assistant').map((t) => personaWords(t.content)));
+  let consistent = 0;
+  expects.forEach((e, i) => {
+    const n = answers.filter((a) => e.must.test(a[i] ?? '') && !(e.never && e.never.test(a[i] ?? ''))).length;
+    if (n === 5) consistent++;
+    check(4, where, `${e.label} every time`, n === 5, `${n}/5`);
+  });
+  writeResult(`probe-facts-${key}`, { lines, answers, timings: runs.map((r) => r.timings) });
+  const c = { persona: key, model: fm.model, chars: fm.chars, consistent, asked: expects.length, technique: '–', median_reply_ms: median(runs.flatMap((r) => r.timings.map((t) => t.total_ms))) };
+  comparisons.push(c);
+  return c;
+}
+
+const ageRe = (dob: string) => { const a = ageOn(dob); return new RegExp(`\\b${a}\\b${a === 78 ? '|seventy-eight' : a === 34 ? '|thirty-four' : ''}`, 'i'); };
+const INVENTED_MEDS = /\b(metformin|insulin|warfarin|aspirin|lisinopril|amlodipine|metoprolol|digoxin|tylenol|acetaminophen|paracetamol|naproxen|aleve|levothyroxine|omeprazole)\b/i;
+
+function patientProbe(key: string): Promise<Comparison> {
+  return probeFacts(key, [
     "Hello, I'm Alex, a second-year nursing student. Thank you for coming in. Who sent you in today?",
     'Thank you. At home, who does the cooking these days?',
     'What medications are you on?',
     'And how old are you, if you don\'t mind me asking?',
-  ];
-  const runs = await Promise.all(Array.from({ length: 5 }, () => converse(persona, lines)));
-  const answers = runs.map((r) => r.turns.filter((t) => t.role === 'assistant').map((t) => personaWords(t.content)));
-  const ok = (i: number, re: RegExp) => answers.filter((a) => re.test(a[i] ?? '')).length;
-  const INVENTED = /\b(metformin|insulin|warfarin|aspirin|lisinopril|amlodipine|metoprolol|digoxin|tylenol|acetaminophen|paracetamol|naproxen|aleve|levothyroxine|omeprazole)\b/i;
-  check(4, where, '"who sent you in?" gives the case file\'s referral every time', ok(0, /Mehta|family doctor|my doctor|GP/i) === 5, `${ok(0, /Mehta|family doctor|my doctor|GP/i)}/5`);
-  check(4, where, '"who does the cooking?" gives the case file\'s answer every time', ok(1, /Claire|daughter|freezer|Ray/i) === 5, `${ok(1, /Claire|daughter|freezer|Ray/i)}/5`);
-  const medsOk = answers.filter((a) => /water tablet|blood pressure|heart|cholesterol|ramipril|bisoprolol|furosemide|atorvastatin/i.test(a[2] ?? '') && !INVENTED.test(a[2] ?? '')).length;
-  check(4, where, '"what medications are you on?" names only case-file medicines every time', medsOk === 5, `${medsOk}/5`);
-  const age = ageOn(caseRecordOf(persona.case_record).date_of_birth);
-  const ageRe = new RegExp(`\\b${age}\\b|${age === 78 ? 'seventy-eight' : '__'}`, 'i');
-  check(4, where, `age is ${age} (from the date of birth) every time`, ok(3, ageRe) === 5, `${ok(3, ageRe)}/5`);
-  writeResult('probe-case-file', { lines, answers, timings: runs.map((r) => r.timings) });
+  ], [
+    { label: '"who sent you in?" gives the referral', must: /Mehta|family doctor|my doctor|GP/i },
+    { label: '"who does the cooking?" gives the fixed answer', must: /Claire|daughter|freezer|Ray/i },
+    { label: '"what medications are you on?" names only listed medicines', must: /water tablet|blood pressure|heart|cholesterol|ramipril|bisoprolol|furosemide|atorvastatin/i, never: INVENTED_MEDS },
+    { label: `age is ${ageOn(factsModel(PERSONAS[key]!).dob)} (from the date of birth)`, must: ageRe(factsModel(PERSONAS[key]!).dob) },
+  ]);
 }
 
-async function probeTechnique(): Promise<void> {
-  const persona = PERSONAS.patient!;
-  const where = 'patient technique (3 + 3 fresh sessions)';
+async function probeTechnique(key: string): Promise<void> {
+  const persona = PERSONAS[key]!;
+  const where = `${key}: technique (3 + 3 fresh sessions)`;
   const curt = ['hi. what meds are you on'];
-  const open = ["Hello, I'm Alex, one of the student nurses. I'd like to understand how you manage your medicines, so we can make sure they're helping you. Could you tell me about the medicines you take, including anything you buy yourself from the chemist?"];
+  const open = ["Hello, I'm Alex, one of the student nurses. I'd like to understand how you manage your medicines, so we can make sure they're helping you. Could you tell me about the medicines you take, including anything you buy yourself from the chemist?",
+    // She does not think of the Advil as medicine (a disclosure rule), so it takes a follow-up on her own hint to reach it.
+    'Thank you, that helps. You mentioned the odd thing from the chemist. What sort of things do you buy there, even if they don\'t feel like medicine?'];
   const [c, o] = await Promise.all([
     Promise.all(Array.from({ length: 3 }, () => converse(persona, curt))),
     Promise.all(Array.from({ length: 3 }, () => converse(persona, open))),
@@ -273,9 +306,41 @@ async function probeTechnique(): Promise<void> {
   const words = (runs: typeof c) => runs.map((r) => wordCount(personaWords(r.turns.find((t) => t.role === 'assistant')?.content ?? '')));
   const cw = words(c), ow = words(o);
   check(5, where, '"what meds are you on" yields less than an open, empathetic medication question', median(cw) < median(ow) && Math.max(...cw) < Math.min(...ow) * 1.2, `curt ${cw.join('/')} words, open ${ow.join('/')} words`);
+  const otc = o.filter((r) => r.turns.some((t) => t.role === 'assistant' && /advil|ibuprofen/i.test(t.content))).length;
+  check(5, where, 'an open question and a follow-up on her hint reach the over-the-counter Advil', otc >= 2, `${otc}/3`);
   const praise = [...c, ...o].map((r) => personaWords(r.turns.find((t) => t.role === 'assistant')?.content ?? '')).filter((x) => COMPLIMENT.test(x));
   check(5, where, 'no compliments on technique', praise.length === 0, praise.map((x) => x.match(COMPLIMENT)?.[0]).join(' / '));
-  writeResult('probe-technique', { curt: c.map((r) => r.turns), open: o.map((r) => r.turns) });
+  techniqueNotes.set(key, `curt ${median(cw)} vs open ${median(ow)} words; OTC reached ${otc}/3`);
+  writeResult(`probe-technique-${key}`, { curt: c.map((r) => r.turns), open: o.map((r) => r.turns) });
+}
+
+/** The fact sheet beyond health care: a tenant at a legal clinic (client template) and a negotiation counterpart (partner template). */
+function nonClinicalProbes(): Promise<Comparison>[] {
+  return [
+    probeFacts('tenant', [
+      "Hi Jordan, I'm Sam, a law student working at the clinic today. Everything you tell me stays confidential. When did you get the notice?",
+      'Thanks. And how much is your rent each month?',
+      'Who lives with you in the apartment?',
+      'Can I ask how old you are?',
+    ], [
+      { label: '"when did you get the notice?" gives 3 October', must: /\b3(rd)? (of )?October|October (3(rd)?|third)\b|third of October/i },
+      { label: '"how much is your rent?" gives $1,450', must: /1,?450|fourteen fifty|fourteen hundred and fifty/i },
+      { label: '"who lives with you?" names Mia', must: /\bMia\b/ },
+      { label: `age is ${ageOn('1992-06-18')} (from the date of birth)`, must: ageRe('1992-06-18') },
+    ]),
+    probeFacts('partner', [
+      "Thanks for meeting me, Dana. I'm Chris from Interior Logistics. Before I say anything about us, what's not working with your current supplier?",
+      'That sounds costly. What are you paying FastLane at the moment?',
+      'Who else is involved in making this decision?',
+      'And when do you need to have a decision made?',
+    ], [
+      { label: '"what\'s not working?" gives the late deliveries', must: /late|Friday|festival|missed/i },
+      // Holding the number back until the student has earned it is in character; giving a different one is not.
+      { label: '"what are you paying?" gives $52,000 or declines, never another figure', must: /[\s\S]/, never: /\$?\b(?!52,?000|48,?000)\d{2,3},\d{3}\b/ },
+      { label: '"who else decides?" names the CFO, Priya Nand', must: /Priya|Nand|CFO/i },
+      { label: '"when do you need a decision?" gives 15 November', must: /15(th)? (of )?November|November 15|mid-November|fifteenth/i },
+    ]),
+  ];
 }
 
 // ─── Static checks: identity and coach copy (item 6) ────────────────────────
@@ -339,7 +404,9 @@ function writeResult(id: string, data: Record<string, unknown>): void {
 console.log(`Persona replay → ${OUT}\nmodels: persona ${process.env.PERSONA_MODEL}, debrief ${process.env.GEN_MODEL}\n`);
 staticChecks();
 const jobs: Promise<void>[] = [...scripts.map(replayScript), ...recorded.map(replayRecorded)];
-if (!filter || 'patient'.includes(filter) || filter.includes('probe')) jobs.push(probeCaseFile(), probeTechnique());
+const probes = !filter || filter.includes('probe') || filter.includes('compare');
+if (probes || 'patient'.includes(filter)) jobs.push(patientProbe('patient').then(() => {}), probeTechnique('patient'));
+if (probes) jobs.push(patientProbe('patient-factsheet').then(() => {}), probeTechnique('patient-factsheet'), ...nonClinicalProbes().map((p) => p.then(() => {})));
 const settled = await Promise.allSettled(jobs);
 for (const s of settled) if (s.status === 'rejected') check(0, 'harness', 'a replay ran to the end', false, String((s.reason as Error)?.message ?? s.reason));
 if (useDb) await stateCheck().catch((e) => check(2, 'debrief state (Postgres)', 'ran to the end', false, (e as Error).message));
@@ -349,8 +416,10 @@ const failed = checks.filter((c) => !c.pass);
 const summary = [`# Persona replay ${stamp}`, '', `Models: persona ${process.env.PERSONA_MODEL}, debrief ${process.env.GEN_MODEL}. ${checks.length - failed.length} of ${checks.length} checks passed.`, '',
   '| Item | Where | Check | Result | Detail |', '|---|---|---|---|---|',
   ...checks.sort((a, b) => a.item - b.item).map((c) => `| ${c.item || '–'} | ${c.where} | ${c.name} | ${c.pass ? 'pass' : '**FAIL**'} | ${c.detail.replace(/\|/g, '\\|').replace(/\n/g, ' ')} |`),
-  '', 'Item 0 is speed and harness health; 1–7 are the report\'s items.'].join('\n');
+  '', 'Item 0 is speed and harness health; 1–7 are the report\'s items.',
+  ...(comparisons.length ? ['', '## Fixed facts: case file and fact sheet', '', '| Persona | Model | Prompt block (chars) | Consistent across 5 sessions | Technique | Median reply |', '|---|---|---|---|---|---|',
+    ...comparisons.map((c) => ({ ...c, technique: techniqueNotes.get(c.persona) ?? c.technique })).sort((a, b) => a.persona.localeCompare(b.persona)).map((c) => `| ${c.persona} | ${c.model} | ${c.chars.toLocaleString()} | ${c.asked ? `${c.consistent}/${c.asked}` : '–'} | ${c.technique} | ${c.median_reply_ms ? (c.median_reply_ms / 1000).toFixed(1) + ' s' : '–'} |`)] : [])].join('\n');
 writeFileSync(join(OUT, 'summary.md'), summary);
-writeFileSync(join(OUT, 'summary.json'), JSON.stringify({ stamp, checks, results: results.map((r) => ({ id: r.id, turns: r.turns.length, median_reply_ms: median(r.timings.map((t) => t.total_ms)), debrief_ms: r.debrief_ms })) }, null, 2));
+writeFileSync(join(OUT, 'summary.json'), JSON.stringify({ stamp, checks, comparisons, results: results.map((r) => ({ id: r.id, turns: r.turns.length, median_reply_ms: median(r.timings.map((t) => t.total_ms)), debrief_ms: r.debrief_ms })) }, null, 2));
 console.log(`\n${checks.length - failed.length}/${checks.length} checks passed. ${OUT}/summary.md`);
 process.exit(failed.length ? 1 : 0);

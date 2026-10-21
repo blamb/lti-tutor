@@ -113,3 +113,29 @@ test('course launches give the persona no name; the coach copy fits the template
   assert.ok(!/consent|cue/i.test(coachSystemFor(thinker)), 'no patient-interview habits for a thinker');
   assert.ok(/End conversation button/.test(coachSystemFor(client)));
 });
+
+test('the fact sheet: fixed sections, designer sections, computed age, and no block when empty', async () => {
+  const { FactSheet, factSheetBlock, isEmptyFactSheet, FACT_SHEET_PRESETS } = await import('./factsheet.js');
+  const f = FactSheet.parse({
+    name: 'Dana Okafor', preferred_name: 'Dana', date_of_birth: '1980-11-02', why_here: 'The delivery contract is up for renewal.',
+    sections: [{ title: 'Walk-away point', facts: ['Will not pay more than $48,000 a year.'] }, { title: 'Empty', facts: [] }],
+    cues: [{ cue: 'Fridays have been a nightmare.', follow_up: 'A missed festival order.', condition: 'Asked what went wrong' }],
+  });
+  const block = factSheetBlock(f, new Date('2026-10-21T12:00:00Z'));
+  assert.ok(block.includes('## Fact sheet (canonical facts)'));
+  assert.ok(block.includes('Today you are 45 years old'));
+  assert.ok(block.includes('### Walk-away point\n- Will not pay more than $48,000 a year.'));
+  assert.ok(!block.includes('### Empty'), 'a section without facts is left out');
+  assert.ok(block.includes('Disclose when: Asked what went wrong'));
+  assert.ok(isEmptyFactSheet(FactSheet.parse({ preset: 'health' })), 'a preset alone is not content');
+  assert.equal(factSheetBlock(FactSheet.parse({})), '');
+  assert.ok(FACT_SHEET_PRESETS.some((p) => p.id === 'negotiation') && FACT_SHEET_PRESETS.some((p) => p.id === 'health'));
+});
+
+test('a fact sheet reaches the prompt for any template, alongside a case file when both are set', async () => {
+  const { personaBlock, PersonaInput } = await import('./personas.js');
+  const p = (input: Record<string, unknown>) => ({ id: 1, lti_iss: 'x', lti_context_id: 'y', created_by: null, created_at: '', updated_at: '', public_slug: '', passcode_hash: '', ...(({ passcode, ...rest }) => rest)(PersonaInput.parse(input)) });
+  assert.ok(personaBlock(p({ title: 'Dana', template: 'partner', fact_sheet: { name: 'Dana Okafor' } })).includes('## Fact sheet'));
+  const both = personaBlock(p({ title: 'M', template: 'client', case_record: { name: 'Margaret' }, fact_sheet: { name: 'Margaret' } }));
+  assert.ok(both.includes('## Case file') && both.includes('## Fact sheet'));
+});

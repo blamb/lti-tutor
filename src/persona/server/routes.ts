@@ -17,7 +17,7 @@
  *   GET  /api/personas/session/:sid/transcript.html | .md   (?download=1)
  *
  * Instructor
- *   GET  /api/teacher/catalog                    -> { templates, models, model_default }
+ *   GET  /api/teacher/catalog                    -> { templates, models, model_default, fact_sheet_presets }
  *   GET/POST /api/teacher/personas, GET/PUT/DELETE /api/teacher/personas/:id
  *   POST /api/teacher/personas/draft             { text, template } -> { draft }
  *   GET  /api/teacher/personas/:id/report        -> { rows, totals, synthesis }   (live conversations, debriefs, reflections)
@@ -65,6 +65,7 @@ import {
 } from './personas.js';
 import { requestDebrief, debriefStatus, clientSession, normalizeDebrief } from './debrief.js';
 import { hasEndIntent } from './signals.js';
+import { FACT_SHEET_PRESETS } from './factsheet.js';
 import { postCompletion, type GradeResult } from '../../core/grades.js';
 
 // The course-import commit sends every selected material's text back in one
@@ -344,7 +345,7 @@ lti.app.get('/api/personas/session/:sid/transcript.:format', async (req: Request
 lti.app.get('/api/teacher/catalog', async (req: Request, res: Response) => {
   const t = await teacher(res);
   if (!t) return;
-  res.json({ templates: templateCatalog(), models: PERSONA_MODELS, model_default: env.PERSONA_MODEL });
+  res.json({ templates: templateCatalog(), models: PERSONA_MODELS, model_default: env.PERSONA_MODEL, fact_sheet_presets: FACT_SHEET_PRESETS });
 });
 
 lti.app.get('/api/teacher/personas', async (req: Request, res: Response) => {

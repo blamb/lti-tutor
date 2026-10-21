@@ -35,6 +35,7 @@ import { searchPassages, ensureChunks, type Passage } from '../../core/chunks.js
 import { checkQuotes, type QuoteCheck } from '../../core/quotes.js';
 import { env } from './env.js';
 import { CaseRecord, caseRecordOf, caseFileBlock } from './casefile.js';
+import { FactSheet, factSheetOf, factSheetBlock } from './factsheet.js';
 import { QuoteBook, quoteBookOf, quoteBookBlock, quoteBookSources } from './quotebook.js';
 import { personaWords, notesToMarkdown } from './signals.js';
 import { debriefMarkdown, normalizeDebrief, claimTexts, type PersonaDebrief } from './debrief.js';
@@ -96,6 +97,8 @@ export interface Persona {
   material_ids: number[];
   /** A simulated patient's or client's fixed facts (casefile.ts). Never sent to a student's browser. */
   case_record: CaseRecord;
+  /** Any template's fixed facts, as fixed and designer-defined sections (factsheet.ts). Never sent to a student's browser. */
+  fact_sheet: FactSheet;
   /** A thinker's vetted quotations, misattributions and reading list (quotebook.ts). */
   quote_book: QuoteBook;
   status: PersonaStatus;
@@ -167,6 +170,7 @@ export const PersonaInput = z.object({
   model: z.string().trim().max(60).default('').refine((m) => m === '' || isKnownModel(m), 'unknown model'),
   material_ids: z.array(z.number().int().positive()).max(40).default([]),
   case_record: CaseRecord.default(CaseRecord.parse({})),
+  fact_sheet: FactSheet.default(FactSheet.parse({})),
   quote_book: QuoteBook.default(QuoteBook.parse({})),
   status: z.enum(['draft', 'published', 'archived']).default('draft'),
 });
@@ -217,9 +221,9 @@ const COLUMNS = [
   'template', 'title', 'subtitle', 'summary', 'student_role', 'setting', 'student_brief', 'character', 'voice', 'behaviour',
   'hidden', 'guardrails', 'historical_cutoff', 'raw_instructions', 'objectives', 'debrief_guidance', 'opening', 'opening_line',
   'response_length', 'voice_pref', 'coach', 'gradebook', 'visibility', 'public_daily_usd', 'public_max_turns', 'model', 'material_ids',
-  'case_record', 'quote_book', 'status',
+  'case_record', 'fact_sheet', 'quote_book', 'status',
 ] as const;
-const JSONB_COLUMNS = new Set<string>(['case_record', 'quote_book']);
+const JSONB_COLUMNS = new Set<string>(['case_record', 'fact_sheet', 'quote_book']);
 /** Placeholder and value for column c at position n: objects go to jsonb as text (pg would turn arrays into Postgres arrays). */
 const placeholder = (c: string, n: number) => (JSONB_COLUMNS.has(c) ? `$${n}::jsonb` : `$${n}`);
 const paramFor = (c: string, v: unknown) => (JSONB_COLUMNS.has(c) ? JSON.stringify(v ?? {}) : v);
@@ -351,6 +355,7 @@ export function personaBlock(p: Persona, givenName = '', now: Date = new Date())
   const head = `# PERSONA: ${p.title}${p.subtitle ? ` (${p.subtitle})` : ''}\n`;
   const body =
     caseFileBlock(caseRecordOf(p.case_record), now) +
+    factSheetBlock(factSheetOf(p.fact_sheet), now) +
     quoteBookBlock(quoteBookOf(p.quote_book)) +
     section('Who you are', p.character) +
     section('How you talk', p.voice) +

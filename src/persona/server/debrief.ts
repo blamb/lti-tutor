@@ -27,6 +27,7 @@ import type { Attribution } from '../../core/costs.js';
 import { getSessionTurns, type Turn } from '../../core/conversations.js';
 import { TEMPLATES } from './templates.js';
 import { caseFileBlock, caseRecordOf } from './casefile.js';
+import { factSheetBlock, factSheetOf } from './factsheet.js';
 import { visibleTurns, type Persona, type PersonaSession } from './personas.js';
 
 // ─── Shape ──────────────────────────────────────────────────────────────────
@@ -96,7 +97,7 @@ export function numberedTranscript(turns: Pick<Turn, 'role' | 'content'>[], pers
 export function debriefSystemFor(p: Persona, now: Date = new Date()): string {
   const spec = TEMPLATES[p.template];
   const objectives = objectivesOf(p);
-  const caseFile = caseFileBlock(caseRecordOf(p.case_record), now);
+  const caseFile = caseFileBlock(caseRecordOf(p.case_record), now) + factSheetBlock(factSheetOf(p.fact_sheet), now);
   return `You write the debrief after ${spec.debriefFrame}. You are not the persona; you write as a supportive, observant coach, to the student as "you". Use a name only if the student gave one in the conversation. The student's role: ${p.student_role || 'a student'}. Setting: ${p.setting || 'unspecified'}.
 
 The transcript's turns are numbered [T1], [T2] and so on. Every item you write rests on what happened in particular turns and lists those turn numbers in "turns". If you cannot point to a turn for something, leave it out.
@@ -105,7 +106,7 @@ ${objectives.length
     ? `Objectives. Report on exactly these, one entry each, in this order, with each name exactly as written:\n${objectives.map((o) => `- ${o}`).join('\n')}\nIf the conversation gave nothing on one, say so in one sentence and cite the turns where it could have come up.`
     : 'The instructor set no objectives: write no by_objective entries; judge the quality of the student\'s questions and thinking in the other fields.'}
 
-${p.hidden.trim() ? `What the persona was holding back (the student never saw this; use it to say what they drew out and what a better question could have reached):\n${p.hidden}\n` : ''}${caseFile ? `The persona's case file (fixed facts; the student never saw it):${caseFile}\n` : ''}${p.debrief_guidance.trim() ? `The instructor's guidance for this debrief:\n${p.debrief_guidance}\n` : ''}
+${p.hidden.trim() ? `What the persona was holding back (the student never saw this; use it to say what they drew out and what a better question could have reached):\n${p.hidden}\n` : ''}${caseFile ? `The persona's fixed facts (case file or fact sheet; the student never saw them):${caseFile}\n` : ''}${p.debrief_guidance.trim() ? `The instructor's guidance for this debrief:\n${p.debrief_guidance}\n` : ''}
 Rules:
 - Praise only what the cited turns show. Be specific, honest and brief.
 - Before suggesting a question or topic, read every student turn. Never suggest something the student already asked, in any wording. If they asked and the answer was thin, a follow-up that goes further is fine, but say what they asked and cite that turn.

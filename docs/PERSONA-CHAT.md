@@ -54,6 +54,8 @@ The persona never receives the LMS display name. A course launch tells it that i
 
 A simulated client carries a **case file** (`persona.case_record`, `casefile.ts`): name and date of birth, presenting complaint, referral source, history, medications with over-the-counter ones apart and the words the patient uses for each, allergies, home and social life, planted cues and disclosure rules. It goes into the persona block as canonical facts, so every session gives the same answers to "who sent you in?" or "what medications are you on?". Age is never stored: it is computed from the date of birth when the prompt is built (78 in October 2026 for a 1948-03-04 birth).
 
+Beside it, for comparison, any template can carry a **fact sheet** (`persona.fact_sheet`, `factsheet.ts`): the sections every persona has (who they are with an optional date of birth, why they are here, history, circumstances, cues, disclosure rules) plus sections the designer names, such as *Medications*, *The matter* or *Walk-away point*. Presets (health care, social work, legal, negotiation, historical figure) only suggest section titles. Both blocks reach the prompt if both are filled. The harness compares them: the simulated patient as a case file and as a fact sheet with the same facts, plus a tenant at a legal clinic and a negotiation counterpart that only a fact sheet can describe.
+
 A thinker carries a **quote book** (`persona.quote_book`, `quotebook.ts`): vetted quotations with source and year, known misattributions with the answer to give, and the only reading it may recommend. Vetted quotations also count as sources for the quotation check, so they get the same chip as a quotation found in the materials.
 
 ### Out-of-character notes and end requests

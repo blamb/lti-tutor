@@ -74,6 +74,8 @@ Long documents (a reading, a novel) belong under Materials, not in the paste box
 
 **A simulated patient needs a case file.** For the *simulated client or patient* template, the **Case file** section holds the facts every student must meet the same way: name and date of birth (the age is worked out on the day), why they came in, who sent them, history, medications one per line (mark over-the-counter ones *OTC* and give the words the patient uses), home life (who does the cooking), planted cues and disclosure rules. Without it the model improvises, and five students hear five different answers to "what medications are you on?".
 
+**Any persona can have a fact sheet.** The **Fact sheet** section, shown for every template, holds the same kind of fixed facts in a general form: a few sections every persona has, then your own, written as a `## Heading` line with one fact per line beneath it. Pick a preset to add suggested headings (*Health care* adds Medications, Allergies and Who sent them; *Negotiation* adds Their interests, Constraints and Walk-away point). On a simulated patient it sits beside the case file while the two are compared: fill one or the other.
+
 **A thinker needs a quote book.** For the *thinker* template, **Quotations and reading** holds quotations you have checked, with source and year, the misattributed lines students tend to bring and what the thinker should say about them, and the only books the thinker may recommend.
 
 **Objectives drive the debrief.** Each line becomes a heading the debrief reports under, with examples from the conversation. Five is plenty. "Therapeutic communication" and "Recognise tensions and counterarguments" are the right grain.
