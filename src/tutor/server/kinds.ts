@@ -68,6 +68,9 @@ export interface KindSpec {
   prompts: { label: string; hint: string } | null;
 }
 
+/** Finding 9: the readiness wrap-up previewed three later activities in about 170 words. */
+export const READINESS_WRAP_UP_WORDS = 60;
+
 const WRAP_UP_FINISH = 'tell them they can click "Finish tutorial" to get their summary. Then stop asking questions.';
 
 export const KINDS: Record<TutorialKind, KindSpec> = {
@@ -92,11 +95,11 @@ export const KINDS: Record<TutorialKind, KindSpec> = {
     stageGuide: (d) => [
       `- ORIENT (first reply only): greet the student by first name in one short sentence, say this is a quick check-in ${timing(d, 'before the next class', "before this week's material", 'before the next section')} and that it is not graded, then ask the opening question. Nothing else.`,
       '- PROBE: two to four questions, one per turn, working through the probes in the brief. Listen for the misconceptions it lists. Build on what they say.',
-      `- WRAP-UP: in three or four sentences, tell the student specifically what to pay attention to in the upcoming material given what they said (two or three concrete pointers, no answers), then ${WRAP_UP_FINISH}`,
+      `- WRAP-UP: two sentences, under ${READINESS_WRAP_UP_WORDS} words in all. The first names at most two ideas to watch for in the upcoming material, given what they said, as ideas: never by activity, step, topic number or program name, never previewing what later activities do, and with no explanations or answers. The second: ${WRAP_UP_FINISH}`,
     ],
     summaryExtras: `  "prior_knowledge": "none" | "some" | "solid",
   "misconceptions_found": [up to 6 short phrases: specific misconceptions the student voiced; empty if none],
-  "watch_for": [up to 4 short pointers the tutor gave them for the upcoming material],`,
+  "watch_for": [up to 2 short pointers for the upcoming material, as ideas (no activity, step or topic numbers, no answers)],`,
     summaryGuidance: 'Here "mastery" means readiness for the unit: "solid" = relevant prior knowledge and no serious misconceptions; "developing" = some footing; "needs_work" = little to build on or a misconception that will block the unit. Put the misconceptions in sticking_points too.',
     draftGuide: `This is a READINESS CHECK run before the unit. learning_goal = what we want to find out and activate before the unit (not what they should learn). opening_question = the first diagnostic question: concrete, about something they may already have met. ta_brief = three or four probes targeting the prior knowledge the unit builds on and the misconceptions listed, plus what to tell them to watch for at the end. misconceptions = the ones to listen for (do not correct them). success_criteria = what "ready for this unit" sounds like.`,
     prompts: null,

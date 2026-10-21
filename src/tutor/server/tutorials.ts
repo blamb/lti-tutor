@@ -41,7 +41,7 @@ import { recordApiCall, type Attribution } from '../../core/costs.js';
 import type { Student } from '../../core/students.js';
 import { COURSE_LEVEL_LABELS, type CourseCtx } from './courses.js';
 import type { Delivery } from './delivery.js';
-import { KINDS, TUTORIAL_KINDS, stageForRun, keyTermsFor, teachBackAskedAt, type TeachBackState, type TutorialKind } from './kinds.js';
+import { KINDS, TUTORIAL_KINDS, stageForRun, keyTermsFor, teachBackAskedAt, READINESS_WRAP_UP_WORDS, type TeachBackState, type TutorialKind } from './kinds.js';
 import { jsonCall, textOf } from '../../core/llm.js';
 import { listLearnerModel, learnerModelBlock, recallCandidates, recallCandidatesBlock, updateLearnerModelFromSummary } from './learner.js';
 import { ensureCourseConcepts, parseConceptLines, listCourseConcepts } from './concepts.js';
@@ -598,14 +598,19 @@ export function questionsIn(message: string): string[] {
 }
 
 /** The progress note, the one uncached block: changes at stage transitions and while a teach-back is held. */
-export function progressNote(studentTurns: number, target: number, stage: string, teachBack: TeachBackState, lastStudentMessage = ''): string {
+export function progressNote(studentTurns: number, target: number, stage: string, teachBack: TeachBackState, lastStudentMessage = '', kind: TutorialKind = 'concept'): string {
   let note = `# PROGRESS NOTE\nStudent turns so far: ${studentTurns} of about ${target}. Current stage: ${stage}.`;
   const asked = questionsIn(lastStudentMessage);
   if (asked.length) {
     note += `\nThe student asked you: ${asked.map((q) => `"${q}"`).join(' and ')}. Answer that first, in one sentence, or say plainly that you cannot see it in the materials; then carry on.`;
   }
   if (studentTurns > 0) {
-    note += "\nBefore you reply, check each statement of fact in the student's last message against the materials. If one is false, your reply opens by stating the correct fact in one plain sentence (\"Actually, …\"), with no praise for that part, unless the kind-specific rules say to note misconceptions without correcting them. If everything they said is right, say so plainly. A prediction they are about to test is not a statement of fact: follow the brief, never call it good, and send them to check it against their output.";
+    note += kind === 'readiness'
+      ? "\nThis is a readiness check: if something in the student's last message is false, do not correct it and do not praise or agree with it; acknowledge it neutrally and move on. The instructor will see it in your summary."
+      : "\nBefore you reply, check each statement of fact in the student's last message against the materials. If one is false, your reply opens by stating the correct fact in one plain sentence (\"Actually, …\"), with no praise for that part, unless the kind-specific rules say to note misconceptions without correcting them. If everything they said is right, say so plainly. A prediction they are about to test is not a statement of fact: follow the brief, never call it good, and send them to check it against their output.";
+  }
+  if (kind === 'readiness' && stage === 'WRAP-UP') {
+    note += `\nThis is your last turn. Write exactly two sentences and nothing else (under ${READINESS_WRAP_UP_WORDS} words): one naming at most two ideas to watch for in the module, as ideas, with no activity, step, topic or program names, no previews and no explanations; then one saying they can click "Finish tutorial" to get their summary.`;
   }
   if (stage === 'TEACH-BACK' && teachBack === 'not_reached') {
     note += "\nUnless the student's last answer left a question open, this is the turn to ask for the teach-back: one open question asking them to explain the core idea in their own words, as the brief describes. Do not explain anything yourself.";
@@ -661,7 +666,7 @@ export function tutorTurnRequest(params: {
     text: `${brief}\n\n# STUDENT PROFILE\n${profileBlock(student, profile)}${extraText}`,
     cache_control: { type: 'ephemeral' },
   });
-  system.push({ type: 'text', text: progressNote(texts.length, target, stage, teachBack, texts[texts.length - 1] ?? '') });
+  system.push({ type: 'text', text: progressNote(texts.length, target, stage, teachBack, texts[texts.length - 1] ?? '', tutorial.kind) });
   return { system, messages, stage, studentTurns: texts.length };
 }
 
@@ -868,6 +873,8 @@ export function groundSummary(
   const student_note = kept.join(' ') || `Thanks for working through this session, ${first}.${draft.next_step ? ` Next: ${draft.next_step}` : ''}`;
 
   const summary = { ...draft, mastery, understood: understood.slice(0, 6), sticking_points: sticking.slice(0, 6), told: told.slice(0, 6), student_note } as Omit<TutorialSummary, 'turns'>;
+  // Finding 9: a readiness summary names at most two things to watch for.
+  if (draft.kind === 'readiness') (summary as unknown as { watch_for: string[] }).watch_for = (draft.watch_for ?? []).slice(0, 2);
   // Finding 5: no attitude labels in any other field either (strategy, plan, next step …).
   const fields = summary as unknown as Record<string, unknown>;
   for (const [k, v] of Object.entries(fields)) {

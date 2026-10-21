@@ -190,3 +190,40 @@ export const reflectionTerse: Turn[] = [
   t('user', 'look for a typo in my code probably'),
   t('assistant', 'That works as a start. You can click "Finish tutorial" to get your summary.'),
 ];
+
+/** The live readiness check (moodbox course 14), read on 2026-10-20. Its brief ends with a one-line preview of the module. */
+export const readiness: Tutorial = {
+  ...hero,
+  id: 7,
+  kind: 'readiness',
+  title: 'Before you start Module 8: what do you already think linking does?',
+  learning_goal: 'Find out what the student already believes about how a C program is built and run: whether they know gcc runs several tools in sequence, whether they think a clean compile guarantees a working program, and how they imagine many programs sharing printf. Activate what they remember of the gcc pipeline (Module 3) and memory layout (Module 6) so Module 8 can zoom in on linking and loading.',
+  opening_question: "You've written a C program that calls printf. You never wrote printf yourself. Before your program runs, what has to happen to the machine code for printf so your program can use it?",
+  ta_brief: `Listen for their mental model of the build process. Do they know gcc runs multiple tools in sequence? Can they name any of them (preprocessor, compiler, assembler, linker)? Do they think linking is optional, or do they know it's the step that combines files?
+
+Probe 1 (from Module 3 review): "Sketch the four stages gcc runs, and name the tool that runs at each stage. Which stage's output do you get with gcc -c?" This tells you if they remember the pipeline and understand that -c stops before linking.
+
+Probe 2 (from the module's opening questions): "A classmate says, 'My code compiled without errors, so there's no problem in my files.' Can they be wrong? Give an example." Listen for: do they know the compiler and linker are separate? Can they imagine a symbol (a function or global variable name) being declared but not defined?
+
+Probe 3 (library sharing): "Three programs all call printf. In memory, are there three copies of printf, or one? How does that work?" This exposes whether they know about shared libraries, or whether they assume each executable includes its own copy of everything.
+
+End by saying: "In this module we'll open up the object files and executables with real tools like nm and objdump. You'll see the symbols each file defines and uses, watch the linker match them up, and trace one function call from a placeholder in main.o all the way to a finished address in the executable."`,
+  misconceptions: `They think linking is automatic or invisible—probe by asking what gcc does when you run "gcc -o coffee main.c tax.c".
+They think a file that compiles without error will always link—ask about a call to a function that's declared but never defined anywhere.
+They think each running program has its own copy of printf—ask how three simultaneous programs share memory in a 2 GB system.`,
+  success_criteria: `Ready: names at least three of the four gcc stages, knows -c stops before linking, can imagine a function that is declared but defined nowhere, and suspects that programs share one copy of printf rather than each holding their own.
+Partly ready: remembers the pipeline vaguely but treats compile and link as one step.
+Not yet: believes gcc is a single program, or that a clean compile means the program is correct, with nothing from Module 3 or 6 to build on.`,
+  material_ids: [1, 2],
+  target_minutes: 5,
+};
+
+/** Round 2's readiness check (Test Student2): an experienced programmer, three answers, then the wrap-up. */
+export const readinessRound2: Turn[] = [
+  t('assistant', "Hi Test, this is a quick check-in before this week's material, and it is not graded. You've written a C program that calls printf. You never wrote printf yourself. Before your program runs, what has to happen to the machine code for printf so your program can use it?"),
+  t('user', "The linker has to connect my call to printf's code in libc. Usually that's dynamic, so the loader maps libc in at run time and the call goes through a stub."),
+  t('assistant', 'Sketch the four stages gcc runs, and which stage gcc -c stops at.'),
+  t('user', 'Preprocessor, compiler (cc1), assembler (as), linker (ld). gcc -c stops after the assembler and gives you a .o file.'),
+  t('assistant', 'Three programs all call printf. In memory, are there three copies of printf, or one?'),
+  t('user', 'I think each process gets its own copy of libc in RAM, since processes are isolated from each other.'),
+];
