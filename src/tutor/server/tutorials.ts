@@ -45,6 +45,7 @@ import { KINDS, TUTORIAL_KINDS, stageForRun, keyTermsFor, teachBackAskedAt, type
 import { jsonCall, textOf } from '../../core/llm.js';
 import { listLearnerModel, learnerModelBlock, recallCandidates, recallCandidatesBlock, updateLearnerModelFromSummary } from './learner.js';
 import { ensureCourseConcepts, parseConceptLines, listCourseConcepts } from './concepts.js';
+import { checkReferences } from './references.js';
 
 export type { CourseCtx } from './courses.js';
 // Materials live in core (both apps store them the same way); re-exported so
@@ -486,7 +487,9 @@ function buildTutorialRules(d: Delivery, kind: TutorialKind): string {
     'Vary technique: definition-probing, counter-example, cause-effect chain, zooming in and out between detail and big picture, analogy stress-test.',
     "If the student raises something correct that's adjacent to the goal, credit it briefly before steering back.",
     'Stay grounded in the course materials provided. If none are attached, draw on general knowledge of the subject described in the brief, and say so if asked where something comes from. If the student asks something outside the materials, say what you can and point them to the instructor.',
-    'When you draw on a course material, name it — its title and, if you can tell, the chapter or section — so the student can find the passage themselves in the open textbook or notes. Briefly, in passing; never as a citation list.',
+    'When you draw on a course material, name it — its title and the section, step or activity as the material itself names it — so the student can find the passage themselves in the open textbook or notes. Briefly, in passing; never as a citation list.',
+    'Name or number a topic, section, step or activity, and quote code or a command, only as it appears in the materials provided. If you cannot find it there, describe it in plain words without a name or number, and never reconstruct code from memory.',
+    "Never say what the student's own computer, VM or compiler will print or do: you cannot see it. Say what the materials say happens, and ask them to check on their VM.",
     "Where the materials include the course's own activities or study questions, prefer those as your probes, adapted to the moment, before inventing your own.",
     "Personalise lightly: about one example or analogy in ten should draw on the student's own context and interests. Never make the tutorial about them instead of the subject.",
   ];
@@ -667,9 +670,9 @@ export async function streamTutorialReply(params: {
   const turns = await getSessionTurns(sessionId);
   const extras = [learnerModelBlock(await listLearnerModel(student.id, ctx))];
   if (tutorial.kind === 'recall') extras.push(recallCandidatesBlock(await recallCandidates(student.id, ctx)));
+  const materials = await getMaterials(tutorial.material_ids, ctx);
   const { system, messages, stage, studentTurns } = tutorTurnRequest({
-    tutorial, ctx, turns, student, profile,
-    materials: await getMaterials(tutorial.material_ids, ctx),
+    tutorial, ctx, turns, student, profile, materials,
     brief: await briefFor(tutorial, ctx),
     learnerBlocks: extras,
   });
@@ -686,6 +689,11 @@ export async function streamTutorialReply(params: {
     }
   }
   await appendTurn(sessionId, 'assistant', assistantText);
+  // Finding 6: log references and VM claims the materials do not support (no text of the reply is logged).
+  if (materials.length) {
+    const issues = checkReferences(assistantText, materials);
+    if (issues.length) console.info(`reference check, session ${sessionId}: ${issues.map((i) => `${i.kind} "${i.text.slice(0, 60)}"`).join('; ')}`);
+  }
 
   try {
     const final = await stream.finalMessage();
