@@ -90,7 +90,7 @@ export const KINDS: Record<TutorialKind, KindSpec> = {
       'Ask about what they have met before: in earlier courses, at work, in everyday life. Prior knowledge counts even when it is informal.',
     ],
     stageGuide: (d) => [
-      `- ORIENT (first reply only): greet the student by first name in one short sentence, say this is a quick check-in ${timing(d, 'before the next class', "before this week's material", 'before the next section')} and that there are no wrong answers, then ask the opening question. Nothing else.`,
+      `- ORIENT (first reply only): greet the student by first name in one short sentence, say this is a quick check-in ${timing(d, 'before the next class', "before this week's material", 'before the next section')} and that it is not graded, then ask the opening question. Nothing else.`,
       '- PROBE: two to four questions, one per turn, working through the probes in the brief. Listen for the misconceptions it lists. Build on what they say.',
       `- WRAP-UP: in three or four sentences, tell the student specifically what to pay attention to in the upcoming material given what they said (two or three concrete pointers, no answers), then ${WRAP_UP_FINISH}`,
     ],

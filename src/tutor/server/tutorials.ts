@@ -481,7 +481,8 @@ function buildTutorialRules(d: Delivery, kind: TutorialKind): string {
   const shared = [
     'One question per turn. Never stack questions.',
     'Don\'t hand over answers the student could be guided to. When their reasoning goes wrong, ask the question that exposes the contradiction rather than saying "no".',
-    'Before you acknowledge a student turn, check every factual claim in it against the course materials and the misconceptions in the brief. If a claim is false, do not praise or agree with that turn (no "good", "exactly", "right direction", "spot on", "I like that") and never build on the claim. Unless the kind-specific rules below say to note misconceptions without correcting them, say plainly in one sentence what is actually the case ("Actually, …" or "Not quite: …"), then ask one question that lets them apply it. Pushing back with only a question is not enough for a false fact: they must hear the correct fact from you in that same reply. You may still credit a different part of the turn that is right, by name ("the first part is right"), before the correction.',
+    'Before you acknowledge a student turn, check every factual claim in it against the course materials and the misconceptions in the brief. If a claim is false, do not praise or agree with that turn (no "good", "exactly", "right direction", "spot on", "I like that") and never build on the claim. Unless the kind-specific rules below say to note misconceptions without correcting them, say plainly in one sentence what is actually the case ("Actually, …" or "Not quite: …"), then ask one question that lets them apply it. Pushing back with only a question is not enough for a false fact: they must hear the correct fact from you in that same reply. You may still credit a different part of the turn that is right, by name ("the first part is right"), before the correction. When everything in their answer is right, say so plainly first ("Yes, that\'s right"); never say "very close" or "almost" and then agree with them.',
+    'When the student asks you a direct question about the course or its materials, answer it in your first sentence, or say plainly that you cannot see that in the materials, before you ask anything.',
     'A prediction the student is about to test may be left for their output to settle if the brief says so, but never call a false prediction good or likely, never plan the next step as if it were true, and tell them to check it against what the terminal shows.',
     "Use the student's own words back to them when probing.",
     'Vary technique: definition-probing, counter-example, cause-effect chain, zooming in and out between detail and big picture, analogy stress-test.',
@@ -584,11 +585,27 @@ function askedAt(turns: Pick<Turn, 'role' | 'content'>[]): number | null {
   return teachBackAskedAt(turns, (c) => c.startsWith(START_MARKER));
 }
 
+/** Finding 7: the questions in a student message (sentences ending in "?"), so the tutor is told to answer them. */
+export function questionsIn(message: string): string[] {
+  if (message.startsWith(START_MARKER)) return [];
+  // Only sentences that open like a question: "C maybe also fails?" is a hedged answer, not a question to answer.
+  const opener = /^(?:(?:so|and|but|ok|okay|wait|um|also|then|sorry|hmm),?\s+)*(?:what|why|how|which|where|when|who|whose|is|are|was|were|isn'?t|aren'?t|does|do|did|doesn'?t|don'?t|can|could|should|would|will|won'?t|shall|may|might|has|have|had)\b/i;
+  return (message.replace(/\s+/g, ' ').match(/[^.!?]*\?/g) ?? [])
+    .map((q) => q.trim())
+    .filter((q) => q.split(' ').length >= 3 && opener.test(q))
+    .slice(0, 2)
+    .map((q) => q.slice(0, 200));
+}
+
 /** The progress note, the one uncached block: changes at stage transitions and while a teach-back is held. */
-export function progressNote(studentTurns: number, target: number, stage: string, teachBack: TeachBackState): string {
+export function progressNote(studentTurns: number, target: number, stage: string, teachBack: TeachBackState, lastStudentMessage = ''): string {
   let note = `# PROGRESS NOTE\nStudent turns so far: ${studentTurns} of about ${target}. Current stage: ${stage}.`;
+  const asked = questionsIn(lastStudentMessage);
+  if (asked.length) {
+    note += `\nThe student asked you: ${asked.map((q) => `"${q}"`).join(' and ')}. Answer that first, in one sentence, or say plainly that you cannot see it in the materials; then carry on.`;
+  }
   if (studentTurns > 0) {
-    note += "\nBefore you reply, check each statement of fact in the student's last message against the materials. If one is false, your reply opens by stating the correct fact in one plain sentence (\"Actually, …\"), with no praise for that part, unless the kind-specific rules say to note misconceptions without correcting them. A prediction they are about to test is not a statement of fact: follow the brief, never call it good, and send them to check it against their output.";
+    note += "\nBefore you reply, check each statement of fact in the student's last message against the materials. If one is false, your reply opens by stating the correct fact in one plain sentence (\"Actually, …\"), with no praise for that part, unless the kind-specific rules say to note misconceptions without correcting them. If everything they said is right, say so plainly. A prediction they are about to test is not a statement of fact: follow the brief, never call it good, and send them to check it against their output.";
   }
   if (stage === 'TEACH-BACK' && teachBack === 'not_reached') {
     note += "\nUnless the student's last answer left a question open, this is the turn to ask for the teach-back: one open question asking them to explain the core idea in their own words, as the brief describes. Do not explain anything yourself.";
@@ -644,7 +661,7 @@ export function tutorTurnRequest(params: {
     text: `${brief}\n\n# STUDENT PROFILE\n${profileBlock(student, profile)}${extraText}`,
     cache_control: { type: 'ephemeral' },
   });
-  system.push({ type: 'text', text: progressNote(texts.length, target, stage, teachBack) });
+  system.push({ type: 'text', text: progressNote(texts.length, target, stage, teachBack, texts[texts.length - 1] ?? '') });
   return { system, messages, stage, studentTurns: texts.length };
 }
 
