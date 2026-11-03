@@ -120,7 +120,7 @@ export async function checkConnection(client: WsClient): Promise<{ site: SiteInf
 
 // ─── Reading a course ───────────────────────────────────────────────────────
 
-interface WsContent { type: string; filename: string; fileurl?: string; filesize?: number; mimetype?: string; content?: string }
+interface WsContent { type: string; filename: string; filepath?: string; fileurl?: string; filesize?: number; mimetype?: string; content?: string }
 interface WsModule { id: number; name: string; modname: string; visible?: number; description?: string; url?: string; contents?: WsContent[] }
 interface WsSection { id: number; name: string; section?: number; visible?: number; summary?: string; modules: WsModule[] }
 
@@ -235,10 +235,30 @@ export async function fetchCourseModel(client: WsClient, courseId: string, cours
           break;
         }
         case 'book': {
+          // core_course_get_contents lists a book as one 'content' entry named "structure"
+          // (JSON: chapter titles and hrefs, subchapters nested under `subitems`) and then
+          // one 'file' entry per chapter, index.html under /<pagenum>/, beside any images the
+          // chapter embeds. Moodle builds each index.html on the fly from the chapter's content.
+          const titles = new Map<string, string>();
+          const walk = (items: unknown): void => {
+            if (!Array.isArray(items)) return;
+            for (const it of items as Array<{ title?: string; href?: string; subitems?: unknown }>) {
+              if (it && typeof it.href === 'string') titles.set(it.href.replace(/^\/+/, ''), html(it.title).replace(/\s+/g, ' ').trim());
+              walk(it?.subitems);
+            }
+          };
+          const structure = (m.contents ?? []).find((c) => c.type === 'content' && c.filename === 'structure');
+          if (structure?.content) { try { walk(JSON.parse(structure.content)); } catch { /* titles stay unknown */ } }
           const chapters: string[] = [];
           for (const c of m.contents ?? []) {
-            if (c.type !== 'content' || !c.fileurl || !/\.html?$/i.test(c.filename)) continue;
-            try { chapters.push(html((await client.download(c.fileurl)).toString('utf8'))); } catch (e) { modNotes.push(`a chapter could not be read: ${(e as Error).message}`); }
+            if (c.type !== 'file' || !c.fileurl || !/^index\.html?$/i.test(c.filename)) continue;
+            const href = `${(c.filepath ?? '/').replace(/^\/+|\/+$/g, '')}/${c.filename}`.replace(/^\//, '');
+            try {
+              const doc = htmlToText((await client.download(c.fileurl)).toString('utf8'));
+              const title = titles.get(href) || doc.title;
+              const body = title ? doc.text.replace(new RegExp(`^#+ ${title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\n+`, 'i'), '') : doc.text;
+              chapters.push([title ? `## ${title}` : '', body].filter(Boolean).join('\n\n'));
+            } catch (e) { modNotes.push(`a chapter could not be read: ${(e as Error).message}`); }
           }
           text = [intro(books.get(m.id)), ...chapters].filter(Boolean).join('\n\n');
           break;

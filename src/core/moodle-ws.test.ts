@@ -48,6 +48,12 @@ function fakeMoodle(opts: { allow?: string[]; denyGlossary?: boolean } = {}) {
         { id: 101, name: 'Unit 1: What is an argument?', modname: 'label', visible: 1, description: '<h4>Unit 1: What is an argument?</h4><p>' + 'An argument is a set of statements, one of which is the conclusion. '.repeat(6) + '</p>' },
         { id: 102, name: 'Activity: Exercise 1.1', modname: 'label', visible: 1, description: '<h4>Activity: Exercise 1.1</h4><p>Standardise the following arguments and identify the premises and conclusion. Then say whether each is deductive or inductive.</p>' },
         { id: 103, name: 'Russell, chapter XV', modname: 'resource', visible: 1, url: 'https://moodbox.example.ca/mod/resource/view.php?id=103', contents: [{ type: 'file', filename: 'russell-ch15.txt', fileurl: 'https://moodbox.example.ca/webservice/pluginfile.php/503/mod_resource/content/1/russell-ch15.txt', filesize: 120, mimetype: 'text/plain' }] },
+        { id: 104, name: 'Unit 1 book', modname: 'book', visible: 1, url: 'https://moodbox.example.ca/mod/book/view.php?id=104', contents: [
+          { type: 'content', filename: 'structure', filepath: '/', filesize: 0, content: JSON.stringify([{ title: 'Overview', href: '1/index.html', level: 0, subitems: [{ title: 'Topic 1: What supervisors do', href: '2/index.html', level: 1, subitems: [] }] }]) },
+          { type: 'file', filename: 'index.html', filepath: '/1/', filesize: 0, fileurl: 'https://moodbox.example.ca/webservice/pluginfile.php/504/mod_book/chapter/31/index.html', mimetype: 'text/html' },
+          { type: 'file', filename: 'diagram.png', filepath: '/1/', filesize: 900, fileurl: 'https://moodbox.example.ca/webservice/pluginfile.php/504/mod_book/chapter/31/diagram.png', mimetype: 'image/png' },
+          { type: 'file', filename: 'index.html', filepath: '/2/', filesize: 0, fileurl: 'https://moodbox.example.ca/webservice/pluginfile.php/504/mod_book/chapter/32/index.html', mimetype: 'text/html' },
+        ] },
         { id: 105, name: 'Assignment 1', modname: 'assign', visible: 1, url: 'https://moodbox.example.ca/mod/assign/view.php?id=105' },
         { id: 108, name: 'Unit 1 glossary', modname: 'glossary', visible: 1, url: 'https://moodbox.example.ca/mod/glossary/view.php?id=108' },
       ] },
@@ -59,7 +65,7 @@ function fakeMoodle(opts: { allow?: string[]; denyGlossary?: boolean } = {}) {
     mod_resource_get_resources_by_courses: { resources: [{ coursemodule: 103, intro: '<p>Read before Unit 1.</p>', contentfiles: [{ filename: 'russell-ch15.txt', fileurl: 'https://moodbox.example.ca/webservice/pluginfile.php/503/mod_resource/content/1/russell-ch15.txt', filesize: 120, mimetype: 'text/plain' }] }] },
     mod_url_get_urls_by_courses: { urls: [] },
     mod_assign_get_assignments: { courses: [{ assignments: [{ cmid: 105, name: 'Assignment 1: Argument Types and Components', intro: '<p>Standardise the three passages below.</p>', duedate: 1761350400, allowsubmissionsfromdate: 0, grade: 100, introattachments: [] }] }] },
-    mod_book_get_books_by_courses: { books: [] },
+    mod_book_get_books_by_courses: { books: [{ coursemodule: 104, intro: '<p>Unit 1 in book form.</p>' }] },
     mod_forum_get_forums_by_courses: [],
     mod_lesson_get_lessons_by_courses: { lessons: [] },
     mod_glossary_get_glossaries_by_courses: { glossaries: [{ id: 9, coursemodule: 108, intro: '<p>Key terms.</p>' }] },
@@ -69,6 +75,12 @@ function fakeMoodle(opts: { allow?: string[]; denyGlossary?: boolean } = {}) {
   const fetchImpl = async (url: string, init?: RequestInit): Promise<Response> => {
     if (url.includes('/webservice/pluginfile.php/')) {
       assert.match(url, /[?&]token=tok/);
+      const chapter = url.match(/mod_book\/chapter\/(\d+)\/index\.html/);
+      if (chapter) {
+        const [title, body] = chapter[1] === '31' ? ['Overview', 'Welcome to the unit. ' + 'Supervisors are the link between management and operations. '.repeat(4)] : ['Topic 1: What supervisors do', 'Planning, organizing, staffing, leading and controlling. '.repeat(4)];
+        return new Response(`<!DOCTYPE html><html><head><title>${title}</title></head><body><h1>${title}</h1><p>${body}</p></body></html>`, { headers: { 'content-type': 'text/html' } });
+      }
+      assert.doesNotMatch(url, /mod_book/, 'only chapter index.html files are downloaded from a book');
       return new Response('CHAPTER XV. THE VALUE OF PHILOSOPHY. Having now come to the end of our brief and very incomplete review of the problems of philosophy, it will be well to consider…', { headers: { 'content-type': 'text/plain' } });
     }
     const params = new URLSearchParams(String(init?.body));
@@ -103,12 +115,15 @@ test('fetchCourseModel reads a course through web services into the same preview
     ['Unit 1: Arguments — text', 'reading', 'moodle:section-7-reading'],
     ['Unit 1: Arguments — activities and study questions', 'activities', 'moodle:section-7-activities'],
     ['Russell, chapter XV', 'reading', 'moodle:resource-103'],
+    ['Unit 1 book', 'reading', 'moodle:book-104'],
     ['Assignment 1', 'assignment', 'moodle:assign-105'],
     ['Unit 1 glossary', 'reading', 'moodle:glossary-108'],
   ]);
   assert.match(u1.items[2]!.text, /THE VALUE OF PHILOSOPHY/);
-  assert.match(u1.items[3]!.text, /^Due: 2025-10-25\nMarked out of 100\n\nStandardise[\s\S]*## Marking rubric: A1 rubric\n- Identifies premises\n  5 pts: All identified/);
-  assert.match(u1.items[4]!.text, /\*\*Validity\*\*: An argument is valid/);
+  assert.match(u1.items[3]!.text, /^Unit 1 in book form\.\n\n## Overview\n\nWelcome to the unit\.[\s\S]*\n\n## Topic 1: What supervisors do\n\nPlanning, organizing/, 'book chapters arrive titled from the structure, once each');
+  assert.equal((u1.items[3]!.text.match(/Overview/g) ?? []).length, 1, 'the chapter title is not repeated from the page <title> or <h1>');
+  assert.match(u1.items[4]!.text, /^Due: 2025-10-25\nMarked out of 100\n\nStandardise[\s\S]*## Marking rubric: A1 rubric\n- Identifies premises\n  5 pts: All identified/);
+  assert.match(u1.items[5]!.text, /\*\*Validity\*\*: An argument is valid/);
   assert.equal(u1.items[0]!.source_url, 'https://moodbox.example.ca/course/view.php?id=12&section=1');
   const u2 = out.units[1]!;
   assert.equal(u2.items[0]!.include, false, 'items in a hidden section are unticked');
