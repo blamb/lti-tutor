@@ -1,11 +1,13 @@
 # LTI Tutor
 
-This repository holds two LTI 1.3 tools for Moodle (and other LTI Advantage platforms), built on one shared core and deployed separately:
+This repository holds three LTI 1.3 tools for Moodle (and other LTI Advantage platforms), built on one shared core and deployed separately:
 
 - **LTI Tutor**: instructor-designed one-on-one AI tutorials. Documented below.
 - **Persona Chat**: conversations with a persona an instructor designs, a thinker from history, a simulated client, a role-play partner, grounded in course materials, with a coach, a debrief and an instructor's report. Designers start with [its user guide](docs/PERSONA-CHAT-USER-GUIDE.md); the technical description is [docs/PERSONA-CHAT.md](docs/PERSONA-CHAT.md).
 
-They share `src/core` (LTI provider, materials and importers, Moodle course import and sync, retrieval, the model client, cost tracking, grade passback) and nothing else: each has its own registration, database and pages. `APP=tutor` (the default) or `APP=persona` picks which one a process runs. The repository layout is under [Architecture](#architecture).
+- **Module Builder**: for course designers. A Word course draft with its production notes and H5P specifications becomes one Moodle restore file: a Book with accordions, hints, callouts and working H5P activities. Described in [docs/MODULE-BUILDER.md](docs/MODULE-BUILDER.md).
+
+They share `src/core` (LTI provider, materials and importers, Moodle course import and sync, retrieval, the model client, cost tracking, grade passback) and nothing else: each has its own registration, database and pages. `APP=tutor` (the default), `APP=persona` or `APP=builder` picks which one a process runs. The repository layout is under [Architecture](#architecture).
 
 ---
 
@@ -266,6 +268,13 @@ src/
     migrations/            001_personas.sql … 007_fact_sheet.sql
     web/launch.html
 ```
+  builder/                 Module Builder: docs/MODULE-BUILDER.md
+    engine/                fixed rules, no AI: draft.ts (Word reader), pages.ts (production notes to Book pages), h5p.ts (H5P packages and the activity checker), mbz.ts (the backup writer), index.ts (inspectDraft, buildModule); unit and golden tests alongside
+    server/interpret.ts    the one AI step: a free-form H5P specification read into a structured activity
+    server/builds.ts       uploaded drafts, the review state of each activity, rebuilding on request
+    server/routes.ts       /api/* (designer only)
+    migrations/001_builds.sql
+    web/launch.html        upload, review, page preview, to-do list, download
 
 ---
 

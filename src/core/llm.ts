@@ -49,12 +49,18 @@ export async function jsonCall<T>(params: {
   preprocess?: (raw: unknown) => unknown;
   /** Defaults to GEN_MODEL. */
   model?: string;
+  /**
+   * Skip structured output and rely on the prompt plus validation. For a
+   * schema with many optional fields, where compiling the output grammar
+   * makes the request time out.
+   */
+  promptOnly?: boolean;
 }): Promise<T> {
   const client = getAnthropic();
   const model = params.model ?? GEN_MODEL;
   const pre = params.preprocess ?? ((x: unknown) => x);
   const opts = requestOptions(model, { maxTokens: params.maxTokens, effort: params.effort ?? 'medium' });
-  const output_config = { ...opts.output_config, format: formatFor(params.output ?? params.schema) };
+  const output_config = { ...opts.output_config, format: params.promptOnly ? undefined : formatFor(params.output ?? params.schema) };
   const messages: Anthropic.MessageParam[] = [{ role: 'user', content: params.userPrompt }];
   const call = async (msgs: Anthropic.MessageParam[], endpoint: string): Promise<Anthropic.Message> => {
     const t0 = Date.now();

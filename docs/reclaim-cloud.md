@@ -102,6 +102,22 @@ Done so far: the teacher launch, the Designer view, and the live sync. A student
 - After the October 21 redeploy: typing "end simulation" opens the end dialog; the debrief shows Critical issues and turn links; a placed persona's page lists only that persona and shows the activity title.
 - Filling a live persona's case file, fact sheet or quote book in the Designer view and checking a conversation uses it.
 
+## A third environment for Module Builder (not yet created)
+
+Module Builder deploys from the same repository and branch, as its own environment with its own PostgreSQL node, like Persona Chat. Follow the Persona Chat checklist above with these differences:
+
+| Step | Value |
+|---|---|
+| Environment name | `module-builder` → `https://module-builder.ca.reclaim.cloud` |
+| `APP` | `builder` |
+| `TOOL_NAME` | `Module Builder` |
+| `LTI_TOOL_URL` | `https://module-builder.ca.reclaim.cloud` |
+| `BUILDER_MODEL` | optional; default `claude-sonnet-5-5` |
+| `DATABASE_URL`, `ANTHROPIC_API_KEY`, `LTI_COOKIE_SECRET`, `NODE_ENV=production`, `PORT=8080` | as for the other two |
+| `PLATFORM_HTTP_HOSTS` | the same value as the other two tools, for moodbox on the private network |
+
+Register it in moodbox by dynamic registration with `https://module-builder.ca.reclaim.cloud/register`, then add it to a course as an external tool (or show it in the activity chooser). It needs no deep linking, no grade service and no web-service token. Only instructor and designer roles can open it. Uploaded drafts are stored in its database, so size the PostgreSQL node for a few megabytes per draft.
+
 ## Moodle on the same Reclaim account: private-network routing
 
 Reclaim's containers cannot reach the shared load balancer's public addresses ("no route to host"), and inside the account every `*.ca.reclaim.cloud` name resolves to the node's private address, where only plain HTTP is served (TLS ends at the load balancer). Two consequences for an LMS hosted on the same account, and their fixes:

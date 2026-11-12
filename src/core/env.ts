@@ -1,7 +1,7 @@
 /**
  * Environment shared by every app in this repository.
  *
- * Each app (tutor, persona) spreads `coreEnv` into its own `env` and adds
+ * Each app (tutor, persona, builder) spreads `coreEnv` into its own `env` and adds
  * its own variables (tool name, chat model, retention). `APP` names the app
  * a process runs as, so `.env.<app>` can override `.env` when two apps run
  * side by side on one machine; deployments set plain variables and no APP.
@@ -9,7 +9,7 @@
 
 import { config as loadDotenv } from 'dotenv';
 
-export const APP_NAMES = ['tutor', 'persona'] as const;
+export const APP_NAMES = ['tutor', 'persona', 'builder'] as const;
 export type AppName = (typeof APP_NAMES)[number];
 
 export function appNameOf(raw: string | undefined): AppName {
