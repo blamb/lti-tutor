@@ -102,9 +102,9 @@ Done so far: the teacher launch, the Designer view, and the live sync. A student
 - After the October 21 redeploy: typing "end simulation" opens the end dialog; the debrief shows Critical issues and turn links; a placed persona's page lists only that persona and shows the activity title.
 - Filling a live persona's case file, fact sheet or quote book in the Designer view and checking a conversation uses it.
 
-## A third environment for Module Builder (not yet created)
+## A third environment for Module Builder (created 2026-11-12)
 
-Module Builder deploys from the same repository and branch, as its own environment with its own PostgreSQL node, like Persona Chat. Follow the Persona Chat checklist above with these differences:
+Module Builder deploys from the same repository and branch, as its own environment with its own PostgreSQL node, like Persona Chat. Environment `module-builder` (Node.js 22.23.4 npm, node 17742; PostgreSQL 17.11, node 17741, so host `node17741-module-builder.ca.reclaim.cloud`) was created on 2026-11-12 with `main` at `9d72c21` deployed to ROOT and the non-secret variables applied (`NODE_ENV`, `APP`, `LTI_TOOL_URL`, `PORT`, `TOOL_NAME`, `PLATFORM_HTTP_HOSTS`). It starts once the account owner adds `DATABASE_URL`, `LTI_COOKIE_SECRET` and `ANTHROPIC_API_KEY` and restarts the Application Servers layer. The checklist is the Persona Chat one above with these differences:
 
 | Step | Value |
 |---|---|
