@@ -11,7 +11,9 @@ import type { IdToken } from 'ltijs';
 import { env } from './env.js';
 import { setupLti, launchHtmlLoader, escapeHtml, mintFullscreenNonce } from '../../core/lti-provider.js';
 import { isTeacher } from '../../core/auth.js';
-import { studentFromToken } from '../../core/reqctx.js';
+import { studentFromToken, contextIdOf } from '../../core/reqctx.js';
+import { launchTheme } from '../../core/theme-store.js';
+import { applyThemeToHtml } from '../../core/theme.js';
 
 export { escapeHtml, mintFullscreenNonce };
 
@@ -36,7 +38,7 @@ lti.onConnect(async (token: IdToken, req, res) => {
     .replaceAll('{{TOOL_NAME}}', escapeHtml(env.TOOL_NAME))
     .replaceAll('{{DISPLAY_NAME}}', escapeHtml(me.display_name))
     .replaceAll('{{CONTEXT_TITLE}}', escapeHtml(token.platformContext.context?.title || ''));
-  return res.send(html);
+  return res.send(applyThemeToHtml(html, await launchTheme(token.iss, contextIdOf(token))));
 });
 
 lti.onDeepLinking(async (_token: IdToken, _req, res) => {

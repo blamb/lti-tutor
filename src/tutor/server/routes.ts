@@ -53,7 +53,8 @@ import { buildPreview } from '../../core/course-model.js';
 import { wsClient, checkConnection, fetchCourseModel, WS_FUNCTIONS, WsError } from '../../core/moodle-ws.js';
 import type { DeepLinkContentItem, IdToken } from 'ltijs';
 import { z } from 'zod';
-import { lti, mintFullscreenNonce } from './lti.js';
+import { lti, mintFullscreenNonce, themeWsToken } from './lti.js';
+import { registerThemeRoutes } from '../../core/theme-store.js';
 import { env } from './env.js';
 import { isTeacher } from '../../core/auth.js';
 import { tokenOf, studentFromToken, attr, gateTeacher } from '../../core/reqctx.js';
@@ -85,6 +86,9 @@ import { query } from '../../core/db.js';
 // express.json skips a body another parser has already read.
 lti.app.use('/api/teacher/materials/import-backup/commit', express.json({ limit: '64mb' }));
 lti.app.use('/api', express.json({ limit: '2mb' }));
+
+// Look and feel: /api/teacher/theme (core/theme-store.ts).
+registerThemeRoutes(lti.app, { wsToken: themeWsToken });
 
 async function ctxOf(res: Response): Promise<{ token: IdToken; ctx: CourseCtx }> {
   const token = tokenOf(res);

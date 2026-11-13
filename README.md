@@ -144,6 +144,14 @@ The tutor's rules ask it to name the material it is drawing on (title and, where
 
 ---
 
+## Taking the course's look
+
+All three tools take their colours and font from the Moodle theme of the course they are opened in, so they read as part of the course rather than as a separate site. The LTI launch says nothing about the theme and the tool's iframe cannot see the page around it, so the theme is read the way a browser gets it: Moodle serves every installed theme's compiled stylesheet publicly, and a public page names the site's default theme. Only a few values are taken (brand colour, page background, text colour, font names); none of Moodle's CSS is loaded into the tool. Colours are darkened where needed so every text and background pair stays at 4.5:1 or better, and a themed page stays light even when the reader's device is in dark mode, as Moodle does.
+
+Which theme a course gets, in order: the instructor's pick; the course's own theme (or its category's), read through the course's web-service token when the service allows `core_course_get_courses_by_field` and `core_course_get_categories`; otherwise the site's default theme. On a site where courses cannot have their own theme, the site default is already right and nothing needs setting up. The instructor view has a **Look and feel** control (in the course settings of the tutor and Persona Chat, on the home page of Module Builder) that shows what was found, lists the site's themes with a swatch each, and can switch the course back to the tool's own look. What is read is cached per site and refreshed in the background; a launch waits for it only the first time, and for at most a few seconds.
+
+Not covered: a look applied without changing the theme's name (Boost Union flavours), fonts that are not installed on the reader's device (the tool names the theme's font but cannot load its files across origins), Persona Chat's public links, and the deep-linking and print pages. Code: `src/core/theme.ts`, `src/core/theme-store.ts`, `src/core/web/theme-picker.js`.
+
 ## Offline and low-bandwidth
 
 Nothing conversational works without a connection. What the tool can do is turn the same briefs into printable, self-contained artifacts so an offline learner gets the same learning design on paper (`src/tutor/server/print.ts`):

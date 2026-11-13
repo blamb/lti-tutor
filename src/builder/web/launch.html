@@ -16,8 +16,9 @@
     --mark: #fde2e2; --focus: #0b5fa8;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   }
+  /* A course theme (core/theme.ts) marks <html> and keeps the page light, as Moodle is. */
   @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-course-theme]) {
       --bg: #121417; --fg: #ececec; --muted: #b3b8c0;
       --accent: #8ec2ff; --accent-fg: #06192c; --accent-soft: #1b2a3d;
       --good: #8ad69a; --good-bg: #16301d; --bad: #ff9c9c; --bad-bg: #3d1a1a;
@@ -171,6 +172,7 @@
         <h2>Modules in this course</h2>
         <div id="build-list"><p class="muted">Loading…</p></div>
       </div>
+      <div class="card" id="course-theme-box" role="region" aria-label="Look and feel"></div>
     </section>
 
     <!-- ─── One draft ─── -->
@@ -809,6 +811,13 @@
     $('#upload-msg').textContent = 'The AI step is not set up on this server (no API key), so H5P specifications cannot be read. Pages can still be built.';
   }
   loadHome();
+  // The shared "Look and feel" control (core/web/theme-picker.js).
+  {
+    const sc = document.createElement('script');
+    sc.src = '/vendor/theme-picker.js';
+    sc.onload = () => window.CourseTheme.mount($('#course-theme-box'), api, { heading: 'h2' });
+    document.head.appendChild(sc);
+  }
 </script>
 </body>
 </html>

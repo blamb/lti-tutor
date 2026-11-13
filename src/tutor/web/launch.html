@@ -16,8 +16,9 @@
     --focus: #0b5fa8; --lh: 1.5;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   }
+  /* A course theme (core/theme.ts) marks <html> and keeps the page light, as Moodle is. */
   @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-course-theme]) {
       --bg: #121417; --fg: #ececec; --muted: #b3b8c0; --muted-2: #a8adb5;
       --accent: #8ec2ff; --accent-fg: #06192c; --accent-soft: #1b2a3d;
       --good: #8ad69a; --good-bg: #16301d; --bad: #ff9c9c; --bad-bg: #3d1a1a;
@@ -668,6 +669,7 @@
           </form>
           <div class="err" id="moodle-ws-err" role="alert"></div>
         </section>
+        <section id="course-theme-box" aria-label="Look and feel" style="max-width:640px;margin-top:1.5rem;padding-top:1rem;border-top:1px solid var(--border)"></section>
       </div>
     </div>
   </div>
@@ -1765,7 +1767,16 @@
       courseForm.elements.course_start.value = d.settings.course_start || '';
       renderTruflexDesc();
       renderMoodleWs(d.moodle_ws || { connected: false });
+      mountThemePicker();
     } catch (e) { err.textContent = friendlyError(e); }
+  }
+  let themePickerMounted = false;
+  function mountThemePicker() {
+    if (themePickerMounted) return;
+    themePickerMounted = true;
+    loadScript('/vendor/theme-picker.js')
+      .then(() => window.CourseTheme.mount($('#course-theme-box'), api, { heading: 'h3' }))
+      .catch(() => { themePickerMounted = false; });
   }
   let moodleWs = { connected: false };
   function renderMoodleWs(ws) {

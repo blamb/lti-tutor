@@ -29,6 +29,7 @@ import multer from 'multer';
 import type { IdToken } from 'ltijs';
 import { z } from 'zod';
 import { lti } from './lti.js';
+import { registerThemeRoutes } from '../../core/theme-store.js';
 import { env } from './env.js';
 import { studentFromToken, gateTeacher, contextIdOf, attr } from '../../core/reqctx.js';
 import { ImportError } from '../../core/importers.js';
@@ -44,6 +45,9 @@ import { checkQuotes } from '../engine/reading.js';
 import { RHIZO_KINDS, RHIZO_TYPES, CONTRACT_PARTS, CREDIT_TEXT } from '../engine/rhizo.js';
 
 lti.app.use('/api', express.json({ limit: '2mb' }));
+
+// Look and feel: /api/teacher/theme (core/theme-store.ts). No web-service token here, so the site theme or a pick.
+registerThemeRoutes(lti.app);
 
 function scopeOf(token: IdToken): Scope & { title: string } {
   return { iss: token.iss, contextId: contextIdOf(token), title: token.platformContext.context?.title ?? '' };

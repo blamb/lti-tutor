@@ -15,6 +15,9 @@ import { contextIdOf } from '../../core/reqctx.js';
 import { listPersonas } from './personas.js';
 import { TEMPLATES } from './templates.js';
 import { registerPublicRoutes } from './public.js';
+import { getMoodleWsToken } from './course.js';
+import { launchTheme, type WsTokenFn } from '../../core/theme-store.js';
+import { applyThemeToHtml } from '../../core/theme.js';
 
 export { escapeHtml, mintFullscreenNonce };
 
@@ -26,6 +29,9 @@ const lti = setupLti({
   description: 'Persona-based conversations for learning: historical thinkers, simulated clients and role-play partners, grounded in course materials',
   addon: registerPublicRoutes,
 });
+
+/** The course's web-service token, for finding the course's own Moodle theme. */
+export const themeWsToken: WsTokenFn = async (iss, contextId) => (await getMoodleWsToken({ iss, contextId })).token;
 
 /** Successful launch: ltijs validated the JWT and set the session cookie. */
 lti.onConnect(async (token: IdToken, req, res) => {
@@ -54,7 +60,7 @@ lti.onConnect(async (token: IdToken, req, res) => {
     // The label names where this launch came from: the placed activity's own title, else the course.
     .replaceAll('{{CONTEXT_TITLE}}', escapeHtml((personaId && token.platformContext.resource?.title) || token.platformContext.context?.title || ''))
     .replaceAll('{{ROLE}}', role);
-  return res.send(html);
+  return res.send(applyThemeToHtml(html, await launchTheme(token.iss, contextIdOf(token), themeWsToken)));
 });
 
 lti.onDeepLinking(async (token: IdToken, req, res) => {

@@ -11,7 +11,9 @@ import { setupLti, launchHtmlLoader, escapeHtml, mintFullscreenNonce } from '../
 import { findOrCreateStudent } from '../../core/students.js';
 import { isTeacher } from '../../core/auth.js';
 import { listTutorials } from './tutorials.js';
-import { courseCtxFromToken, defaultAiDisclosure, instructorVisibility } from './courses.js';
+import { courseCtxFromToken, defaultAiDisclosure, instructorVisibility, getMoodleWsToken } from './courses.js';
+import { launchTheme, type WsTokenFn } from '../../core/theme-store.js';
+import { applyThemeToHtml } from '../../core/theme.js';
 import { deliveryLabels } from './delivery.js';
 import { KINDS } from './kinds.js';
 
@@ -24,6 +26,9 @@ const lti = setupLti({
   name: env.TOOL_NAME,
   description: 'Instructor-designed one-on-one AI tutorials with voice, deep linking and debriefs',
 });
+
+/** The course's web-service token, for finding the course's own Moodle theme. */
+export const themeWsToken: WsTokenFn = async (iss, contextId) => (await getMoodleWsToken(iss, contextId)).token;
 
 /** Successful launch: ltijs validated the JWT and set the session cookie. */
 lti.onConnect(async (token: IdToken, req, res) => {
@@ -58,7 +63,7 @@ lti.onConnect(async (token: IdToken, req, res) => {
     .replaceAll('{{DISCLOSURE}}', escapeHtml(ctx.settings.ai_disclosure || defaultAiDisclosure(env.TOOL_NAME, ctx.delivery)))
     .replaceAll('{{VISIBILITY}}', escapeHtml(JSON.stringify(instructorVisibility(ctx.delivery))))
     .replaceAll('{{ROLE}}', role);
-  return res.send(html);
+  return res.send(applyThemeToHtml(html, await launchTheme(token.iss, ctx.contextId, themeWsToken)));
 });
 
 /**

@@ -42,7 +42,8 @@ import os from 'node:os';
 import fs from 'node:fs';
 import type { DeepLinkContentItem, IdToken } from 'ltijs';
 import { z } from 'zod';
-import { lti, mintFullscreenNonce } from './lti.js';
+import { lti, mintFullscreenNonce, themeWsToken } from './lti.js';
+import { registerThemeRoutes } from '../../core/theme-store.js';
 import { query } from '../../core/db.js';
 import { env } from './env.js';
 import { tokenOf, studentFromToken, gateTeacher, contextIdOf, attr } from '../../core/reqctx.js';
@@ -72,6 +73,9 @@ import { postCompletion, type GradeResult } from '../../core/grades.js';
 // request, so it gets its own limit; express.json skips a body another parser has already read.
 lti.app.use('/api/teacher/materials/import-backup/commit', express.json({ limit: '64mb' }));
 lti.app.use('/api', express.json({ limit: '2mb' }));
+
+// Look and feel: /api/teacher/theme (core/theme-store.ts).
+registerThemeRoutes(lti.app, { wsToken: themeWsToken });
 
 function scopeOf(token: IdToken): Scope & { title: string } {
   return { iss: token.iss, contextId: contextIdOf(token), title: token.platformContext.context?.title ?? '' };

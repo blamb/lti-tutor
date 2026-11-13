@@ -34,6 +34,9 @@ export const WS_FUNCTIONS_OPTIONAL = [
   'mod_glossary_get_glossaries_by_courses',
   'mod_glossary_get_entries_by_letter',
   'core_grading_get_definitions',
+  // Not part of the sync: these let the tool find the course's own theme (theme.ts).
+  'core_course_get_courses_by_field',
+  'core_course_get_categories',
 ] as const;
 export const WS_FUNCTIONS = [...WS_FUNCTIONS_REQUIRED, ...WS_FUNCTIONS_OPTIONAL];
 

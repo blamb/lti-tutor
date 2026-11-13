@@ -58,6 +58,8 @@ export function escapeHtml(s: string): string {
 const VENDOR: Record<string, string> = {
   'marked.umd.js': join(HERE, '..', '..', 'node_modules', 'marked', 'lib', 'marked.umd.js'),
   'purify.min.js': join(HERE, '..', '..', 'node_modules', 'dompurify', 'dist', 'purify.min.js'),
+  // The shared "Look and feel" control (core/web), not a third-party library.
+  'theme-picker.js': join(HERE, 'web', 'theme-picker.js'),
 };
 
 export interface LtiToolOptions {
