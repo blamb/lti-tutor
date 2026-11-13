@@ -11,6 +11,30 @@ It is the Moodle counterpart to what D2L sells as Creator+ and Lumi for Brightsp
 3. **Check the pages** in the preview, and the **To do** list: things the draft asks for that it does not contain (a video link, a handout file, alt text), judgement calls the page rules made, and a box for dropping stray notes that were not marked as notes.
 4. **Download** the restore file and the build report, then restore in Moodle: *More › Course reuse › Restore › Merge into this course*. The module arrives hidden.
 
+## Starting from readings instead (added 12 Nov 2026)
+
+A module does not need a Word draft. From the home page a designer can name a module and add readings to it, one at a time:
+
+| Kind of reading | How it is read |
+|---|---|
+| A web address | A Pressbooks chapter through the book's own interface, or any public page as readable text. A licence link on the page is detected. Sites that block automated access say so, and the designer uploads the file instead. |
+| A file | PDF, Word, HTML or plain text. A scanned PDF has no text until it has been through OCR. |
+| Pasted text | As typed, with a title. |
+
+Each reading becomes one Book page. For each, the designer chooses what the page carries:
+
+- **The full text, then the activities.** For open or self-owned material. This is the default only when an open licence was found; otherwise the build flags the page until someone confirms the right to reuse.
+- **A link to the reading, then the activities.** For copyrighted readings such as library articles. The text is used to draft the activities and is not put on the page.
+
+Two activities are drafted by AI from each reading: a set of practice questions (multiple choice and true/false, with feedback on every answer) and a deck of key-term flashcards (the reading's own definitions; skipped when the reading defines fewer than three terms). Here the wording is the model's, so the safeguards are stronger than for a Word draft:
+
+- Every question and card must quote the sentence of the reading it rests on. Code checks that the sentence is really there (`engine/reading.ts`). An item whose quotation is not found is sent back to the model once; if it still fails, the activity cannot be approved or built until a person fixes or removes the item.
+- The review screen shows each item beside its supporting sentence. The model is told to use only what the reading says and to avoid sentences that look wrong, and it reports those to the designer.
+- The build report lists every drafted item with its key and supporting sentence, for a subject reviewer. The quotation check confirms the source of an answer. It does not judge whether a question is a good one.
+- Each page carries a line saying the activities were drafted with AI and are not graded, and a credit line for the reading.
+
+Limits of this route: pages carry text only (headings, paragraphs, lists), so figures and tables in the reading are not carried over; a page read from an ordinary website keeps whatever the site puts in its main text, so it may need tidying in Moodle; a reading longer than about 30,000 words is cut for drafting, and the note on the activity says so; one page per reading.
+
 ## The two steps, and where AI is used
 
 | Step | What does it | AI? |
@@ -18,10 +42,12 @@ It is the Moodle counterpart to what D2L sells as Creator+ and Lumi for Brightsp
 | Read the Word file, act on the production notes, lay out the pages | Fixed rules in `src/builder/engine` (`draft.ts`, `pages.ts`) | No |
 | Read each free-form H5P specification into a structured activity | `src/builder/server/interpret.ts`, model `BUILDER_MODEL` | Yes |
 | Build the `.h5p` packages and the backup | Fixed code (`h5p.ts`, `mbz.ts`) | No |
+| Readings route: fetch or extract the text, lay out the pages, check every quotation | `core/importers.ts`, `engine/reading.ts` | No |
+| Readings route: draft practice questions and flashcards from one reading | `src/builder/server/drafting.ts`, model `BUILDER_MODEL` | Yes |
 
 The AI step is told to carry the author's wording across and add nothing of its own. Where a spec does not fit H5P as written (a "True/False" spec with four statements, feedback per blank), it picks the closest type and says so in a note the designer sees. Every reading is checked by code before it can be built (`checkActivity`), and the build report records, per activity, whether a person approved it, whether it was edited by hand, or whether it went into the file unreviewed.
 
-Only the H5P specification text is sent to the model, one spec per call, with the chapter and heading it sits under. The rest of the draft is not sent.
+Only the H5P specification text is sent to the model, one spec per call, with the chapter and heading it sits under. The rest of the draft is not sent. On the readings route the whole text of the reading is sent, once for each of its two activities.
 
 ## Production notes the page rules understand
 
@@ -57,7 +83,7 @@ LTI can add links to a course but not pages, Books or H5P activities, and Moodle
 
 ## Data kept
 
-Table `build` (migration `src/builder/migrations/001_builds.sql`): the uploaded Word file, the specs found, each reading with its review status, and the settings. Pages and restore files are rebuilt on request and never stored. Rows are scoped to the course the tool was launched from. Model calls are recorded in `api_call` like the other tools' (`/admin/costs`).
+Table `build` (migrations `001_builds.sql`, `002_readings.sql`): the uploaded Word file or the text of each reading, the specs found, each activity with its review status, and the settings. Pages and restore files are rebuilt on request and never stored. Rows are scoped to the course the tool was launched from. Model calls are recorded in `api_call` like the other tools' (`/admin/costs`).
 
 ## Running it
 
@@ -79,6 +105,8 @@ Environment: the shared variables in `.env.example`, plus `APP=builder`, `TOOL_N
 - The whole flow was run locally with a stand-in for the LTI launch: upload, review screen, approve, ask for a change, page preview, to-do list, settings, download.
 - The file the app produced restored into a local Moodle 5.0.1 as a new course, and all 16 activities loaded on their pages.
 
+- Readings route, locally: a module from pasted text (an open textbook section) and a Wikipedia page. All 41 drafted items passed the quotation check on the first pass; the file restored into the local Moodle and its four activities loaded. A BCcampus chapter address was refused by the site's bot protection, with the message telling the designer to upload the file. A PDF upload was not tried.
+
 Not yet tested: a real LTI launch from Moodle (the launch and session code is the same as the other two tools'), a deployment, restoring an app-built file on moodbox or by merging into an existing course, and a second draft.
 
 ## Limits
@@ -87,4 +115,5 @@ Not yet tested: a real LTI launch from Moodle (the launch and session code is th
 - The page preview is plain: no Moodle theme and no icons.
 - Editing an activity's details means editing JSON. A form per activity type is the next step.
 - One module per file. A whole course is several uploads and several restores.
+- A module is either a Word draft or a set of readings. Adding readings to a Word-draft module is not built yet.
 - Not yet checked with a screen reader, or in the Moodle mobile app.

@@ -9,6 +9,10 @@
  *   GET    /api/builds/:id                        -> { build }   (slots, activities, settings, state)
  *   PUT    /api/builds/:id                        { course_shortname?, section_number?, leave_out? } -> { build }
  *   DELETE /api/builds/:id
+ *   POST   /api/builds/readings                   { title } -> { build }   (an empty module to add readings to)
+ *   POST   /api/builds/:id/readings               multipart 'file' | { url } | { text, title } -> { build }   (starts drafting its activities)
+ *   PUT    /api/builds/:id/readings/:rid          { title?, include_text?, source_url?, license?, attribution? } -> { build }
+ *   DELETE /api/builds/:id/readings/:rid          -> { build }
  *   GET    /api/builds/:id/pages                  -> { chapters, todo, judgement, counts, included, file_name }
  *   GET    /api/builds/:id/file/:name             an image from the draft, for the page preview
  *   PUT    /api/builds/:id/activities/:n          { status?, spec? } -> { activity }
@@ -32,8 +36,10 @@ import { ACTIVITY_TYPES } from '../engine/index.js';
 import { TYPE_LABELS } from './interpret.js';
 import {
   DRAFT_MAX_BYTES, listBuilds, getBuild, createBuild, deleteBuild, updateSettings, reviewActivity, rereadActivity, runBuild,
-  type BuildRow, type Built,
+  createReadingsBuild, addReading, updateReading, removeReading, forClient, READING_MAX_BYTES,
+  type BuildRow, type Built, type ReadingInput,
 } from './builds.js';
+import { checkQuotes } from '../engine/reading.js';
 
 lti.app.use('/api', express.json({ limit: '2mb' }));
 
@@ -65,6 +71,30 @@ async function ctx(req: Request, res: Response): Promise<{ token: IdToken; scope
   const build = id ? await getBuild(scope, id) : null;
   if (!build) { res.status(404).json({ error: 'That draft was not found in this course.' }); return null; }
   return { token, scope, build };
+}
+
+/**
+ * A build for the browser. For a readings module each activity also carries
+ * the result of the quotation check, item by item, so the review screen can
+ * show every question beside the sentence it rests on.
+ */
+function view(build: BuildRow): unknown {
+  const b = forClient(build);
+  if (build.kind !== 'readings') return b;
+  return {
+    ...b,
+    activities: build.activities.map((a) => {
+      const slot = build.slots.find((s) => s.n === a.n) as { reading?: number } | undefined;
+      const text = build.readings.find((r) => r.id === slot?.reading)?.text ?? '';
+      return a.spec ? { ...a, quotes: checkQuotes(a.spec, text) } : a;
+    }),
+  };
+}
+
+function withQuotes(build: BuildRow, a: { n: number; spec: Parameters<typeof checkQuotes>[0] | null }): unknown {
+  if (build.kind !== 'readings' || !a.spec) return a;
+  const slot = build.slots.find((s) => s.n === a.n) as { reading?: number } | undefined;
+  return { ...a, quotes: checkQuotes(a.spec, build.readings.find((r) => r.id === slot?.reading)?.text ?? '') };
 }
 
 // The engine rebuilds a module in well under a second, but a page preview
@@ -136,9 +166,74 @@ lti.app.post('/api/builds', upload.single('file'), async (req: Request, res: Res
     // Multer reads the name as latin1; browsers send UTF-8.
     const name = Buffer.from(file.originalname, 'latin1').toString('utf8');
     const build = await createBuild(scopeOf(token), me.id, { name, bytes: new Uint8Array(file.buffer) }, attr(token, me.id, null, 'builder.read'));
-    res.json({ build });
+    res.json({ build: view(build) });
   } catch (e) {
     fail(res, e, 'POST /api/builds');
+  }
+});
+
+lti.app.post('/api/builds/readings', async (req: Request, res: Response) => {
+  try {
+    const token = gateTeacher(res);
+    if (!token) return;
+    const { title } = z.object({ title: z.string().trim().min(2).max(160) }).parse(req.body);
+    const me = await studentFromToken(token);
+    res.json({ build: view(await createReadingsBuild(scopeOf(token), me.id, title)) });
+  } catch (e) {
+    fail(res, e, 'POST /api/builds/readings');
+  }
+});
+
+const uploadReading = multer({ storage: multer.memoryStorage(), limits: { fileSize: READING_MAX_BYTES, files: 1 } });
+const NewReading = z.union([
+  z.object({ url: z.string().trim().min(8).max(2000) }),
+  z.object({ text: z.string().min(1).max(400_000), title: z.string().trim().max(160).default('') }),
+]);
+
+lti.app.post('/api/builds/:id/readings', uploadReading.single('file'), async (req: Request, res: Response) => {
+  try {
+    const c = await ctx(req, res);
+    if (!c) return;
+    const file = (req as Request & { file?: Express.Multer.File }).file;
+    const input: ReadingInput = file
+      ? { file: { name: Buffer.from(file.originalname, 'latin1').toString('utf8'), bytes: new Uint8Array(file.buffer) } }
+      : NewReading.parse(req.body);
+    const me = await studentFromToken(c.token);
+    res.json({ build: view(await addReading(c.build, input, attr(c.token, me.id, null, 'builder.draft'))) });
+  } catch (e) {
+    fail(res, e, 'POST /api/builds/:id/readings');
+  }
+});
+
+const ReadingChange = z.object({
+  title: z.string().trim().min(1).max(160).optional(),
+  include_text: z.boolean().optional(),
+  source_url: z.string().trim().max(2000).refine((u) => u === '' || /^https?:\/\//i.test(u), 'must start with http:// or https://').optional(),
+  license: z.string().trim().max(120).optional(),
+  attribution: z.string().trim().max(500).optional(),
+});
+
+lti.app.put('/api/builds/:id/readings/:rid', async (req: Request, res: Response) => {
+  try {
+    const c = await ctx(req, res);
+    if (!c) return;
+    const rid = idParam(req, 'rid');
+    if (!rid) { res.status(400).json({ error: 'Bad reading number.' }); return; }
+    res.json({ build: view(await updateReading(c.build, rid, ReadingChange.parse(req.body))) });
+  } catch (e) {
+    fail(res, e, 'PUT /api/builds/:id/readings/:rid');
+  }
+});
+
+lti.app.delete('/api/builds/:id/readings/:rid', async (req: Request, res: Response) => {
+  try {
+    const c = await ctx(req, res);
+    if (!c) return;
+    const rid = idParam(req, 'rid');
+    if (!rid) { res.status(400).json({ error: 'Bad reading number.' }); return; }
+    res.json({ build: view(await removeReading(c.build, rid)) });
+  } catch (e) {
+    fail(res, e, 'DELETE /api/builds/:id/readings/:rid');
   }
 });
 
@@ -146,7 +241,7 @@ lti.app.get('/api/builds/:id', async (req: Request, res: Response) => {
   try {
     const c = await ctx(req, res);
     if (!c) return;
-    res.json({ build: c.build });
+    res.json({ build: view(c.build) });
   } catch (e) {
     fail(res, e, 'GET /api/builds/:id');
   }
@@ -163,7 +258,7 @@ lti.app.put('/api/builds/:id', async (req: Request, res: Response) => {
     const c = await ctx(req, res);
     if (!c) return;
     const build = await updateSettings(c.scope, c.build.id, Settings.parse(req.body));
-    res.json({ build });
+    res.json({ build: build ? view(build) : null });
   } catch (e) {
     fail(res, e, 'PUT /api/builds/:id');
   }
@@ -269,7 +364,7 @@ lti.app.put('/api/builds/:id/activities/:n', async (req: Request, res: Response)
       res.status(400).json({ error: `"type" must be one of: ${ACTIVITY_TYPES.join(', ')}.` });
       return;
     }
-    res.json({ activity: await reviewActivity(c.build, n, change) });
+    res.json({ activity: withQuotes(c.build, await reviewActivity(c.build, n, change)) });
   } catch (e) {
     fail(res, e, 'PUT /api/builds/:id/activities/:n');
   }
@@ -283,7 +378,7 @@ lti.app.post('/api/builds/:id/activities/:n/reread', async (req: Request, res: R
     if (!n) { res.status(400).json({ error: 'Bad activity number.' }); return; }
     const note = z.object({ note: z.string().max(2000).optional() }).parse(req.body ?? {}).note ?? '';
     const me = await studentFromToken(c.token);
-    res.json({ activity: await rereadActivity(c.build, n, note, attr(c.token, me.id, null, 'builder.reread')) });
+    res.json({ activity: withQuotes(c.build, await rereadActivity(c.build, n, note, attr(c.token, me.id, null, 'builder.reread'))) });
   } catch (e) {
     fail(res, e, 'POST /api/builds/:id/activities/:n/reread');
   }
@@ -294,7 +389,7 @@ lti.app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => 
   if (err instanceof multer.MulterError) {
     res.status(413).json({
       error: err.code === 'LIMIT_FILE_SIZE'
-        ? `That file is too large: the limit is ${Math.round(DRAFT_MAX_BYTES / 1048576)} MB. Compress the images in the Word file and try again.`
+        ? `That file is too large: the limit is ${Math.round((_req.path.endsWith('/readings') ? READING_MAX_BYTES : DRAFT_MAX_BYTES) / 1048576)} MB.`
         : `Upload failed: ${err.message}`,
     });
     return;

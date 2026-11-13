@@ -95,6 +95,20 @@
   label.field input, label.field textarea { display: block; width: 100%; max-width: 32rem; margin-top: .3rem; padding: .45rem .6rem; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--fg); }
   label.field textarea { max-width: 100%; min-height: 4.5rem; }
 
+  /* Readings */
+  .reading { border: 1px solid var(--border); border-radius: 10px; background: var(--card); padding: .8rem 1rem; margin-top: .8rem; }
+  .reading h3 { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+  .reading .excerpt { color: var(--muted); font-size: .88rem; margin: .4rem 0; }
+  .reading fieldset { border: none; padding: 0; margin: .6rem 0 0; } .reading legend { font-weight: 500; padding: 0; }
+  .reading label.opt { display: block; margin-top: .3rem; } .reading label.opt span { color: var(--muted); font-size: .86rem; }
+  .add-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; }
+  .add-grid form { border: 1px solid var(--border); border-radius: 8px; padding: .8rem; }
+  .add-grid h3 { margin-bottom: .2rem; }
+  .quotes { margin: 0; padding: 0; list-style: none; font-size: .88rem; }
+  .quotes li { background: var(--surface-2); border-radius: 6px; padding: .5rem .65rem; margin-bottom: .4rem; }
+  .quotes .lab { display: block; font-size: .78rem; color: var(--muted); }
+  .quotes .no { color: var(--bad); font-weight: 600; } .quotes .yes { color: var(--good); font-weight: 600; }
+
   /* Page preview */
   .pages { display: grid; grid-template-columns: 15rem 1fr; gap: 1rem; margin-top: 1rem; }
   @media (max-width: 760px) { .pages { grid-template-columns: 1fr; } }
@@ -117,7 +131,7 @@
     <!-- ─── Home: upload and the list of drafts ─── -->
     <section class="view active" id="view-home" aria-labelledby="home-h">
       <div class="card">
-        <h2 id="home-h">Turn a Word course draft into a Moodle module</h2>
+        <h2 id="home-h">Start from a Word course draft</h2>
         <ol class="steps">
           <li>Upload the draft, with its <code>[@Production: …]</code> notes and H5P specifications left in.</li>
           <li>Check how each H5P specification was read. Approve it, ask for a change, or leave it out.</li>
@@ -133,25 +147,37 @@
         </form>
       </div>
       <div class="card">
-        <h2>Drafts in this course</h2>
+        <h2 id="readings-h">Or start from readings</h2>
+        <p class="muted">No Word draft? Give the module a name, then add readings: an open textbook chapter or web page by address, a file (PDF, Word, text), or pasted text. Each reading becomes a page, with practice questions and key-term flashcards drafted from it by AI for you to review.</p>
+        <form id="readings-form">
+          <label class="field" for="readings-title">Module name
+            <input id="readings-title" maxlength="160" required placeholder="Unit 3: The Chemistry of Life"></label>
+          <button class="btn" type="submit" style="margin-top:.8rem">Start the module</button>
+          <div id="readings-msg" role="status"></div>
+        </form>
+      </div>
+      <div class="card">
+        <h2>Modules in this course</h2>
         <div id="build-list"><p class="muted">Loading…</p></div>
       </div>
     </section>
 
     <!-- ─── One draft ─── -->
     <section class="view" id="view-build" aria-labelledby="build-title">
-      <p style="margin:1rem 0 0"><button class="btn btn-ghost btn-small" id="back-btn" type="button">← All drafts</button></p>
+      <p style="margin:1rem 0 0"><button class="btn btn-ghost btn-small" id="back-btn" type="button">← All modules</button></p>
       <div class="card">
         <h2 id="build-title" tabindex="-1"></h2>
         <div class="muted" id="build-sub"></div>
         <div id="build-banner"></div>
       </div>
       <div class="tabs" role="tablist" aria-label="Parts of this draft">
+        <button role="tab" id="tab-src" aria-controls="pane-src" aria-selected="false" tabindex="-1" type="button" hidden>Readings</button>
         <button role="tab" id="tab-acts" aria-controls="pane-acts" aria-selected="true" type="button">H5P activities</button>
         <button role="tab" id="tab-pages" aria-controls="pane-pages" aria-selected="false" tabindex="-1" type="button">Pages</button>
         <button role="tab" id="tab-todo" aria-controls="pane-todo" aria-selected="false" tabindex="-1" type="button">To do</button>
         <button role="tab" id="tab-get" aria-controls="pane-get" aria-selected="false" tabindex="-1" type="button">Download</button>
       </div>
+      <div class="pane" id="pane-src" role="tabpanel" aria-labelledby="tab-src"></div>
       <div class="pane active" id="pane-acts" role="tabpanel" aria-labelledby="tab-acts"></div>
       <div class="pane" id="pane-pages" role="tabpanel" aria-labelledby="tab-pages"></div>
       <div class="pane" id="pane-todo" role="tabpanel" aria-labelledby="tab-todo"></div>
@@ -214,9 +240,9 @@
       const { builds } = await api('/api/builds');
       if (!builds.length) { box.innerHTML = '<p class="empty">No drafts yet. Upload one above.</p>'; return; }
       box.innerHTML = `<div class="scroll-x"><table class="tbl"><thead><tr><th scope="col">Module</th><th scope="col">Uploaded</th><th scope="col">H5P activities</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead><tbody>` +
-        builds.map((b) => `<tr><th scope="row" style="font-weight:500;color:inherit;font-size:inherit">${esc(b.title)}<div class="muted">${esc(b.source_name)}</div></th>
+        builds.map((b) => `<tr><th scope="row" style="font-weight:500;color:inherit;font-size:inherit">${esc(b.title)}<div class="muted">${b.kind === 'readings' ? `From ${b.reading_count} reading${b.reading_count === 1 ? '' : 's'}` : esc(b.source_name)}</div></th>
           <td>${when(b.created_at)}</td>
-          <td>${b.state === 'reading' ? '<span class="chip">Being read…</span>' : b.spec_count ? `${b.approved} of ${b.spec_count} approved${b.to_review ? ` · <span class="chip draft">${b.to_review} to review</span>` : ''}${b.failed ? ` · <span class="chip bad">${b.failed} failed</span>` : ''}` : 'None in this draft'}</td>
+          <td>${b.kind === 'readings' && !b.reading_count ? 'No readings yet' : b.state === 'reading' ? '<span class="chip">Being read…</span>' : b.spec_count ? `${b.approved} of ${b.spec_count} approved${b.to_review ? ` · <span class="chip draft">${b.to_review} to review</span>` : ''}${b.failed ? ` · <span class="chip bad">${b.failed} failed</span>` : ''}` : 'None in this draft'}</td>
           <td><button class="btn btn-small" type="button" data-open="${b.id}">Open<span class="visually-hidden"> ${esc(b.title)}</span></button></td></tr>`).join('') +
         '</tbody></table></div>';
       $$('[data-open]', box).forEach((btn) => btn.addEventListener('click', () => openBuild(Number(btn.dataset.open))));
@@ -237,27 +263,40 @@
     } catch (e) { msg.className = 'err'; msg.textContent = friendly(e); }
     finally { btn.disabled = false; }
   });
+  $('#readings-form').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const msg = $('#readings-msg');
+    try {
+      const { build: b } = await api('/api/builds/readings', { body: { title: $('#readings-title').value.trim() } });
+      ev.target.reset(); msg.textContent = '';
+      await openBuild(b.id);
+    } catch (e) { msg.className = 'err'; msg.textContent = friendly(e); }
+  });
   $('#back-btn').addEventListener('click', loadHome);
 
   // ─── One draft ───
-  const TABS = ['acts', 'pages', 'todo', 'get'];
+  const ALL_TABS = ['src', 'acts', 'pages', 'todo', 'get'];
+  const isReadings = () => build && build.kind === 'readings';
+  const tabs = () => ALL_TABS.filter((t) => t !== 'src' || isReadings());
   function selectTab(name, focus) {
-    TABS.forEach((t) => {
+    ALL_TABS.forEach((t) => {
       const on = t === name;
       $('#tab-' + t).setAttribute('aria-selected', String(on));
       $('#tab-' + t).tabIndex = on ? 0 : -1;
       $('#pane-' + t).classList.toggle('active', on);
     });
     if (focus) $('#tab-' + name).focus();
+    if (name === 'src') renderSources();
     if (name === 'pages') renderPages();
     if (name === 'todo') renderTodo();
     if (name === 'get') renderGet();
   }
-  TABS.forEach((t, i) => {
+  ALL_TABS.forEach((t) => {
     $('#tab-' + t).addEventListener('click', () => selectTab(t));
     $('#tab-' + t).addEventListener('keydown', (ev) => {
-      if (ev.key === 'ArrowRight') selectTab(TABS[(i + 1) % TABS.length], true);
-      if (ev.key === 'ArrowLeft') selectTab(TABS[(i + TABS.length - 1) % TABS.length], true);
+      const list = tabs(), i = list.indexOf(t);
+      if (ev.key === 'ArrowRight') selectTab(list[(i + 1) % list.length], true);
+      if (ev.key === 'ArrowLeft') selectTab(list[(i + list.length - 1) % list.length], true);
     });
   });
 
@@ -266,8 +305,9 @@
     $('#pane-acts').innerHTML = '<p class="muted" style="margin-top:1rem">Loading…</p>';
     try {
       build = (await api('/api/builds/' + id)).build; pages = null;
+      $('#tab-src').hidden = !isReadings();
       renderBuild();
-      selectTab('acts');
+      selectTab(isReadings() && !build.readings.length ? 'src' : 'acts');
       $('#build-title').focus();
     } catch (e) { $('#pane-acts').innerHTML = `<p class="err">${esc(friendly(e))}</p>`; }
   }
@@ -281,13 +321,17 @@
   function renderHead() {
     $('#build-title').textContent = build.title;
     const c = counts(), total = build.slots.length;
-    $('#build-sub').textContent = `${build.source_name} · uploaded ${when(build.created_at)}`;
+    $('#build-sub').textContent = isReadings()
+      ? `Built from ${build.readings.length} reading${build.readings.length === 1 ? '' : 's'} · started ${when(build.created_at)}`
+      : `${build.source_name} · uploaded ${when(build.created_at)}`;
     const banner = $('#build-banner');
     if (build.state === 'reading') {
       const done = total - c.pending;
-      banner.innerHTML = `<div class="banner" role="status"><div>Reading the H5P specifications: ${done} of ${total} done. The pages are ready to look at now.</div><progress max="${total}" value="${done}" aria-label="Specifications read"></progress></div>`;
+      banner.innerHTML = `<div class="banner" role="status"><div>${isReadings() ? 'Drafting activities from the readings' : 'Reading the H5P specifications'}: ${done} of ${total} done. The pages are ready to look at now.</div><progress max="${total}" value="${done}" aria-label="Specifications read"></progress></div>`;
     } else if (!total) {
-      banner.innerHTML = `<div class="banner">This draft has no H5P specifications. The pages are ready: check the To do list, then download.</div>`;
+      banner.innerHTML = isReadings()
+        ? `<div class="banner">Add a reading to begin.</div>`
+        : `<div class="banner">This draft has no H5P specifications. The pages are ready: check the To do list, then download.</div>`;
     } else if (c.draft || c.failed) {
       banner.innerHTML = `<div class="banner warn">${c.draft ? `${c.draft} of ${total} activities still need your review. ` : ''}${c.failed ? `${c.failed} could not be read and will be left out unless you try again. ` : ''}</div>`;
     } else {
@@ -298,9 +342,12 @@
   function renderBuild() {
     renderHead();
     const pane = $('#pane-acts');
-    if (!build.slots.length) { pane.innerHTML = '<p class="empty" style="margin-top:1rem">No H5P specifications were found in this draft. The builder looks for a production note that says “Insert H5P activity using the specification below”.</p>'; }
+    if (!build.slots.length && isReadings()) { pane.innerHTML = '<p class="empty" style="margin-top:1rem">No activities yet. Add a reading on the Readings tab and two activities are drafted from it.</p>'; }
+    else if (!build.slots.length) { pane.innerHTML = '<p class="empty" style="margin-top:1rem">No H5P specifications were found in this draft. The builder looks for a production note that says “Insert H5P activity using the specification below”.</p>'; }
     else {
-      pane.innerHTML = `<p class="muted" style="margin-top:1rem">Each specification is shown as the author wrote it, beside how it was read by AI (${esc(me.model || '')}). Nothing here was written by the AI except where a note says so. An activity is built from the right-hand side.</p>` +
+      pane.innerHTML = (isReadings()
+        ? `<p class="muted" style="margin-top:1rem">These activities were written by AI (${esc(me.model || '')}) from the readings. Each question and card is shown beside the sentence of the reading it rests on; a program has checked that each sentence is really there. Read them as a subject expert would: the check confirms the source, not the quality of the question.</p>`
+        : `<p class="muted" style="margin-top:1rem">Each specification is shown as the author wrote it, beside how it was read by AI (${esc(me.model || '')}). Nothing here was written by the AI except where a note says so. An activity is built from the right-hand side.</p>`) +
         build.slots.map((s) => `<article class="act" id="act-${s.n}" aria-labelledby="act-h-${s.n}"></article>`).join('');
       build.slots.forEach((s) => renderAct(s.n));
     }
@@ -315,6 +362,7 @@
       const before = build;
       build = fresh; pages = null;
       renderHead();
+      if (fresh.slots.length !== before.slots.length) { renderBuild(); return; }
       fresh.activities.forEach((a) => {
         const old = before.activities.find((x) => x.n === a.n);
         if (!old || old.status !== a.status) renderAct(a.n);
@@ -374,14 +422,16 @@
     if (a.status === 'pending') right = '<p class="muted">Being read…</p>';
     else if (!spec) right = `<div class="problem">The AI step could not read this specification${a.error ? ': ' + esc(a.error) : '.'} Try again, or leave it out and build it by hand.</div>`;
     else right = `<div class="read">${outline(spec)}</div>` +
-      (spec.interpretation ? `<div class="note"><strong>Note from the AI reading:</strong> ${esc(spec.interpretation)}</div>` : '') +
+      (spec.interpretation ? `<div class="note"><strong>Note from the AI:</strong> ${esc(spec.interpretation)}</div>` : '') +
       (a.problems.length ? `<div class="problem"><strong>Cannot be built yet:</strong> ${a.problems.map(esc).join(' ')}</div>` : '') +
       (a.edited ? '<p class="muted">Edited by hand.</p>' : '');
     const canApprove = spec && !a.problems.length && a.status !== 'approved';
     el.innerHTML = `<header><h3 id="act-h-${n}">${n}. ${inline(title)}</h3>
         ${spec ? `<span class="chip type">${esc(typeLabel(spec.type))}</span>` : ''}<span class="chip ${cls}">${esc(label)}</span></header>
-      <p class="muted where">${esc(slot.chapter)} › ${esc(slot.under)}${slot.type ? ` · the draft asks for: ${esc(slot.type)}` : ''}</p>
-      <div class="cols"><div><h4>In the draft</h4><pre class="spec">${inline(slot.text)}</pre></div><div><h4>How it was read</h4>${right}</div></div>
+      <p class="muted where">${esc(slot.chapter)} › ${esc(slot.under)}${slot.type && !isReadings() ? ` · the draft asks for: ${esc(slot.type)}` : ''}</p>
+      <div class="cols"><div>${isReadings()
+        ? `<h4>Sentences from the reading</h4>${(a.quotes || []).length ? `<ul class="quotes">${a.quotes.map((q) => `<li><span class="lab">${esc(q.label)} · ${q.found ? '<span class="yes">found in the reading</span>' : '<span class="no">not found in the reading</span>'}</span>${q.quote ? '“' + esc(q.quote) + '”' : '<em>none given</em>'}</li>`).join('')}</ul>` : '<p class="muted">Nothing yet.</p>'}`
+        : `<h4>In the draft</h4><pre class="spec">${inline(slot.text)}</pre>`}</div><div><h4>${isReadings() ? 'What was drafted' : 'How it was read'}</h4>${right}</div></div>
       <div class="actions">
         ${a.status === 'pending' ? '' : `
         <button class="btn btn-small" type="button" data-do="approve" ${canApprove ? '' : 'disabled'}>${a.status === 'approved' ? 'Approved' : 'Approve'}</button>
@@ -420,7 +470,7 @@
       if (what === 'ask') {
         if (!spec) { run(() => api(`/api/builds/${build.id}/activities/${n}/reread`, { method: 'POST', body: {} }), 'Reading the specification again…'); return; }
         if (openPanel(btn, `<label class="field" for="ask-${n}">What should change?
-            <span class="hint">Say it in your own words, for example “make this single choice” or “the third answer is also correct”. The specification is read again with your note.</span>
+            <span class="hint">${isReadings() ? 'Say it in your own words, for example “replace question 3 with one about hydrogen bonds” or “make the wrong answers harder”. The activity is drafted again with your note.' : 'Say it in your own words, for example “make this single choice” or “the third answer is also correct”. The specification is read again with your note.'}</span>
             <textarea id="ask-${n}"></textarea></label>
             <button class="btn btn-small" type="button" style="margin-top:.5rem" data-send>Read it again</button>`)) {
           $('#ask-' + n).focus();
@@ -444,6 +494,86 @@
         }
       }
     }));
+  }
+
+  // ─── Readings (modules started from readings) ───
+  function setBuild(b) { build = b; pages = null; renderBuild(); renderSources(); }
+  function renderSources() {
+    const pane = $('#pane-src');
+    if (!isReadings()) { pane.innerHTML = ''; return; }
+    const keep = { url: $('#src-url')?.value || '', title: $('#src-title')?.value || '', text: $('#src-text')?.value || '' };
+    pane.innerHTML = `<div class="card"><h2>Add a reading</h2>
+        <div class="add-grid">
+          <form id="src-url-form"><h3>From the web</h3>
+            <label class="field" for="src-url">Address of the page or chapter
+              <span class="hint">Open textbooks on Pressbooks (BCcampus, for example) are read chapter by chapter.</span>
+              <input id="src-url" type="url" placeholder="https://" required></label>
+            <button class="btn btn-small" type="submit" style="margin-top:.6rem">Add</button></form>
+          <form id="src-file-form"><h3>A file</h3>
+            <label class="field" for="src-file">PDF, Word, HTML or text file
+              <span class="hint">A scanned PDF has no text to read until it has been through OCR.</span>
+              <input id="src-file" type="file" accept=".pdf,.docx,.txt,.md,.html,.htm" required></label>
+            <button class="btn btn-small" type="submit" style="margin-top:.6rem">Add</button></form>
+          <form id="src-text-form"><h3>Pasted text</h3>
+            <label class="field" for="src-title">Title <input id="src-title" maxlength="160" required></label>
+            <label class="field" for="src-text">Text <textarea id="src-text" required></textarea></label>
+            <button class="btn btn-small" type="submit" style="margin-top:.6rem">Add</button></form>
+        </div>
+        <div id="src-msg" role="status"></div></div>
+      <div class="card"><h2>Readings in this module</h2>
+        ${build.readings.length ? '' : '<p class="empty">None yet.</p>'}
+        ${build.readings.map((r, i) => `<div class="reading" data-rid="${r.id}">
+          <h3>${i + 1}. ${esc(r.title)} <span class="chip">${r.origin === 'url' ? 'web' : r.origin === 'file' ? 'file' : 'pasted'}</span>
+            ${r.license ? `<span class="chip done">${esc(r.license)}</span>` : '<span class="chip draft">no open licence found</span>'}</h3>
+          <p class="excerpt">${esc(r.excerpt)}… <span class="muted">(${Math.round(r.chars / 100) / 10}k characters)</span></p>
+          <fieldset><legend>On this reading’s page</legend>
+            <label class="opt"><input type="radio" name="inc-${r.id}" value="1" ${r.include_text ? 'checked' : ''}> The full text of the reading, then the activities
+              <span>· only if it is openly licensed, or yours to reuse</span></label>
+            <label class="opt"><input type="radio" name="inc-${r.id}" value="0" ${r.include_text ? '' : 'checked'}> ${r.source_url ? 'A link to the reading' : 'A reminder to add the reading or a link'}, then the activities
+              <span>· for copyrighted readings such as library articles</span></label>
+          </fieldset>
+          <label class="field" for="url-${r.id}">Link to the reading
+            <span class="hint">Where students can read it: its web address, or a library permalink. Used when the page links to the reading, and in the credit line.</span>
+            <input id="url-${r.id}" type="url" value="${esc(r.source_url)}" maxlength="2000" placeholder="https://"></label>
+          <label class="field" for="attr-${r.id}">Credit line shown under the page
+            <input id="attr-${r.id}" value="${esc(r.attribution)}" maxlength="500" placeholder="Author, title, publisher, licence"></label>
+          <p style="margin:.7rem 0 0"><button class="btn btn-ghost btn-small" type="button" data-save>Save link and credit line</button>
+            <button class="btn btn-danger btn-small" type="button" data-remove>Remove this reading</button> <span class="msg" role="status"></span></p>
+        </div>`).join('')}</div>`;
+    $('#src-url').value = keep.url; $('#src-title').value = keep.title; $('#src-text').value = keep.text;
+    const msg = $('#src-msg');
+    const add = async (form, body, working) => {
+      const btn = $('button', form);
+      btn.disabled = true; msg.className = 'muted'; msg.textContent = working;
+      try {
+        const { build: b } = await api(`/api/builds/${build.id}/readings`, { method: 'POST', body });
+        ['#src-url', '#src-title', '#src-text'].forEach((id) => { $(id).value = ''; });
+        setBuild(b);
+        $('#src-msg').className = 'ok'; $('#src-msg').textContent = 'Added. Its activities are being drafted; see the H5P activities tab.';
+        announce('Reading added. Its activities are being drafted.');
+      } catch (e) { msg.className = 'err'; msg.textContent = friendly(e); btn.disabled = false; }
+    };
+    $('#src-url-form').addEventListener('submit', (ev) => { ev.preventDefault(); add(ev.target, { url: $('#src-url').value.trim() }, 'Fetching the page…'); });
+    $('#src-file-form').addEventListener('submit', (ev) => { ev.preventDefault(); const fd = new FormData(); fd.append('file', $('#src-file').files[0]); add(ev.target, fd, 'Reading the file…'); });
+    $('#src-text-form').addEventListener('submit', (ev) => { ev.preventDefault(); add(ev.target, { title: $('#src-title').value.trim(), text: $('#src-text').value }, 'Adding…'); });
+    $$('.reading', pane).forEach((box) => {
+      const rid = box.dataset.rid, m = $('.msg', box);
+      const change = async (body, done) => {
+        try { const { build: b } = await api(`/api/builds/${build.id}/readings/${rid}`, { method: 'PUT', body }); build = b; pages = null; m.className = 'msg ok'; m.textContent = done; }
+        catch (e) { m.className = 'msg err'; m.textContent = friendly(e); }
+      };
+      $$('input[type=radio]', box).forEach((r) => r.addEventListener('change', () => change({ include_text: r.value === '1' }, 'Saved.')));
+      $('[data-save]', box).addEventListener('click', async () => {
+        await change({ attribution: $('#attr-' + rid).value.trim(), source_url: $('#url-' + rid).value.trim() }, 'Saved.');
+        if ($('.msg', box).classList.contains('ok')) { renderSources(); }
+      });
+      $('[data-remove]', box).addEventListener('click', async (ev) => {
+        const btn = ev.currentTarget;
+        if (btn.dataset.sure !== '1') { btn.dataset.sure = '1'; btn.textContent = 'Remove it and its activities?'; return; }
+        try { const { build: b } = await api(`/api/builds/${build.id}/readings/${rid}`, { method: 'DELETE' }); setBuild(b); announce('Reading removed.'); }
+        catch (e) { m.className = 'msg err'; m.textContent = friendly(e); }
+      });
+    });
   }
 
   // ─── Pages, to-do, download: all from one engine run ───
@@ -500,9 +630,9 @@
           const s = build.slots.find((x) => x.n === a.n);
           return `<li>${a.n}. ${esc((a.spec && a.spec.title) || (s && s.title) || 'Untitled')}: ${esc((STATUS[a.status] || [a.status])[0])}${a.problems.length ? ' (' + esc(a.problems.join(' ')) + ')' : ''}</li>`;
         }).join('') + '</ul>' : '<p class="muted">None. Every specification found is in the file.</p>'}</div>
-        <div class="card"><h2>Judgement calls made by the page rules</h2>
-          <p class="muted">Places where the draft was unclear and a fixed rule chose. Worth a glance on the page.</p>${list(p.judgement)}</div>
-        <div class="card"><h2>Leave out lines that are notes, not content</h2>
+        <div class="card"><h2>${isReadings() ? 'Notes on the pages' : 'Judgement calls made by the page rules'}</h2>
+          <p class="muted">${isReadings() ? 'Things worth a glance.' : 'Places where the draft was unclear and a fixed rule chose. Worth a glance on the page.'}</p>${list(p.judgement)}</div>
+        <div class="card" ${isReadings() ? 'hidden' : ''}><h2>Leave out lines that are notes, not content</h2>
           <form id="leave-form"><label class="field" for="leave-out">Paragraphs to leave out
             <span class="hint">If a note to production was not marked as one and shows up on a page, paste how the paragraph starts, one per line. Every paragraph starting that way is dropped.</span>
             <textarea id="leave-out">${esc((build.leave_out || []).join('\n'))}</textarea></label>
