@@ -14,7 +14,11 @@
  */
 
 import { ACTIVITY_TYPES, LIB, checkActivity, librariesUsed, packageH5p } from './h5p.js';
-import { buildMbz } from './mbz.js';
+import { buildMbz, forumLink, bookPageLink, type MbzForum } from './mbz.js';
+import {
+  isRhizo, isContract, checkRhizo, rhizoDisclosure, rhizoPageHtml, rhizoForumHtml, contractPageHtml, contractForumHtml,
+  trailsOf, partsOf, placeOf, RHIZO_KINDS, CREDIT_TEXT,
+} from './rhizo.js';
 import { slug } from './pages.js';
 import { cmp, pad } from './py.js';
 import type { Activity, BuildOptions, BuildResult } from './index.js';
@@ -46,6 +50,10 @@ export interface ReadingModule {
   /** One line shown above the activities on every page. */
   disclosure?: string;
   h5p_versions?: Record<string, string>;
+  /** rhizmode: the activities are open prompts (rhizo.ts), not practice questions. */
+  mode?: 'practice' | 'rhizmode';
+  /** The model that drafted the activities, named on RhizMode pages. */
+  model?: string;
 }
 
 const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -127,8 +135,11 @@ export function checkQuotes(act: Activity, readingText: string): QuoteCheck[] {
     const n = normForQuote(quote);
     return { label, quote, found: n.length >= 12 && source.includes(n) };
   };
-  const items = (list: unknown, word: string): QuoteCheck[] =>
-    Array.isArray(list) ? list.map((x, i) => one(`${word} ${i + 1}`, (x as Record<string, unknown> | null)?.source_quote)) : [];
+  const items = (list: unknown, word: string, field = 'source_quote'): QuoteCheck[] =>
+    Array.isArray(list) ? list.map((x, i) => one(`${word} ${i + 1}`, (x as Record<string, unknown> | null)?.[field])) : [];
+  // RhizMode: the passage each prompt is anchored to. A Community Contract belongs to the whole module and has none.
+  if (isContract(act)) return [];
+  if (isRhizo(act)) return items(act.trails, 'Passage', 'passage');
   if (act.type === 'questionset') return items(act.questions, 'Question');
   if (act.type === 'dialogcards') return items(act.cards, 'Card');
   return [one('This activity', act.source_quote)];
@@ -136,6 +147,13 @@ export function checkQuotes(act: Activity, readingText: string): QuoteCheck[] {
 
 /** Problems that keep a drafted activity out of the file: what checkActivity finds, plus any item whose quotation is not in the reading. */
 export function checkDrafted(act: Activity, readingText: string): string[] {
+  if (isRhizo(act)) {
+    const problems = checkRhizo(act);
+    for (const q of checkQuotes(act, readingText)) {
+      if (!q.found) problems.push(q.quote ? `${q.label}: it is not in the reading as quoted.` : `${q.label}: no passage was given.`);
+    }
+    return problems;
+  }
   const problems = checkActivity(act);
   for (const q of checkQuotes(act, readingText)) {
     if (!q.found) problems.push(q.quote ? `${q.label}: the supporting sentence is not in the reading as quoted.` : `${q.label}: no supporting sentence was given.`);
@@ -159,8 +177,18 @@ export function buildReadings(mod: ReadingModule, opts: BuildOptions): BuildResu
   const todo: string[] = [];
   const judgement: string[] = [];
   const built: { act: ReadingActivity; name: string }[] = [];
+  const rhizmode = mod.mode === 'rhizmode';
+  const open: ReadingActivity[] = [];      // RhizMode activities that passed their checks
+  const forums: MbzForum[] = [];
 
   for (const act of mod.activities) {
+    if (isRhizo(act)) {
+      const r = mod.readings.find((x) => x.id === act.reading);
+      const problems = isContract(act) ? checkRhizo(act) : r ? checkDrafted(act, r.text) : ['its reading is no longer in the module.'];
+      if (problems.length) todo.push(`${String(act.title)} could not be built: ${problems.join(' ')}`);
+      else open.push(act);
+      continue;
+    }
     const label = `H5P activity #${act.n}${typeof act.title === 'string' ? ` (${act.title})` : ''}`;
     try {
       if (!ACTIVITY_TYPES.includes(act.type)) throw new Error(`unknown type "${act.type}"`);
@@ -173,14 +201,26 @@ export function buildReadings(mod: ReadingModule, opts: BuildOptions): BuildResu
     }
   }
 
-  const chapters = mod.readings.map((r) => {
+  // The Community Contract, when there is one, is the first page and the first forum.
+  const contract = open.find(isContract);
+  const first = contract ? 1 : 0;
+  let contractPage: { title: string; html: string } | undefined;
+  if (contract) {
+    const note = rhizoDisclosure(mod.model, true);
+    const discuss = placeOf(contract) === 'discussion';
+    if (discuss) forums.push({ name: String(contract.title), intro: contractForumHtml(contract, note) });
+    contractPage = { title: RHIZO_KINDS.contract!.title, html: contractPageHtml(contract, note, discuss ? forumLink(0) : undefined) };
+  }
+
+  const readingPages = mod.readings.map((r, page) => {
     const mine = built.filter((b) => b.act.reading === r.id);
+    const prompts = open.filter((a) => !isContract(a) && a.reading === r.id);
     let html = '';
     if (r.include_text) {
       html += textToHtml(r.text, r.title);
       if (!r.license) todo.push(`${r.title}: the text of this reading is on the page and no open licence was found. Confirm you have the right to reuse it, or switch the page to "link only".`);
     } else if (r.source_url) {
-      html += `<p>Read <a href="${escAttr(r.source_url)}" target="_blank" rel="noopener">${esc(r.title)}</a>, then return to this page for the practice activities.</p>`;
+      html += `<p>Read <a href="${escAttr(r.source_url)}" target="_blank" rel="noopener">${esc(r.title)}</a>, then return to this page for the ${rhizmode ? 'prompts below' : 'practice activities'}.</p>`;
     } else {
       html += TODO(`Add the reading "${r.title}" here, or a link to it. Its text is not on this page.`);
       todo.push(`${r.title}: the page has no text and no link to the reading. Add the file or a link.`);
@@ -190,6 +230,16 @@ export function buildReadings(mod: ReadingModule, opts: BuildOptions): BuildResu
       // The activity shows its own full title; the page heading is the short form before the colon.
       for (const b of mine) html += `\n<h5>${esc(String(b.act.title).split(':')[0]!.trim())}</h5>\n${EMBED(b.name)}`;
     }
+    for (const act of prompts) {
+      const note = rhizoDisclosure(mod.model);
+      if (placeOf(act) === 'discussion') {
+        const i = forums.length;
+        forums.push({ name: String(act.title), intro: rhizoForumHtml(act, r.title, note, bookPageLink(0, first + page + 1)) });
+        html += rhizoPageHtml(act, note, forumLink(i));
+      } else {
+        html += rhizoPageHtml(act, note);
+      }
+    }
     const credit = [r.attribution, r.license && !r.attribution.includes(r.license) ? r.license : ''].filter(Boolean).join('. ');
     if (credit || r.source_url) {
       html += '\n<hr>\n<p style="font-size:.85rem;color:#495057">'
@@ -198,21 +248,29 @@ export function buildReadings(mod: ReadingModule, opts: BuildOptions): BuildResu
     } else {
       todo.push(`${r.title}: no source or attribution is recorded for this reading. Add a credit line to the page.`);
     }
-    if (!mine.length) judgement.push(`${r.title}: no practice activities are on this page.`);
+    if (!mine.length && !prompts.length) judgement.push(`${r.title}: no ${rhizmode ? 'prompts' : 'practice activities'} are on this page.`);
     return { title: r.title, html };
   });
+  const chapters = contractPage ? [contractPage, ...readingPages] : readingPages;
 
   const fileName = `${slug(mod.name) || 'module'}.mbz`;
   const stats = buildMbz(fileName, { fullname: mod.name, shortname: opts.course || slug(mod.name).toUpperCase() }, { name: mod.name },
-    [{ name: mod.name, chapters, files: packages }], { hidden: !opts.visible, sectionNumber: opts.section ?? 1 });
+    [{ name: mod.name, chapters, files: packages }], { hidden: !opts.visible, sectionNumber: opts.section ?? 1, forums });
 
   const items = built.reduce((n, b) => n + checkQuotes(b.act, '').length, 0);
   const rows: [string, number | string][] = [
     ['Book pages', chapters.length],
     ['Pages carrying the reading’s text', mod.readings.filter((r) => r.include_text).length],
     ['Pages that link to the reading', mod.readings.filter((r) => !r.include_text).length],
-    ['H5P activities embedded', built.length],
-    ['AI-drafted questions and cards', items],
+    ...(rhizmode ? [
+      ['Open-prompt activities on the pages', open.length],
+      ['Discussion forums', forums.length],
+      ['Passages the prompts point to', open.reduce((n, a) => n + (isContract(a) ? 0 : trailsOf(a).length), 0)],
+    ] as [string, number][] : []),
+    ...(rhizmode && !built.length ? [] : [
+      ['H5P activities embedded', built.length],
+      ['AI-drafted questions and cards', items],
+    ] as [string, number][]),
     ['Files in the backup', stats.files],
   ];
 
@@ -223,7 +281,32 @@ export function buildReadings(mod: ReadingModule, opts: BuildOptions): BuildResu
   report += '\n## Needs a person before publishing\n\n';
   for (const t of todo) report += `- ${t}\n`;
   if (!todo.length) report += '- Nothing was flagged.\n';
-  report += '\n## Every AI-drafted item, for the subject reviewer\n\n'
+  if (rhizmode) {
+    report += '\n## Every AI-drafted prompt, for the reviewer\n\n'
+      + 'These activities have no answer key and are not graded. Each prompt points at a passage of the reading, and a program checked that the passage is there as quoted. '
+      + 'The check shows what a prompt is responding to; it does not judge whether the prompt is a good one. Only activities a person approved are in the file.\n\n'
+      + `${CREDIT_TEXT}\n\n`
+      + '| Page | Activity | Students answer | Passage | In the reading | What the page says about it | Questions |\n|---|---|---|---|---|---|---|\n';
+    for (const act of open) {
+      const r = mod.readings.find((x) => x.id === act.reading);
+      const checks = checkQuotes(act, r?.text ?? '');
+      const where = placeOf(act) === 'discussion' ? 'in a discussion forum' : 'on their own';
+      if (isContract(act)) {
+        report += `| ${RHIZO_KINDS.contract!.title} | ${cell(act.title)} | ${where} | (none: drafted from the whole module) | | ${cell(act.topic)} | ${cell(partsOf(act).map((p) => `${p.label}: ${p.prompt}`).join(' / '))} |\n`;
+        continue;
+      }
+      trailsOf(act).forEach((t, i) => {
+        report += `| ${cell(r?.title)} | ${cell(act.title)} | ${where} | ${cell(t.passage)} | ${checks[i]?.found ? 'yes' : 'NO'} | ${cell(t.notice)} | ${cell(t.questions.join(' / '))} |\n`;
+      });
+      report += `| ${cell(r?.title)} | ${cell(act.title)} | ${where} | (Your turn) | | ${cell(act.your_turn)} | |\n`;
+    }
+    report += '\nFixed wording, the same on every page, not drafted by AI:\n\n';
+    for (const [type, k] of Object.entries(RHIZO_KINDS)) {
+      if (open.some((a) => a.type === type)) report += `- ${k.title}, on the page: ${k.how}\n- ${k.title}, in the discussion: ${k.forum_how}\n`;
+    }
+    report += `- Disclosure: ${rhizoDisclosure(mod.model)}\n`;
+  }
+  if (!rhizmode || built.length) report += '\n## Every AI-drafted item, for the subject reviewer\n\n'
     + 'Each answer key was checked against the quoted sentence of the reading, not against outside knowledge. '
     + 'A subject expert should still read every item.\n\n| Page | Activity | Item | Key | Supporting sentence | In the reading |\n|---|---|---|---|---|---|\n';
   for (const { act } of built) {
@@ -237,7 +320,7 @@ export function buildReadings(mod: ReadingModule, opts: BuildOptions): BuildResu
       report += `| ${cell(r?.title)} | ${cell(act.title)} | ${what.slice(0, 120)} | ${key.slice(0, 120)} | ${cell(q.quote).slice(0, 200)} | ${q.found ? 'yes' : 'NO'} |\n`;
     });
   }
-  report += '\n## H5P versions this file expects on the Moodle site\n\n';
+  if (!rhizmode || built.length) report += '\n## H5P versions this file expects on the Moodle site\n\n';
   const need: Record<string, string> = {};
   for (const { act } of built) Object.assign(need, librariesUsed(act, versions));
   const main = Object.values(LIB);
@@ -247,7 +330,7 @@ export function buildReadings(mod: ReadingModule, opts: BuildOptions): BuildResu
 
   return {
     name: mod.name, fileName, mbz: stats.mbz, report, specsFound: '',
-    chapters, slots: [], h5p: packages, images: {},
+    chapters, slots: [], h5p: packages, images: {}, forums: forums.map((f) => ({ name: f.name, html: f.intro })),
     counts: Object.fromEntries(rows), todo, judgement,
   };
 }

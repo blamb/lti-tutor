@@ -75,3 +75,89 @@ test('buildReadings: full text with no licence is flagged, and a broken activity
   assert.match(r.todo.join('\n'), /H5P activity #2 \(Broken\) could not be built/);
   assert.equal(Object.keys(r.h5p).length, 0);
 });
+
+// ─── RhizMode ───────────────────────────────────────────────────────────────
+
+const breadcrumb = (over: Record<string, unknown> = {}): ReadingActivity => ({
+  n: 3, reading: 1, type: 'breadcrumb', title: 'Breadcrumb Trail: Water', place: 'discussion',
+  trails: [{ passage: 'Water is a polar molecule.', notice: 'The reading states this and gives no source.', questions: ['Where would you look to check this?', 'Who taught you this first?'] }],
+  your_turn: 'Post one thing you believe about water & where you got it.',
+  ...over,
+});
+
+test('RhizMode anchor check: a passage must be in the reading as quoted, short, and have something asked of it', () => {
+  assert.deepEqual(checkDrafted(breadcrumb(), TEXT), []);
+  assert.equal(checkQuotes(breadcrumb(), TEXT)[0]!.label, 'Passage 1');
+  const moved = breadcrumb({ trails: [{ passage: 'Water is a dipolar molecule.', notice: 'x', questions: ['y?'] }] });
+  assert.match(checkDrafted(moved, TEXT).join(' '), /Passage 1: it is not in the reading as quoted/);
+  const bare = breadcrumb({ trails: [{ passage: 'Water is a polar molecule.', notice: '', questions: [] }], your_turn: ' ' });
+  assert.match(checkDrafted(bare, TEXT).join(' '), /nothing is said about it.*no question.*Your turn/);
+  assert.match(checkDrafted(breadcrumb({ trails: [] }), TEXT).join(' '), /no passages/);
+});
+
+test('RhizMode build: the prompt is on the page and in a forum, they link to each other, and nothing is H5P', () => {
+  const r = buildReadings({
+    name: 'Unit 1: Water', mode: 'rhizmode', model: 'test-model',
+    readings: [reading()], activities: [breadcrumb()],
+  }, { sourceName: '1 reading' });
+  const page = r.chapters[0]!.html;
+  assert.ok(page.includes('<h4>Breadcrumb Trail</h4>'));
+  assert.ok(page.includes('“Water is a polar molecule.”'));
+  assert.ok(page.includes('drafted with AI (test-model)'));
+  assert.ok(page.includes('no answer key and nothing is graded'));
+  assert.ok(page.includes('writings of <a href="https://davecormier.com/edblog/"'));
+  assert.ok(page.includes('href="$@FORUMVIEWBYID*9351@$"'), 'the page links to its forum in the form Moodle rewrites on restore');
+  assert.ok(page.includes('water &amp; where'), 'prompt text is escaped');
+  assert.equal(r.forums!.length, 1);
+  assert.equal(r.forums![0]!.name, 'Breadcrumb Trail: Water');
+  assert.ok(r.forums![0]!.html.includes('href="$@BOOKVIEWBYIDCH*9301*9602@$"'), 'the forum links back to the page');
+  assert.equal(Object.keys(r.h5p).length, 0);
+  assert.equal(r.counts['Discussion forums'], 1);
+  assert.match(r.report, /Every AI-drafted prompt, for the reviewer/);
+  assert.match(r.report, /\| Water \| Breadcrumb Trail: Water \| in a discussion forum \| Water is a polar molecule\. \| yes \|/);
+  assert.ok(!r.report.includes('H5P versions'));
+  const tar = gunzipSync(r.mbz).toString('latin1');
+  assert.ok(tar.includes('activities/forum_9351/forum.xml'));
+  assert.ok(tar.includes('<type>single</type>'));
+});
+
+test('RhizMode build: "on their own" makes no forum, and a prompt whose passage is gone is reported, not built', () => {
+  const alone = buildReadings({ name: 'M', mode: 'rhizmode', readings: [reading()], activities: [breadcrumb({ place: 'page' })] }, { sourceName: 'x' });
+  assert.equal(alone.forums!.length, 0);
+  assert.ok(alone.chapters[0]!.html.includes('it is not handed in'));
+  assert.ok(!alone.chapters[0]!.html.includes('FORUMVIEWBYID'));
+  const gone = buildReadings({ name: 'M', mode: 'rhizmode', readings: [reading()],
+    activities: [breadcrumb({ trails: [{ passage: 'Water is wet and wonderful.', notice: 'n', questions: ['q?'] }] })] }, { sourceName: 'x' });
+  assert.match(gone.todo.join('\n'), /Breadcrumb Trail: Water could not be built: Passage 1: it is not in the reading as quoted/);
+  assert.ok(!gone.chapters[0]!.html.includes('Breadcrumb Trail'));
+  assert.match(gone.judgement.join('\n'), /no prompts are on this page/);
+});
+
+test('RhizMode: every reading kind shares the anchor check, and a Community Contract leads the Book', () => {
+  for (const type of ['trust', 'unsettled', 'missing']) {
+    assert.deepEqual(checkDrafted(breadcrumb({ type }), TEXT), [], type);
+    assert.match(checkDrafted(breadcrumb({ type, trails: [{ passage: 'Not in the reading at all.', notice: 'n', questions: ['q?'] }] }), TEXT).join(' '), /not in the reading as quoted/, type);
+  }
+  const contract = {
+    n: 9, reading: 0, type: 'contract', title: 'Community Contract: Unit 1', place: 'discussion', topic: 'This module is about water.',
+    parts: [{ prompt: 'What do you know about water?' }, { prompt: 'What do you need?' }, { prompt: 'What would you let us question?' }, { prompt: 'What is not up for debate for you?' }],
+  } as ReadingActivity;
+  assert.deepEqual(checkDrafted(contract, ''), []);
+  assert.match(checkDrafted({ ...contract, parts: (contract.parts as unknown[]).slice(0, 3) } as ReadingActivity, '').join(' '), /“Where I draw a line” has no question/);
+
+  const r = buildReadings({
+    name: 'Unit 1', mode: 'rhizmode', readings: [reading({ include_text: false })],
+    activities: [breadcrumb({ type: 'trust', title: 'Trust Audit: Water' }), contract],
+  }, { sourceName: '1 reading' });
+  assert.deepEqual(r.chapters.map((c) => c.title), ['Community Contract', 'Water']);
+  assert.ok(r.chapters[0]!.html.includes('<strong>Where I draw a line.</strong> What is not up for debate for you?'));
+  assert.ok(r.chapters[0]!.html.includes('from the text of this module’s readings'));
+  assert.deepEqual(r.forums!.map((f) => f.name), ['Community Contract: Unit 1', 'Trust Audit: Water']);
+  assert.ok(r.chapters[0]!.html.includes('$@FORUMVIEWBYID*9351@$'), 'the contract page links to the first forum');
+  assert.ok(r.chapters[1]!.html.includes('$@FORUMVIEWBYID*9352@$'), 'the reading page links to the second');
+  assert.ok(r.forums![1]!.html.includes('$@BOOKVIEWBYIDCH*9301*9603@$'), 'its forum links back to page 2, after the contract page');
+  assert.ok(r.chapters[1]!.html.includes('<h4>Trust Audit</h4>'));
+  assert.ok(r.chapters[1]!.html.includes('return to this page for the prompts below'), 'a link-only page says where the prompts are');
+  assert.ok(!r.chapters[1]!.html.includes('Cohesion'), 'and does not carry the reading');
+  assert.match(r.report, /Community Contract \| Community Contract: Unit 1 \| in a discussion forum \| \(none: drafted from the whole module\)/);
+});

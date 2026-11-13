@@ -46,6 +46,7 @@ export interface BuildResult {
   counts: Record<string, number | string>;  // the "What was built" rows, label -> value
   todo: string[];
   judgement: string[];          // judgement + dropped, as in the report
+  forums?: { name: string; html: string }[];  // RhizMode: each discussion's first post
 }
 
 const NOTES_LEFT = new RegExp(`\\[@?${S}*Production`, 'g');

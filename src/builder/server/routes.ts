@@ -9,8 +9,9 @@
  *   GET    /api/builds/:id                        -> { build }   (slots, activities, settings, state)
  *   PUT    /api/builds/:id                        { course_shortname?, section_number?, leave_out? } -> { build }
  *   DELETE /api/builds/:id
- *   POST   /api/builds/readings                   { title } -> { build }   (an empty module to add readings to)
+ *   POST   /api/builds/readings                   { title, mode? } -> { build }   (an empty module to add readings to; mode 'practice' | 'rhizmode')
  *   POST   /api/builds/:id/readings               multipart 'file' | { url } | { text, title } -> { build }   (starts drafting its activities)
+ *   POST   /api/builds/:id/contract               -> { build }   (RhizMode: draft the module's Community Contract)
  *   PUT    /api/builds/:id/readings/:rid          { title?, include_text?, source_url?, license?, attribution? } -> { build }
  *   DELETE /api/builds/:id/readings/:rid          -> { build }
  *   GET    /api/builds/:id/pages                  -> { chapters, todo, judgement, counts, included, file_name }
@@ -36,10 +37,11 @@ import { ACTIVITY_TYPES } from '../engine/index.js';
 import { TYPE_LABELS } from './interpret.js';
 import {
   DRAFT_MAX_BYTES, listBuilds, getBuild, createBuild, deleteBuild, updateSettings, reviewActivity, rereadActivity, runBuild,
-  createReadingsBuild, addReading, updateReading, removeReading, forClient, READING_MAX_BYTES,
+  createReadingsBuild, addReading, addContract, updateReading, removeReading, forClient, READING_MAX_BYTES,
   type BuildRow, type Built, type ReadingInput,
 } from './builds.js';
 import { checkQuotes } from '../engine/reading.js';
+import { RHIZO_KINDS, RHIZO_TYPES, CONTRACT_PARTS, CREDIT_TEXT } from '../engine/rhizo.js';
 
 lti.app.use('/api', express.json({ limit: '2mb' }));
 
@@ -135,7 +137,9 @@ lti.app.get('/api/me', async (_req: Request, res: Response) => {
       course: { id: contextIdOf(token), title: scopeOf(token).title },
       model: env.BUILDER_MODEL,
       ai_ready: Boolean(env.ANTHROPIC_API_KEY),
-      types: ACTIVITY_TYPES.map((t) => ({ id: t, label: TYPE_LABELS[t] ?? t })),
+      types: [...ACTIVITY_TYPES.map((t) => ({ id: t, label: TYPE_LABELS[t] ?? t })), ...RHIZO_TYPES.map((t) => ({ id: t, label: RHIZO_KINDS[t]!.title, asks: RHIZO_KINDS[t]!.asks }))],
+      contract_parts: CONTRACT_PARTS,
+      rhizo_credit: CREDIT_TEXT,
     });
   } catch (e) {
     fail(res, e, 'GET /api/me');
@@ -176,9 +180,9 @@ lti.app.post('/api/builds/readings', async (req: Request, res: Response) => {
   try {
     const token = gateTeacher(res);
     if (!token) return;
-    const { title } = z.object({ title: z.string().trim().min(2).max(160) }).parse(req.body);
+    const { title, mode } = z.object({ title: z.string().trim().min(2).max(160), mode: z.enum(['practice', 'rhizmode']).default('practice') }).parse(req.body);
     const me = await studentFromToken(token);
-    res.json({ build: view(await createReadingsBuild(scopeOf(token), me.id, title)) });
+    res.json({ build: view(await createReadingsBuild(scopeOf(token), me.id, title, mode)) });
   } catch (e) {
     fail(res, e, 'POST /api/builds/readings');
   }
@@ -202,6 +206,17 @@ lti.app.post('/api/builds/:id/readings', uploadReading.single('file'), async (re
     res.json({ build: view(await addReading(c.build, input, attr(c.token, me.id, null, 'builder.draft'))) });
   } catch (e) {
     fail(res, e, 'POST /api/builds/:id/readings');
+  }
+});
+
+lti.app.post('/api/builds/:id/contract', async (req: Request, res: Response) => {
+  try {
+    const c = await ctx(req, res);
+    if (!c) return;
+    const me = await studentFromToken(c.token);
+    res.json({ build: view(await addContract(c.build, attr(c.token, me.id, null, 'builder.draft'))) });
+  } catch (e) {
+    fail(res, e, 'POST /api/builds/:id/contract');
   }
 });
 
@@ -283,7 +298,7 @@ lti.app.get('/api/builds/:id/pages', async (req: Request, res: Response) => {
     if (!c) return;
     const b = await builtFor(c.build);
     res.json({
-      chapters: b.chapters, todo: b.todo, judgement: b.judgement, counts: b.counts, included: b.included, file_name: b.fileName,
+      chapters: b.chapters, forums: b.forums ?? [], todo: b.todo, judgement: b.judgement, counts: b.counts, included: b.included, file_name: b.fileName,
       h5p: Object.keys(b.h5p), size: b.mbz.byteLength,
     });
   } catch (e) {
@@ -360,9 +375,19 @@ lti.app.put('/api/builds/:id/activities/:n', async (req: Request, res: Response)
     const n = idParam(req, 'n');
     if (!n) { res.status(400).json({ error: 'Bad activity number.' }); return; }
     const change = Review.parse(req.body);
-    if (change.spec && !ACTIVITY_TYPES.includes(String(change.spec.type))) {
-      res.status(400).json({ error: `"type" must be one of: ${ACTIVITY_TYPES.join(', ')}.` });
-      return;
+    if (change.spec) {
+      // A module's activities stay of its own kind: open prompts in RhizMode, H5P types everywhere else.
+      const allowed = c.build.mode === 'rhizmode' ? RHIZO_TYPES : ACTIVITY_TYPES;
+      if (!allowed.includes(String(change.spec.type))) {
+        res.status(400).json({ error: `"type" must be one of: ${allowed.join(', ')}.` });
+        return;
+      }
+      // An edit keeps the kind it was drafted as: a Trust Audit does not become a contract.
+      const was = c.build.activities.find((a) => a.n === n)?.spec?.type;
+      if (c.build.mode === 'rhizmode' && was && was !== change.spec.type) {
+        res.status(400).json({ error: 'An activity keeps the kind it was drafted as.' });
+        return;
+      }
     }
     res.json({ activity: withQuotes(c.build, await reviewActivity(c.build, n, change)) });
   } catch (e) {

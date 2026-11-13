@@ -101,6 +101,11 @@
   .reading .excerpt { color: var(--muted); font-size: .88rem; margin: .4rem 0; }
   .reading fieldset { border: none; padding: 0; margin: .6rem 0 0; } .reading legend { font-weight: 500; padding: 0; }
   .reading label.opt { display: block; margin-top: .3rem; } .reading label.opt span { color: var(--muted); font-size: .86rem; }
+  fieldset.modes { border: none; padding: 0; margin: .8rem 0 0; } fieldset.modes legend { font-weight: 500; padding: 0; }
+  fieldset.modes label.opt { display: block; margin-top: .35rem; } fieldset.modes label.opt span { color: var(--muted); font-size: .86rem; }
+  .grp { margin-top: 1.6rem; } .grp > h3 { font-size: 1.05rem; margin: 0 0 .2rem; }
+  .trail { border: 1px solid var(--border); border-radius: 8px; padding: .2rem .8rem .8rem; margin-top: .8rem; }
+  .read blockquote { margin: .6rem 0 .3rem; padding-left: .7rem; border-left: 3px solid var(--border); font-style: italic; }
   .add-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; }
   .add-grid form { border: 1px solid var(--border); border-radius: 8px; padding: .8rem; }
   .add-grid h3 { margin-bottom: .2rem; }
@@ -148,10 +153,16 @@
       </div>
       <div class="card">
         <h2 id="readings-h">Or start from readings</h2>
-        <p class="muted">No Word draft? Give the module a name, then add readings: an open textbook chapter or web page by address, a file (PDF, Word, text), or pasted text. Each reading becomes a page, with practice questions and key-term flashcards drafted from it by AI for you to review.</p>
+        <p class="muted">No Word draft? Give the module a name, then add readings: an open textbook chapter or web page by address, a file (PDF, Word, text), or pasted text. Each reading becomes a page, with activities drafted from it by AI for you to review.</p>
         <form id="readings-form">
           <label class="field" for="readings-title">Module name
             <input id="readings-title" maxlength="160" required placeholder="Unit 3: The Chemistry of Life"></label>
+          <fieldset class="modes"><legend>What is drafted from each reading</legend>
+            <label class="opt"><input type="radio" name="readings-mode" value="practice" checked> <strong>Practice</strong>
+              <span>· practice questions and key-term flashcards, with an answer key checked against the reading</span></label>
+            <label class="opt"><input type="radio" name="readings-mode" value="rhizmode"> <strong>RhizMode</strong>
+              <span>· open prompts with no answer key, about how the reading knows what it says. Students answer in a discussion forum. Nothing is graded. <span id="rhizo-credit"></span></span></label>
+          </fieldset>
           <button class="btn" type="submit" style="margin-top:.8rem">Start the module</button>
           <div id="readings-msg" role="status"></div>
         </form>
@@ -239,8 +250,8 @@
     try {
       const { builds } = await api('/api/builds');
       if (!builds.length) { box.innerHTML = '<p class="empty">No drafts yet. Upload one above.</p>'; return; }
-      box.innerHTML = `<div class="scroll-x"><table class="tbl"><thead><tr><th scope="col">Module</th><th scope="col">Uploaded</th><th scope="col">H5P activities</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead><tbody>` +
-        builds.map((b) => `<tr><th scope="row" style="font-weight:500;color:inherit;font-size:inherit">${esc(b.title)}<div class="muted">${b.kind === 'readings' ? `From ${b.reading_count} reading${b.reading_count === 1 ? '' : 's'}` : esc(b.source_name)}</div></th>
+      box.innerHTML = `<div class="scroll-x"><table class="tbl"><thead><tr><th scope="col">Module</th><th scope="col">Uploaded</th><th scope="col">Activities</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead><tbody>` +
+        builds.map((b) => `<tr><th scope="row" style="font-weight:500;color:inherit;font-size:inherit">${esc(b.title)}<div class="muted">${b.kind === 'readings' ? `From ${b.reading_count} reading${b.reading_count === 1 ? '' : 's'}${b.mode === 'rhizmode' ? ' · RhizMode' : ''}` : esc(b.source_name)}</div></th>
           <td>${when(b.created_at)}</td>
           <td>${b.kind === 'readings' && !b.reading_count ? 'No readings yet' : b.state === 'reading' ? '<span class="chip">Being read…</span>' : b.spec_count ? `${b.approved} of ${b.spec_count} approved${b.to_review ? ` · <span class="chip draft">${b.to_review} to review</span>` : ''}${b.failed ? ` · <span class="chip bad">${b.failed} failed</span>` : ''}` : 'None in this draft'}</td>
           <td><button class="btn btn-small" type="button" data-open="${b.id}">Open<span class="visually-hidden"> ${esc(b.title)}</span></button></td></tr>`).join('') +
@@ -267,7 +278,8 @@
     ev.preventDefault();
     const msg = $('#readings-msg');
     try {
-      const { build: b } = await api('/api/builds/readings', { body: { title: $('#readings-title').value.trim() } });
+      const mode = ($('input[name=readings-mode]:checked') || {}).value || 'practice';
+      const { build: b } = await api('/api/builds/readings', { body: { title: $('#readings-title').value.trim(), mode } });
       ev.target.reset(); msg.textContent = '';
       await openBuild(b.id);
     } catch (e) { msg.className = 'err'; msg.textContent = friendly(e); }
@@ -277,6 +289,9 @@
   // ─── One draft ───
   const ALL_TABS = ['src', 'acts', 'pages', 'todo', 'get'];
   const isReadings = () => build && build.kind === 'readings';
+  const isRhizo = () => isReadings() && build.mode === 'rhizmode';
+  const actsTab = () => (isRhizo() ? 'Activities' : 'H5P activities');
+  const isRhizoType = (t) => me.types.some((x) => x.id === t && x.asks);
   const tabs = () => ALL_TABS.filter((t) => t !== 'src' || isReadings());
   function selectTab(name, focus) {
     ALL_TABS.forEach((t) => {
@@ -306,6 +321,7 @@
     try {
       build = (await api('/api/builds/' + id)).build; pages = null;
       $('#tab-src').hidden = !isReadings();
+      $('#tab-acts').textContent = actsTab();
       renderBuild();
       selectTab(isReadings() && !build.readings.length ? 'src' : 'acts');
       $('#build-title').focus();
@@ -322,7 +338,7 @@
     $('#build-title').textContent = build.title;
     const c = counts(), total = build.slots.length;
     $('#build-sub').textContent = isReadings()
-      ? `Built from ${build.readings.length} reading${build.readings.length === 1 ? '' : 's'} · started ${when(build.created_at)}`
+      ? `Built from ${build.readings.length} reading${build.readings.length === 1 ? '' : 's'}${isRhizo() ? ' · RhizMode' : ''} · started ${when(build.created_at)}`
       : `${build.source_name} · uploaded ${when(build.created_at)}`;
     const banner = $('#build-banner');
     if (build.state === 'reading') {
@@ -333,23 +349,48 @@
         ? `<div class="banner">Add a reading to begin.</div>`
         : `<div class="banner">This draft has no H5P specifications. The pages are ready: check the To do list, then download.</div>`;
     } else if (c.draft || c.failed) {
-      banner.innerHTML = `<div class="banner warn">${c.draft ? `${c.draft} of ${total} activities still need your review. ` : ''}${c.failed ? `${c.failed} could not be read and will be left out unless you try again. ` : ''}</div>`;
+      banner.innerHTML = `<div class="banner warn">${c.draft ? `${c.draft} of ${total} activities still need your review. ${isRhizo() ? 'In RhizMode an activity is only built once you approve it. ' : ''}` : ''}${c.failed ? `${c.failed} could not be read and will be left out unless you try again. ` : ''}</div>`;
     } else {
       banner.innerHTML = `<div class="banner">All ${total} activities reviewed: ${c.approved} approved${c.skipped ? `, ${c.skipped} left out` : ''}. Check the To do list, then download.</div>`;
     }
   }
 
+  const article = (s) => `<article class="act" id="act-${s.n}" aria-labelledby="act-h-${s.n}"></article>`;
+  // RhizMode: the activities grouped under the reading they were drafted from, as a list to pick from.
+  function rhizoGroups() {
+    const kind = (me.types.find((x) => x.id === 'contract') || {});
+    const contract = build.slots.find((s) => s.role === 'contract');
+    const group = (title, hint, slots) => `<section class="grp"><h3>${esc(title)}</h3><p class="muted">${hint}</p>${slots.map(article).join('')}</section>`;
+    return (contract
+        ? group('The whole module', 'One Community Contract for the module, on its own page at the front of the Book. It is built only if you approve it.', [contract])
+        : `<section class="grp"><h3>The whole module</h3><p class="muted">Optional: a Community Contract. ${esc(kind.asks || '')} It is drafted from all the module’s readings, so add those first.</p>
+            <p><button class="btn btn-ghost btn-small" type="button" id="add-contract" ${build.readings.length ? '' : 'disabled'}>Draft a Community Contract</button> <span id="contract-msg" role="status"></span></p></section>`) +
+      build.readings.map((r, i) => {
+        const mine = build.slots.filter((s) => s.reading === r.id && s.role !== 'contract');
+        const picked = mine.filter((s) => (build.activities.find((a) => a.n === s.n) || {}).status === 'approved').length;
+        return group(`Reading ${i + 1}: ${r.title}`, `${mine.length} ${mine.length === 1 ? 'activity was' : 'activities were'} drafted from this reading, one of each kind. Pick the ones it should carry by approving them; the rest are left out of the file. <strong>${picked} picked so far.</strong> One or two per reading is usually plenty.`, mine);
+      }).join('');
+  }
+
   function renderBuild() {
     renderHead();
     const pane = $('#pane-acts');
-    if (!build.slots.length && isReadings()) { pane.innerHTML = '<p class="empty" style="margin-top:1rem">No activities yet. Add a reading on the Readings tab and two activities are drafted from it.</p>'; }
+    if (!build.slots.length && isReadings()) { pane.innerHTML = '<p class="empty" style="margin-top:1rem">No activities yet. Add a reading on the Readings tab and its activities are drafted from it.</p>'; }
     else if (!build.slots.length) { pane.innerHTML = '<p class="empty" style="margin-top:1rem">No H5P specifications were found in this draft. The builder looks for a production note that says “Insert H5P activity using the specification below”.</p>'; }
     else {
-      pane.innerHTML = (isReadings()
+      pane.innerHTML = (isRhizo()
+        ? `<p class="muted" style="margin-top:1rem">These prompts were written by AI (${esc(me.model || '')}) from the readings. They have no answer key. Each one points at a passage of the reading, shown on the left; a program has checked that each passage is really there, so you can see what the prompt is responding to. The check does not judge whether a prompt is a good one: that is yours to decide. Change any wording, and approve only what you would put your name to. Nothing is built until you approve it. ${esc(me.rhizo_credit || '')}</p>`
+        : isReadings()
         ? `<p class="muted" style="margin-top:1rem">These activities were written by AI (${esc(me.model || '')}) from the readings. Each question and card is shown beside the sentence of the reading it rests on; a program has checked that each sentence is really there. Read them as a subject expert would: the check confirms the source, not the quality of the question.</p>`
         : `<p class="muted" style="margin-top:1rem">Each specification is shown as the author wrote it, beside how it was read by AI (${esc(me.model || '')}). Nothing here was written by the AI except where a note says so. An activity is built from the right-hand side.</p>`) +
-        build.slots.map((s) => `<article class="act" id="act-${s.n}" aria-labelledby="act-h-${s.n}"></article>`).join('');
+        (isRhizo() ? rhizoGroups() : build.slots.map(article).join(''));
       build.slots.forEach((s) => renderAct(s.n));
+      const addBtn = $('#add-contract');
+      if (addBtn) addBtn.addEventListener('click', async () => {
+        addBtn.disabled = true; $('#contract-msg').className = 'muted'; $('#contract-msg').textContent = 'Drafting…';
+        try { setBuild((await api(`/api/builds/${build.id}/contract`, { method: 'POST', body: {} })).build); announce('The Community Contract is being drafted.'); }
+        catch (e) { addBtn.disabled = false; $('#contract-msg').className = 'err'; $('#contract-msg').textContent = friendly(e); }
+      });
     }
     clearTimeout(pollTimer);
     if (build.state === 'reading') pollTimer = setTimeout(poll, 2500);
@@ -407,6 +448,19 @@
       }
       return `<p class="muted">No outline for type “${esc(q.type)}”.</p>`;
     };
+    const placeLine = (x) => `<p class="muted">${x.place === 'page' ? 'Students answer on their own, from the page. No discussion forum is made.' : 'Students answer in a discussion forum made for this activity. This prompt is its first post.'}</p>`;
+    if (a.type === 'contract') {
+      return `<div class="q"><span class="muted">What the module is about</span><p>${esc(a.topic)}</p></div>
+        <div class="q"><span class="muted">The four questions</span><ol>${(me.contract_parts || []).map((label, i) => `<li><strong>${esc(label)}.</strong> ${esc(((a.parts || [])[i] || {}).prompt || '')}</li>`).join('')}</ol>
+          <p class="muted">${a.place === 'page' ? 'Students answer on their own. No discussion forum is made.' : 'Students answer in a discussion forum made for the module. The questions are its first post.'} The contract gets its own page at the front of the Book.</p></div>`;
+    }
+    if (isRhizoType(a.type)) {
+      if (!(a.trails || []).length) return '<p class="muted">Nothing was drafted: the AI found nothing honest to work with in this reading for this kind of activity. Its note says why. You can ask it to try again with a note of your own.</p>';
+      return (a.trails || []).map((t, i) => `<div class="q"><span class="muted">Passage ${i + 1} of ${a.trails.length}</span>
+          <blockquote>“${esc(t.passage)}”</blockquote><p>${esc(t.notice)}</p><ul>${(t.questions || []).map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>`).join('') +
+        `<div class="q"><span class="muted">Your turn</span><p><strong>${esc(a.your_turn)}</strong></p>
+          ${placeLine(a)}</div>`;
+    }
     if (a.type === 'questionset') return (a.questions || []).map((q, i) => `<div class="q"><span class="muted">Question ${i + 1} of ${a.questions.length}</span>${one(q)}</div>`).join('');
     return one(a);
   }
@@ -428,15 +482,15 @@
     const canApprove = spec && !a.problems.length && a.status !== 'approved';
     el.innerHTML = `<header><h3 id="act-h-${n}">${n}. ${inline(title)}</h3>
         ${spec ? `<span class="chip type">${esc(typeLabel(spec.type))}</span>` : ''}<span class="chip ${cls}">${esc(label)}</span></header>
-      <p class="muted where">${esc(slot.chapter)} › ${esc(slot.under)}${slot.type && !isReadings() ? ` · the draft asks for: ${esc(slot.type)}` : ''}</p>
+      <p class="muted where">${isRhizo() ? esc(slot.type) : `${esc(slot.chapter)} › ${esc(slot.under)}${slot.type && !isReadings() ? ` · the draft asks for: ${esc(slot.type)}` : ''}`}</p>
       <div class="cols"><div>${isReadings()
-        ? `<h4>Sentences from the reading</h4>${(a.quotes || []).length ? `<ul class="quotes">${a.quotes.map((q) => `<li><span class="lab">${esc(q.label)} · ${q.found ? '<span class="yes">found in the reading</span>' : '<span class="no">not found in the reading</span>'}</span>${q.quote ? '“' + esc(q.quote) + '”' : '<em>none given</em>'}</li>`).join('')}</ul>` : '<p class="muted">Nothing yet.</p>'}`
+        ? `<h4>${isRhizo() ? 'Passages from the reading' : 'Sentences from the reading'}</h4>${spec && spec.type === 'contract' ? '<p class="muted">None. The contract is about the student, not a passage; it draws on the readings only for what the module is about.</p>' : (a.quotes || []).length ? `<ul class="quotes">${a.quotes.map((q) => `<li><span class="lab">${esc(q.label)} · ${q.found ? '<span class="yes">found in the reading</span>' : '<span class="no">not found in the reading</span>'}</span>${q.quote ? '“' + esc(q.quote) + '”' : '<em>none given</em>'}</li>`).join('')}</ul>` : '<p class="muted">Nothing yet.</p>'}`
         : `<h4>In the draft</h4><pre class="spec">${inline(slot.text)}</pre>`}</div><div><h4>${isReadings() ? 'What was drafted' : 'How it was read'}</h4>${right}</div></div>
       <div class="actions">
         ${a.status === 'pending' ? '' : `
         <button class="btn btn-small" type="button" data-do="approve" ${canApprove ? '' : 'disabled'}>${a.status === 'approved' ? 'Approved' : 'Approve'}</button>
         <button class="btn btn-ghost btn-small" type="button" data-do="ask" aria-expanded="false">${spec ? 'Ask for a change' : 'Try again'}</button>
-        ${spec ? '<button class="btn btn-ghost btn-small" type="button" data-do="edit" aria-expanded="false">Edit the details</button>' : ''}
+        ${spec ? `<button class="btn btn-ghost btn-small" type="button" data-do="edit" aria-expanded="false">${isRhizo() ? 'Edit the wording' : 'Edit the details'}</button>` : ''}
         <button class="btn btn-ghost btn-small" type="button" data-do="${a.status === 'skipped' ? 'restore' : 'skip'}">${a.status === 'skipped' ? 'Put back' : 'Leave out'}</button>`}
         <span class="msg" role="status"></span>
       </div>
@@ -449,7 +503,7 @@
         const { activity } = await fn();
         const i = build.activities.findIndex((x) => x.n === n);
         if (i >= 0) build.activities[i] = activity; else build.activities.push(activity);
-        pages = null; renderHead(); renderAct(n);
+        pages = null; renderHead(); if (isRhizo()) { renderBuild(); } else { renderAct(n); }
         announce(`Activity ${n}: ${(STATUS[activity.status] || [activity.status])[0]}.`);
         $('#act-' + n + ' [data-do]')?.focus();
       } catch (e) { renderAct(n); const m = $('#act-' + n + ' .msg'); m.className = 'msg err'; m.textContent = friendly(e); }
@@ -470,7 +524,7 @@
       if (what === 'ask') {
         if (!spec) { run(() => api(`/api/builds/${build.id}/activities/${n}/reread`, { method: 'POST', body: {} }), 'Reading the specification again…'); return; }
         if (openPanel(btn, `<label class="field" for="ask-${n}">What should change?
-            <span class="hint">${isReadings() ? 'Say it in your own words, for example “replace question 3 with one about hydrogen bonds” or “make the wrong answers harder”. The activity is drafted again with your note.' : 'Say it in your own words, for example “make this single choice” or “the third answer is also correct”. The specification is read again with your note.'}</span>
+            <span class="hint">${isRhizo() ? 'Say it in your own words, for example “swap the second passage for one about cost” or “make the questions shorter”. The activity is drafted again with your note.' : isReadings() ? 'Say it in your own words, for example “replace question 3 with one about hydrogen bonds” or “make the wrong answers harder”. The activity is drafted again with your note.' : 'Say it in your own words, for example “make this single choice” or “the third answer is also correct”. The specification is read again with your note.'}</span>
             <textarea id="ask-${n}"></textarea></label>
             <button class="btn btn-small" type="button" style="margin-top:.5rem" data-send>Read it again</button>`)) {
           $('#ask-' + n).focus();
@@ -480,7 +534,53 @@
           });
         }
       }
-      if (what === 'edit') {
+      const placeField = () => `<fieldset class="modes"><legend>Where students answer</legend>
+              <label class="opt"><input type="radio" name="rz-place-${n}" value="discussion" ${spec.place === 'page' ? '' : 'checked'}> In a discussion forum <span>· one is made for this activity, ungraded, with the prompt as its first post</span></label>
+              <label class="opt"><input type="radio" name="rz-place-${n}" value="page" ${spec.place === 'page' ? 'checked' : ''}> On their own <span>· the prompt stays on the page and no forum is made</span></label>
+            </fieldset>`;
+      const placeValue = () => ($(`input[name=rz-place-${n}]:checked`, panel) || {}).value || 'discussion';
+      if (what === 'edit' && spec.type === 'contract') {
+        if (openPanel(btn, `<label class="field" for="rz-title-${n}">Title <span class="hint">Also the name of the discussion forum.</span>
+              <input id="rz-title-${n}" maxlength="120" value="${esc(spec.title)}"></label>
+            ${placeField()}
+            <label class="field" for="rz-topic-${n}">What the module is about <span class="hint">One or two sentences to students.</span>
+              <textarea id="rz-topic-${n}">${esc(spec.topic)}</textarea></label>
+            ${(me.contract_parts || []).map((label, i) => `<label class="field" for="rz-part-${n}-${i}">${esc(label)}
+              <textarea id="rz-part-${n}-${i}" data-part>${esc(((spec.parts || [])[i] || {}).prompt || '')}</textarea></label>`).join('')}
+            <button class="btn btn-small" type="button" style="margin-top:.6rem" data-save>Save changes</button>`)) {
+          $('#rz-title-' + n).focus();
+          $('[data-save]', panel).addEventListener('click', () => {
+            put({ spec: { type: spec.type, title: $('#rz-title-' + n).value.trim(), interpretation: spec.interpretation || '', place: placeValue(),
+              topic: $('#rz-topic-' + n).value.trim(), parts: $$('[data-part]', panel).map((t) => ({ prompt: t.value.trim() })) } }, 'Saving…');
+          });
+        }
+      } else if (what === 'edit' && isRhizoType(spec.type)) {
+        const trails = [...(spec.trails || []), { passage: '', notice: '', questions: [] }];
+        if (openPanel(btn, `<label class="field" for="rz-title-${n}">Title <span class="hint">Also the name of the discussion forum.</span>
+              <input id="rz-title-${n}" maxlength="120" value="${esc(spec.title)}"></label>
+            ${placeField()}
+            ${trails.map((t, i) => `<div class="trail" data-trail>
+              <label class="field" for="rz-p-${n}-${i}">${i < trails.length - 1 ? `Passage ${i + 1}` : 'Add a passage (optional)'}
+                <span class="hint">Copied from the reading exactly. Saving checks it is there. Clear this box to remove the passage and its questions.</span>
+                <textarea id="rz-p-${n}-${i}" data-f="passage">${esc(t.passage)}</textarea></label>
+              <label class="field" for="rz-n-${n}-${i}">What the page says about it
+                <textarea id="rz-n-${n}-${i}" data-f="notice">${esc(t.notice)}</textarea></label>
+              <label class="field" for="rz-q-${n}-${i}">Questions <span class="hint">One per line.</span>
+                <textarea id="rz-q-${n}-${i}" data-f="questions">${esc((t.questions || []).join('\n'))}</textarea></label></div>`).join('')}
+            <label class="field" for="rz-turn-${n}">Your turn <span class="hint">What students are asked to post, or to answer for themselves.</span>
+              <textarea id="rz-turn-${n}">${esc(spec.your_turn)}</textarea></label>
+            <button class="btn btn-small" type="button" style="margin-top:.6rem" data-save>Save changes</button>`)) {
+          $('#rz-title-' + n).focus();
+          $('[data-save]', panel).addEventListener('click', () => {
+            const kept = $$('[data-trail]', panel).map((box) => ({
+              passage: $('[data-f=passage]', box).value.trim(), notice: $('[data-f=notice]', box).value.trim(),
+              questions: $('[data-f=questions]', box).value.split('\n').map((x) => x.trim()).filter(Boolean),
+            })).filter((t) => t.passage);
+            put({ spec: { type: spec.type, title: $('#rz-title-' + n).value.trim(), interpretation: spec.interpretation || '',
+              place: placeValue(), trails: kept, your_turn: $('#rz-turn-' + n).value.trim() } }, 'Saving…');
+          });
+        }
+      } else if (what === 'edit') {
         const { n: _n, ...editable } = spec;
         if (openPanel(btn, `<label class="field" for="edit-${n}">The activity’s details
             <span class="hint">This is exactly what gets built. Change wording, mark a different answer correct, or reorder items, keeping the punctuation and quotation marks of the format. Saving checks it and tells you if something is missing.</span>
@@ -549,7 +649,7 @@
         const { build: b } = await api(`/api/builds/${build.id}/readings`, { method: 'POST', body });
         ['#src-url', '#src-title', '#src-text'].forEach((id) => { $(id).value = ''; });
         setBuild(b);
-        $('#src-msg').className = 'ok'; $('#src-msg').textContent = 'Added. Its activities are being drafted; see the H5P activities tab.';
+        $('#src-msg').className = 'ok'; $('#src-msg').textContent = 'Added. Its activities are being drafted; see the ' + actsTab() + ' tab.';
         announce('Reading added. Its activities are being drafted.');
       } catch (e) { msg.className = 'err'; msg.textContent = friendly(e); btn.disabled = false; }
     };
@@ -593,16 +693,21 @@
     pane.innerHTML = '<p class="muted" style="margin-top:1rem">Building the pages…</p>';
     try {
       const p = await loadPages();
-      pageIndex = Math.min(pageIndex, p.chapters.length - 1);
-      pane.innerHTML = `<p class="muted" style="margin-top:1rem">A plain preview of each Book page. In Moodle the pages take the course theme, icons appear, and each blue box becomes the working H5P activity.</p>
-        <div class="pages"><nav aria-label="Pages">${p.chapters.map((c, i) => `<button type="button" data-page="${i}">${i + 1}. ${esc(c.title)}</button>`).join('')}</nav>
+      const forums = (p.forums || []).map((f) => ({ title: 'Discussion: ' + f.name, html: '<p style="color:#495057"><em>The first post of this discussion forum. Students reply underneath it.</em></p>' + f.html }));
+      const all = [...p.chapters, ...forums];
+      pageIndex = Math.max(0, Math.min(pageIndex, all.length - 1));
+      pane.innerHTML = `<p class="muted" style="margin-top:1rem">${isRhizo()
+          ? 'A plain preview of each Book page and of each discussion’s first post. In Moodle they take the course theme and the links between them work. Only approved activities appear.'
+          : 'A plain preview of each Book page. In Moodle the pages take the course theme, icons appear, and each blue box becomes the working H5P activity.'}</p>
+        <div class="pages"><nav aria-label="Pages">${all.map((c, i) => `<button type="button" data-page="${i}">${i < p.chapters.length ? (i + 1) + '. ' : ''}${esc(c.title)}</button>`).join('')}</nav>
         <iframe id="page-frame" sandbox="" title="Page preview"></iframe></div>`;
       const showPage = (i) => {
         pageIndex = i;
         $$('[data-page]', pane).forEach((b) => b.setAttribute('aria-current', String(Number(b.dataset.page) === i)));
-        const c = p.chapters[i];
+        const c = all[i];
         let n = 0;
         const html = c.html
+          .replace(/href="\$@[A-Z]+\*[0-9*]+@\$"/g, 'href="#"')
           .replace(/<div class="h5p-placeholder"[^>]*>@@PLUGINFILE@@\/([^<]+)<\/div>/g, (_m, name) => {
             const num = Number((name.match(/-h5p-(\d+)-/) || [])[1]);
             const a = build.activities.find((x) => x.n === num);
@@ -613,7 +718,7 @@
         $('#page-frame').title = 'Page preview: ' + c.title;
       };
       $$('[data-page]', pane).forEach((b) => b.addEventListener('click', () => showPage(Number(b.dataset.page))));
-      showPage(pageIndex);
+      if (all.length) showPage(pageIndex);
     } catch (e) { pane.innerHTML = `<p class="err" style="margin-top:1rem">${esc(friendly(e))}</p>`; }
   }
 
@@ -626,7 +731,7 @@
       const list = (items) => (items.length ? '<ul>' + items.map((t) => `<li>${esc(t)}</li>`).join('') + '</ul>' : '<p class="muted">Nothing.</p>');
       pane.innerHTML = `<div class="card"><h2>Needs a person before publishing</h2>
           <p class="muted">Things the draft asks for that the builder could not supply, such as a file or link it does not contain. Each also shows as a yellow “To do” box on its page.</p>${list(p.todo)}</div>
-        <div class="card"><h2>H5P activities not in the file</h2>${out.length ? '<ul>' + out.map((a) => {
+        <div class="card"><h2>${isRhizo() ? 'Activities' : 'H5P activities'} not in the file</h2>${out.length ? '<ul>' + out.map((a) => {
           const s = build.slots.find((x) => x.n === a.n);
           return `<li>${a.n}. ${esc((a.spec && a.spec.title) || (s && s.title) || 'Untitled')}: ${esc((STATUS[a.status] || [a.status])[0])}${a.problems.length ? ' (' + esc(a.problems.join(' ')) + ')' : ''}</li>`;
         }).join('') + '</ul>' : '<p class="muted">None. Every specification found is in the file.</p>'}</div>
@@ -659,7 +764,9 @@
       const mb = (p.size / 1048576).toFixed(1);
       pane.innerHTML = `<div class="card"><h2>The restore file</h2>
           ${c.pending ? '<div class="banner warn">Some specifications are still being read. A file downloaded now will not include them.</div>' : ''}
-          ${c.draft ? `<div class="banner warn">${c.draft} ${c.draft === 1 ? 'activity is' : 'activities are'} in the file without your review. The build report says which.</div>` : ''}
+          ${c.draft ? `<div class="banner warn">${isRhizo()
+            ? `${c.draft} ${c.draft === 1 ? 'activity is' : 'activities are'} not in the file because you have not approved ${c.draft === 1 ? 'it' : 'them'} yet.`
+            : `${c.draft} ${c.draft === 1 ? 'activity is' : 'activities are'} in the file without your review. The build report says which.`}</div>` : ''}
           <div class="scroll-x" style="margin-top:.75rem"><table class="tbl"><tbody>${Object.entries(p.counts).map(([k, v]) => `<tr><th scope="row">${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</tbody></table></div>
           <form id="settings-form">
             <label class="field" for="set-short">Course short name (optional)
@@ -676,9 +783,11 @@
         <div class="card"><h2>Restoring it in Moodle</h2>
           <ol class="steps"><li>In the course: <strong>More › Course reuse › Restore</strong>.</li>
             <li>Upload the .mbz file and choose <strong>Restore into this course › Merge the backup course into this course</strong>.</li>
-            <li>Keep the defaults and finish. The module arrives as one Book, hidden from students.</li>
-            <li>Open the Book, work through the yellow “To do” boxes, try each activity, then show it to students.</li></ol>
-          <p class="muted">The H5P activities need the matching H5P content types on the Moodle site. They are listed at the end of the build report.</p></div>`;
+            <li>Keep the defaults and finish. The module arrives as one Book${isRhizo() ? ', followed by one discussion forum for each activity that has one, all' : ','} hidden from students.</li>
+            <li>${isRhizo()
+              ? 'Open the Book and each forum, work through any yellow “To do” boxes, then show them to students. Each forum’s first post appears under the name of whoever restored the file.'
+              : 'Open the Book, work through the yellow “To do” boxes, try each activity, then show it to students.'}</li></ol>
+          ${isRhizo() ? '<p class="muted">The forums are ungraded and need nothing installed on the Moodle site.</p>' : '<p class="muted">The H5P activities need the matching H5P content types on the Moodle site. They are listed at the end of the build report.</p>'}</div>`;
       $('#settings-form').addEventListener('submit', async (ev) => {
         ev.preventDefault();
         const msg = $('#set-msg');
@@ -694,6 +803,7 @@
 
   // ─── Start ───
   try { me = await api('/api/me'); } catch (e) { $('#build-list').innerHTML = `<p class="err">${esc(friendly(e))}</p>`; }
+  if (me.rhizo_credit) $('#rhizo-credit').textContent = me.rhizo_credit;
   if (me.ai_ready === false) {
     $('#upload-msg').className = 'err';
     $('#upload-msg').textContent = 'The AI step is not set up on this server (no API key), so H5P specifications cannot be read. Pages can still be built.';

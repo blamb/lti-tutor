@@ -1,5 +1,6 @@
 /**
- * Write a Moodle course backup (.mbz) holding one section with Book activities.
+ * Write a Moodle course backup (.mbz) holding one section with Book activities
+ * and, optionally, discussion forums after them.
  *
  * The file restores through Moodle's normal Restore screen, either as a new
  * course or merged into an existing one. Layout follows a real Moodle 5 backup;
@@ -51,7 +52,23 @@ const hex = (algorithm: 'sha1' | 'md5', data: Uint8Array | string): string => cr
 export interface MbzCourse { fullname: string; shortname: string }
 export interface MbzSection { name: string; summary?: string }
 export interface MbzBook { name: string; intro?: string; chapters: { title: string; html: string }[]; files: Record<string, Uint8Array> }
-export interface MbzOptions { hidden?: boolean; sectionNumber?: number; now?: number }
+/**
+ * A discussion forum of Moodle's "single simple discussion" type, ungraded. The
+ * backup carries no posts (posts belong to users, and a backup without user
+ * data has none); on restore Moodle starts the one discussion itself, with
+ * `intro` as its first post.
+ */
+export interface MbzForum { name: string; intro: string }
+export interface MbzOptions { hidden?: boolean; sectionNumber?: number; now?: number; forums?: MbzForum[] }
+
+/** The course-module id book number n (from 0) gets in the backup, and its chapter ids: for links between activities. */
+export const bookCmid = (n: number): number => 9301 + n;
+export const chapterId = (n: number, page: number): number => 9601 + n * 500 + page;
+/** The course-module id forum number i (from 0) gets in the backup. */
+export const forumCmid = (i: number): number => 9351 + i;
+/** A link to a forum, or to one page of a book, in the form Moodle rewrites on restore. */
+export const forumLink = (i: number): string => `$@FORUMVIEWBYID*${forumCmid(i)}@$`;
+export const bookPageLink = (n: number, page: number): string => `$@BOOKVIEWBYIDCH*${bookCmid(n)}*${chapterId(n, page)}@$`;
 export interface MbzResult { mbz: Uint8Array; files: number; entries: number }
 
 /**
@@ -69,15 +86,30 @@ export function buildMbz(fileName: string, course: MbzCourse, section: MbzSectio
   const section_id = 9201;
   const general_id = 9200;
 
-  const activities: [number, string, string][] = [];
+  if (books.length > 50) throw new Error('Too many books for one backup');
+  const activities: [number, string, string, string][] = [];
+  const module_xml = (cmid: number, modname: string): string => HEAD + raw('module', [
+    x('modulename', modname), x('sectionid', section_id), x('sectionnumber', section_number), x('idnumber', ''),
+    x('added', now), x('score', 0), x('indent', 0), x('visible', hidden ? 0 : 1), x('visibleoncoursepage', 1),
+    x('visibleold', hidden ? 0 : 1), x('groupmode', 0), x('groupingid', 0), x('completion', 0),
+    x('completiongradeitemnumber', NULL), x('completionpassgrade', 0), x('completionview', 0),
+    x('completionexpected', 0), x('availability', NULL), x('showdescription', 0), x('downloadcontent', 1),
+    x('lang', NULL), raw('tags')].join(''), { id: cmid, version: MOODLE_VERSION });
+  const common_files = (folder: string): void => {
+    files.set(folder + '/grades.xml', HEAD + raw('activity_gradebook', raw('grade_items') + raw('grade_letters')));
+    files.set(folder + '/roles.xml', HEAD + raw('roles', raw('role_overrides') + raw('role_assignments')));
+    files.set(folder + '/filters.xml', HEAD + raw('filters', raw('filter_actives') + raw('filter_configs')));
+    files.set(folder + '/calendar.xml', HEAD + raw('events'));
+    files.set(folder + '/grade_history.xml', HEAD + raw('grade_history', raw('grade_grades')));
+  };
   books.forEach((book, n) => {
-    const cmid = 9301 + n, book_id = 9401 + n, ctx = 9501 + n;
+    const cmid = bookCmid(n), book_id = 9401 + n, ctx = 9501 + n;
     const folder = `activities/book_${cmid}`;
     let chapters_xml = '';
     const file_ids: number[] = [];
     book.chapters.forEach((ch, index) => {
       const num = index + 1;
-      const chid = 9601 + n * 500 + num;
+      const chid = chapterId(n, num);
       const used = [...new Set(Array.from(ch.html.matchAll(PLUGINFILE), (m) => m[1]!))].sort(cmp);
       for (const name of used) {
         const data = Object.prototype.hasOwnProperty.call(book.files, name) ? book.files[name] : undefined;
@@ -106,20 +138,29 @@ export function buildMbz(fileName: string, course: MbzCourse, section: MbzSectio
       x('navstyle', 1), x('customtitles', 0), x('timecreated', now), x('timemodified', now),
       raw('chapters', chapters_xml), raw('chaptertags')].join(''), { id: book_id }),
       { id: book_id, moduleid: cmid, modulename: 'book', contextid: ctx }));
-    files.set(folder + '/module.xml', HEAD + raw('module', [
-      x('modulename', 'book'), x('sectionid', section_id), x('sectionnumber', section_number), x('idnumber', ''),
-      x('added', now), x('score', 0), x('indent', 0), x('visible', hidden ? 0 : 1), x('visibleoncoursepage', 1),
-      x('visibleold', hidden ? 0 : 1), x('groupmode', 0), x('groupingid', 0), x('completion', 0),
-      x('completiongradeitemnumber', NULL), x('completionpassgrade', 0), x('completionview', 0),
-      x('completionexpected', 0), x('availability', NULL), x('showdescription', 0), x('downloadcontent', 1),
-      x('lang', NULL), raw('tags')].join(''), { id: cmid, version: MOODLE_VERSION }));
+    files.set(folder + '/module.xml', module_xml(cmid, 'book'));
     files.set(folder + '/inforef.xml', HEAD + raw('inforef', raw('fileref', file_ids.map((f) => raw('file', x('id', f))).join(''))));
-    files.set(folder + '/grades.xml', HEAD + raw('activity_gradebook', raw('grade_items') + raw('grade_letters')));
-    files.set(folder + '/roles.xml', HEAD + raw('roles', raw('role_overrides') + raw('role_assignments')));
-    files.set(folder + '/filters.xml', HEAD + raw('filters', raw('filter_actives') + raw('filter_configs')));
-    files.set(folder + '/calendar.xml', HEAD + raw('events'));
-    files.set(folder + '/grade_history.xml', HEAD + raw('grade_history', raw('grade_grades')));
-    activities.push([cmid, book.name, folder]);
+    common_files(folder);
+    activities.push([cmid, book.name, folder, 'book']);
+  });
+
+  (opts.forums ?? []).forEach((forum, i) => {
+    if (i >= 50) throw new Error('Too many forums for one backup');
+    const cmid = forumCmid(i), forum_id = 9451 + i, ctx = 9551 + i;
+    const folder = `activities/forum_${cmid}`;
+    // The fields Moodle 5's forum backup writes, in its order. Nothing is rated, graded or required.
+    files.set(folder + '/forum.xml', HEAD + raw('activity', raw('forum', [
+      x('type', 'single'), x('name', forum.name), x('intro', forum.intro), x('introformat', 1), x('duedate', 0),
+      x('cutoffdate', 0), x('assessed', 0), x('assesstimestart', 0), x('assesstimefinish', 0), x('scale', 0),
+      x('maxbytes', 0), x('maxattachments', 1), x('forcesubscribe', 0), x('trackingtype', 1), x('rsstype', 0),
+      x('rssarticles', 0), x('timemodified', now), x('warnafter', 0), x('blockafter', 0), x('blockperiod', 0),
+      x('completiondiscussions', 0), x('completionreplies', 0), x('completionposts', 0), x('displaywordcount', 0),
+      x('lockdiscussionafter', 0), x('grade_forum', 0), raw('discussions')].join(''), { id: forum_id }),
+      { id: forum_id, moduleid: cmid, modulename: 'forum', contextid: ctx }));
+    files.set(folder + '/module.xml', module_xml(cmid, 'forum'));
+    files.set(folder + '/inforef.xml', HEAD + raw('inforef'));
+    common_files(folder);
+    activities.push([cmid, forum.name, folder, 'forum']);
   });
 
   const section_xml = (sid: number, number: number, name: string, summary: string, seq: string): string =>
@@ -180,14 +221,14 @@ export function buildMbz(fileName: string, course: MbzCourse, section: MbzSectio
         + x('name', `section_${sid}_${suffix}`) + x('value', v));
     }
   }
-  for (const [cmid] of activities) {
+  for (const [cmid, , , modname] of activities) {
     for (const [suffix, v] of flags) {
-      settings += raw('setting', x('level', 'activity') + x('activity', `book_${cmid}`)
-        + x('name', `book_${cmid}_${suffix}`) + x('value', v));
+      settings += raw('setting', x('level', 'activity') + x('activity', `${modname}_${cmid}`)
+        + x('name', `${modname}_${cmid}_${suffix}`) + x('value', v));
     }
   }
-  let contents = raw('activities', activities.map(([cmid, title, folder]) => raw('activity', [
-    x('moduleid', cmid), x('sectionid', section_id), x('modulename', 'book'), x('title', title),
+  let contents = raw('activities', activities.map(([cmid, title, folder, modname]) => raw('activity', [
+    x('moduleid', cmid), x('sectionid', section_id), x('modulename', modname), x('title', title),
     x('directory', folder), x('insubsection', '')].join(''))).join(''));
   contents += raw('sections', sections.map(([sid, title]) => raw('section', [
     x('sectionid', sid), x('title', title), x('directory', `sections/section_${sid}`), x('parentcmid', ''),

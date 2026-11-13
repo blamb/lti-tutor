@@ -35,6 +35,40 @@ Two activities are drafted by AI from each reading: a set of practice questions 
 
 Limits of this route: pages carry text only (headings, paragraphs, lists), so figures and tables in the reading are not carried over; a page read from an ordinary website keeps whatever the site puts in its main text, so it may need tidying in Moodle; a reading longer than about 30,000 words is cut for drafting, and the note on the activity says so; one page per reading.
 
+## RhizMode: open prompts instead of practice questions (started 12 Nov 2026)
+
+When a designer starts a module from readings they choose what is drafted from each one. **Practice** is the route above. **RhizMode** drafts invitations to notice how a reading knows what it says. These have no answer key and nothing is graded. Method and ethos are drawn with admiration from the writings of Dave Cormier (rhizomatic learning, "the community is the curriculum", *Learning in a Time of Abundance*); the wording of the prompts and pages is ours, and no AI-written sentence is presented as his.
+
+Five activity kinds are built. Four are drafted from each reading and share one shape: two to four sentences of the reading, each with one line on what a reader can see on the page and two questions, then a "Your turn" prompt. The fifth belongs to the whole module.
+
+| Kind | What students do | Where it comes from in the book | What is ours |
+|---|---|---|---|
+| Breadcrumb Trail | Ask where the reading's claims come from, then post a claim of their own and where they got it | Practice 2, "Leave bread crumbs" (ch. 7); "dishwasher research" (ch. 3); his own list of beliefs labelled by where each came from (ch. 3) | The page layout |
+| Trust Audit | Ask who or what the reading asks them to trust, and whether they know enough to weigh in | Humility and informed trust (ch. 6); never asking people for an opinion on what they cannot know; "I don't know enough to have an opinion, but this is how it affects me" as a full answer | The examples of what a reading can lean on. The earlier Rhizo tool's "four kinds of trust" is not in the book and is not used |
+| What's Unsettled | Ask how settled a matter is, and whether more information would settle it | "Finished products" and classroom versus real-life problems (ch. 6); dealing with uncertainty instead of solving it, and the two ways people escape it: picking a side, or giving up (ch. 4); not all grey areas are equal | The name |
+| Who's Missing | Ask whose experience is not on the page and what they or people they know could add | Practice 5, "Learn to see who is left behind" (ch. 7), which is about digital exclusion; who gets to write textbooks (ch. 5); lived experience outranks having read about it (ch. 6) | Applying Practice 5 to a text is our extension |
+| Community Contract | Before the readings, tell the group what they bring, what they need, what they will have challenged and where they draw a line | "The community is the curriculum"; making values explicit, the third literacy (ch. 6); being fair to people you disagree with (Practice 6) | The contract as a device is not in the book. It comes from the earlier Rhizo tool |
+
+Rules every drafting prompt carries, taken from the book as a whole: no question with a right answer; no verdict the student is in no position to give; no teaching of distrust (relying on people who know more is reasonable; the point is to do it knowingly); "I don't know" is always acceptable; open does not mean anything goes; nobody is asked to speak for a group; the trail is honesty, not citation policing. Two Rhizo activities were left out, Wicked Council and Nomad's Entry, because both have the AI invent voices and stories.
+
+**The pick list.** When a reading is added, one activity of each of the four kinds is drafted from it. The Activities tab groups them under their reading; the designer picks by approving, and anything not approved is left out of the file. The model may decline a kind when a reading gives it nothing honest to work with; that activity arrives as "Left out" with its reason. The Community Contract is optional and is drafted on request, once the readings are in.
+
+What differs from the practice route:
+
+- **In Moodle** each reading activity is a section of the reading's Book page (the contract has its own page, first in the Book) and, unless the designer chooses "on their own", a discussion forum of the "single simple discussion" type, ungraded. The backup holds no posts; on restore Moodle starts the discussion itself with the prompt as its first post, under the name of whoever restored the file. The page links to the forum and the forum back to the page.
+- **Pages link to the reading by default**, even an openly licensed one, because the passages under discussion are quoted on the page. The designer can switch a page to the full text on the Readings tab.
+- **The quotation check is an anchor check.** It no longer proves an answer key. Every prompt points at a passage copied from the reading, code confirms the passage is there (`checkQuotes` in `engine/reading.ts`), and the reviewer sees each prompt beside the passage it responds to. A passage is at most 420 characters, so a page that only links to a copyrighted reading carries short quotations only.
+- **The model adds no facts.** It may say only what a reader can see on the page (a figure with no source, a study cited). Anything it thinks the designer should know from outside the reading goes in its note to the designer, not on the page.
+- **Only approved activities are built.** The practice route puts unreviewed drafts in the file and says so in the report; RhizMode leaves them out, because its pages say the prompts were reviewed.
+- **Editing is in plain text boxes** (title, each passage, what the page says about it, the questions, "Your turn", and where students answer), not JSON. A changed passage is checked again on saving.
+- **Disclosure.** Each page and each forum's first post says the prompts were drafted with AI, names the model, says they were reviewed by the course team, that there is no answer key and nothing is graded, and carries the credit line. The build report lists every drafted prompt beside its passage, and the fixed wording that is the same on every page.
+
+Code: `engine/rhizo.ts` (the kinds, checks, page and forum wording), the forum part of `engine/mbz.ts`, the prompts in `server/drafting.ts` (`KIND_BRIEF`, `trailSystem`, `CONTRACT_SYSTEM`), migration `003_rhizmode.sql` (`build.mode`).
+
+Tested locally on 12 Nov 2026: a module from two Wikipedia articles. All nine activities (four per reading and the contract) were drafted and every one of the 32 passages passed the anchor check on the first pass; no kind was declined. An edited passage that was not in the reading blocked approval. With five approved, one of them set to "on their own", the file restored into the local Moodle 5.0.1 as a Book of three pages (the contract first) and four forums, all hidden, each discussion started, no grade item, and every link between page and forum working. Not yet tested: asking for a change to a RhizMode activity, a reading with no web address, a restore merged into an existing course, moodbox, and whether students find the prompts worth answering.
+
+Known rough edges: a passage copied from a web page keeps that page's artefacts (Wikipedia's note numbers, for example), and the model once used a site's "needs updating" banner as a passage; the "what the page says about it" line occasionally reads slightly more into a sentence than is there, which is what the designer's review is for; the fixed "how to take part" wording is not yet editable in the tool.
+
 ## The two steps, and where AI is used
 
 | Step | What does it | AI? |
