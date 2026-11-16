@@ -122,7 +122,8 @@ export function setupLti(opts: LtiToolOptions): ProviderInstance {
           }
           const cookies = entry.cookieHeader.split(';').map((c) => c.trim()).filter(Boolean);
           res.setHeader('Set-Cookie', cookies.map((c) => `${c}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=86400`));
-          res.redirect(`/?ltik=${encodeURIComponent(entry.ltik)}`);
+          // ds: the learner already acknowledged the AI disclosure in the LMS frame, whose storage this window cannot read.
+          res.redirect(`/?ltik=${encodeURIComponent(entry.ltik)}${req.query.ds === '1' ? '#ds' : ''}`);
         });
 
         server.get('/vendor/:file', (req, res) => {

@@ -162,11 +162,11 @@ export async function buildHomeProgress(params: {
     }
   }
 
-  // Reflections not yet done since the last completed concept tutorial.
+  // Reflections not yet done since the last completed session of any other kind.
   const reflections = tutorials.filter((t) => t.kind === 'reflection');
   if (reflections.length) {
     const lastReflection = Math.max(0, ...reflections.map((t) => { const s = latest.get(t.id); return s?.status === 'completed' && s.completed_at ? new Date(s.completed_at).getTime() : 0; }));
-    const conceptsSince = tutorials.filter((t) => t.kind === 'concept' && done(t) && new Date(latest.get(t.id)!.completed_at ?? 0).getTime() > lastReflection).length;
+    const conceptsSince = tutorials.filter((t) => t.kind !== 'reflection' && done(t) && new Date(latest.get(t.id)!.completed_at ?? 0).getTime() > lastReflection).length;
     if (conceptsSince > 0) {
       const t = reflections.find((r) => !done(r)) ?? reflections[0]!;
       if (!nudges.some((n) => n.tutorial_id === t.id)) {

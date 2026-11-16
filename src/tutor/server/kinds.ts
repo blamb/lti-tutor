@@ -248,7 +248,7 @@ export const KINDS: Record<TutorialKind, KindSpec> = {
     ],
     summaryExtras: `  "strategy_in_own_words": one or two sentences quoting or closely paraphrasing what the student said about how they learn,
   "suggested_action": the one concrete next action they committed to (or the tutor suggested),`,
-    summaryGuidance: 'Here "mastery" means quality of reflection: "solid" = specific, honest, with a concrete plan; "needs_work" = answers too brief or general to show a strategy or a plan (say that, never why). understood = what they said they now grasp; sticking_points = only what they said remains hard, in their own words. A reflection is about how they learn: never conclude from it what content they do not know. When the answers are thin, say "Not enough information in this session" and point to what they showed in earlier sessions instead.',
+    summaryGuidance: 'Here "mastery" means quality of reflection: "solid" = specific, honest, with a concrete plan; "needs_work" = answers too brief or general to show a strategy or a plan (say that, never why). A session in which the student named a concrete plan in their own words is at least "developing". understood = what they said they now grasp; sticking_points = only what they said remains hard, in their own words. A reflection is about how they learn: never conclude from it what content they do not know. When the answers are thin, say "Not enough information in this session" and point to what they showed in earlier sessions instead.',
     draftGuide: `This is a REFLECTION run after a unit. learning_goal = what the student should notice about their own learning by the end. opening_question = the first reflective question (e.g. what was hardest in this unit and why). ta_brief = the probes about strategy, self-monitoring and what to change, and what to listen for. misconceptions = unhelpful beliefs about learning to listen for (e.g. that re-reading equals understanding). success_criteria = what a productive, specific reflection sounds like.`,
     prompts: null,
   },
@@ -392,14 +392,26 @@ export function isExplanation(text: string, keyTerms: string[]): boolean {
  * phrasing briefs use. The tutor may ask earlier than the schedule (it moves
  * on when the student clearly has the idea), so the ask itself counts.
  */
-export const TEACH_BACK_ASK = /in your own words|someone who (has never|hasn't|never) (studied|seen)|as if (to|teaching|you were teaching) (a |someone)|explain (it |this |that )?(back )?to (a classmate|a friend|someone)|teach (it|this) (back )?to/i;
+export const TEACH_BACK_ASK = /someone who (has never|hasn't|never) (studied|seen)|as if (to|teaching|you were teaching) (a |someone)|explain (it |this |that )?(back )?to (a classmate|a friend|someone)|teach (it|this) (back )?to/i;
+
+/**
+ * "In your own words" on its own is how any probe is phrased ("in your own
+ * words, what does U mean?"), and counting it moved the status chip to
+ * "Teach it back" on the second or third exchange. It is the teach-back ask
+ * only when the same reply asks for the whole idea.
+ */
+const OWN_WORDS = /in your own words/i;
+const WHOLE_IDEA = /\b(whole (idea|thing|story|picture|process)|big picture|core idea|main idea|key idea|start to (finish|end)|beginning to end|everything (we|you)|put (it|this|that) all together|all of (it|this|that) together)\b/i;
+export function isTeachBackAsk(content: string): boolean {
+  return TEACH_BACK_ASK.test(content) || (OWN_WORDS.test(content) && WHOLE_IDEA.test(content));
+}
 
 /** Student turn index (0-based) of the first reply to a teach-back ask, or null. */
 export function teachBackAskedAt(turns: Array<{ role: 'user' | 'assistant'; content: string }>, isOpening: (content: string) => boolean = () => false): number | null {
   let studentIdx = 0;
   for (const t of turns) {
     if (t.role === 'user') { if (!isOpening(t.content)) studentIdx++; continue; }
-    if (studentIdx > 0 && TEACH_BACK_ASK.test(t.content)) return studentIdx;
+    if (studentIdx > 0 && isTeachBackAsk(t.content)) return studentIdx;
   }
   return null;
 }

@@ -886,7 +886,8 @@
     fs.addEventListener('pointerenter', mintFsTarget);
     fs.addEventListener('focus', mintFsTarget);
     fs.addEventListener('click', () => {
-      const target = fsTarget || window.location.href;
+      // The LMS iframe and the full window do not share browser storage, so the acknowledgement travels with the link.
+      const target = fsTarget ? fsTarget + (disclosureSeen() ? '&ds=1' : '') : window.location.href;
       fsTarget = null; fsMintedAt = 0;
       try { window.top.location.href = target; } catch { window.open(target, '_blank', 'noopener'); }
     });
@@ -1019,9 +1020,11 @@
   let afterDisclosure = null;
   function holdForDisclosure(next) {
     afterDisclosure = next;
+    const aboutFirst = !hasProfile && !isTeacherRole;
+    $('#disclosure-next').textContent = aboutFirst ? 'Next: a few optional questions about you, then your session. ' : 'Your session opens next. ';
     $('#disclosure-next').hidden = false;
     const h = $('#disclosure-notice h2'); if (h) h.focus({ preventScroll: true });
-    announce('Before you start: please read the notice about this tutor. Your session opens after you select Got it.');
+    announce('Before you start: please read the notice about this tutor. ' + (aboutFirst ? 'After you select Got it, a few optional questions about you come first, then your session.' : 'Your session opens after you select Got it.'));
   }
   $('#disclosure-ok').addEventListener('click', () => {
     markDisclosureSeen(); $('#disclosure-notice').hidden = true; $('#disclosure-next').hidden = true;
@@ -1170,7 +1173,7 @@
       mastery: { solid: 'Ready to continue', developing: 'Partly ready', needs_work: 'Not yet started' }, placeholder: 'Say what you think the assignment is asking, or where you are stuck…',
       fields: { learning_goal: ['What they should leave able to do', 'Understand the task, have a plan, have taken the first step: on their own.'], opening_question: ['Opening question', 'Names the assignment and asks them to say in their own words what it is asking for.'], ta_brief: ['How to run it — your notes to the TA', 'What the assignment requires (parts and criteria), which readings bear on which part, which of the course\'s own activities and study questions to use as probes, and how to decline requests to write any of it.'], misconceptions: ['Common misreadings of the assignment', 'One per line, with the question that exposes it.'], success_criteria: ['What "ready to continue alone" sounds like', 'Used to judge the summary. Never about the quality of the eventual assignment.'], practice_prompts: ['First-step prompts', 'Prompts the tutor may offer for the first step, one per line: the course\'s own activities adapted to the assignment where possible.'] } },
     reflection: { label: 'Reflection', blurb: 'A short metacognitive conversation after a unit (4–8 exchanges): what was hard, what worked, what to change.', done: 'Reflection complete',
-      mastery: { solid: 'Specific', developing: 'Developing', needs_work: 'Needs more' }, placeholder: null,
+      mastery: { solid: 'Specific', developing: 'Taking shape', needs_work: 'Brief' }, placeholder: null,
       fields: { learning_goal: ['What to notice', 'What the learner should notice about their own learning by the end.'], opening_question: ['Opening question', 'The first reflective question, e.g. what was hardest in this unit and why.'], ta_brief: ['How to run it — your notes to the TA', 'The probes about strategy, self-monitoring and what to change; what to listen for.'], misconceptions: ['Unhelpful beliefs about learning', 'One per line, e.g. that re-reading equals understanding.'], success_criteria: ['What a productive reflection sounds like', 'Used to judge the summary.'] } },
     recall: { label: 'Recall', blurb: 'Revisit earlier learning: retrieve it from memory, then connect it to the current unit.', done: 'Recall complete',
       mastery: { solid: 'Retained', developing: 'Partly retained', needs_work: 'Mostly faded' }, placeholder: null,
@@ -1178,6 +1181,8 @@
   };
   function kindUI(kind) { return KIND_UI[kind] || KIND_UI.concept; }
   function masteryLabel(kind, m) { return kindUI(kind).mastery[m] || MASTERY_LABEL[m] || m; }
+  // A reflection is about how someone learns, not how well: its chip carries no grade colour.
+  function masteryChip(kind, m) { return `<span class="chip${kind === 'reflection' ? '' : ' ' + m}">${masteryLabel(kind, m)}</span>`; }
 
   /** Keep the newest turn in view: inside the box where it scrolls, or on the page on narrow screens. */
   function scrollToLatest(el) {
@@ -1197,7 +1202,7 @@
   async function openTutorial(id, opts = {}) {
     if (!hasProfile && !opts.skipProfile && !isTeacherRole) { pendingTutorialId = id; openProfile('home'); return; }
     stopTutorialVoice();
-    tutErr.textContent = ''; tut.npsDone = false;
+    tutErr.textContent = ''; tut.npsDone = false; tut.stageAt = 0;
     tutShowState('chat'); tutStage.textContent = 'Starting…';
     tutTurns.innerHTML = '<div class="empty-state">Opening your tutorial…</div>';
     $('#tutorial-title').textContent = 'Tutorial'; $('#tutorial-goal').textContent = '';
@@ -1256,6 +1261,11 @@
             // "Wrapping up" only once the tutor has stopped asking: a final question still wants an answer.
             const ready = evt.data.stage === 'WRAP-UP' && !endsWithQuestion(bubble._raw);
             if (evt.data.stage) {
+              // The chip never moves backwards: a stage the learner has been shown stays shown.
+              const order = (tut.tutorial && tut.tutorial.stages) || [];
+              const at = order.indexOf(evt.data.stage);
+              if (at >= 0 && at < (tut.stageAt || 0)) evt.data.stage = order[tut.stageAt];
+              else if (at >= 0) tut.stageAt = at;
               tutStage.textContent = evt.data.stage === 'WRAP-UP' && !ready ? 'Nearly done' : stageText(evt.data.stage);
               if (ready) tutStage.textContent += ' — click Finish when ready';
             }
@@ -1336,7 +1346,7 @@
     const understoodLabel = kind === 'practice' ? 'What you did well' : kind === 'reflection' ? 'What you said you now grasp' : kind === 'assignment_start' ? 'What you worked out about the task' : 'What you showed you understand';
     const stickyLabel = kind === 'practice' ? 'Where the work fell short' : kind === 'reflection' ? 'What still feels hard' : kind === 'assignment_start' ? 'Where you got stuck' : 'Where it got sticky';
     box.innerHTML =
-      `<h3>${ku.done} <span class="chip ${summary.mastery}">${masteryLabel(kind, summary.mastery)}</span></h3>` +
+      `<h3>${ku.done} ${masteryChip(kind, summary.mastery)}</h3>` +
       `<div class="md" id="tut-sum-note"></div>` +
       `<div style="margin-top:.75rem"><strong>${understoodLabel}</strong>${list(summary.understood)}</div>` +
       (summary.told && summary.told.length ? `<div><strong>Ideas the tutor explained</strong> <span class="muted">— worth putting in your own words next time</span>${list(summary.told)}</div>` : '') +
@@ -2226,7 +2236,7 @@
         `<td><span class="chip ${row.status === 'completed' ? 'done' : 'live'}">${row.status === 'completed' ? 'completed' : 'in progress'}</span>` +
         (row.grade_posted_at ? ' <span class="chip" title="Posted to gradebook">✓ grade</span>' : '') +
         (row.grade_error && !row.grade_posted_at && row.status === 'completed' ? ` <span class="chip" title="${escapeHtml(row.grade_error)}">grade not posted</span>` : '') + '</td>' +
-        `<td>${s ? `<span class="chip ${s.mastery}">${masteryLabel(r.tutorial.kind, s.mastery)}</span>` : '—'}</td>` +
+        `<td>${s ? masteryChip(r.tutorial.kind, s.mastery) : '—'}</td>` +
         `<td class="num">${row.turns}</td>` +
         `<td>${s && s.sticking_points.length ? escapeHtml(s.sticking_points.join('; ')) : '<span class="muted">—</span>'}</td>` +
         `<td class="num">${row.nps_score === null ? '—' : row.nps_score + '/10'}${row.nps_comment ? ` <span title="${escapeHtml(row.nps_comment)}" aria-label="Comment: ${escapeHtml(row.nps_comment)}">💬</span>` : ''}</td>` +
@@ -2247,7 +2257,7 @@
       if (d.after_session_note) { noteOut.hidden = false; noteOut.innerHTML = '<div class="muted" style="margin-bottom:.2rem">After-session note learners see</div><div class="md"></div>'; setMd(noteOut.querySelector('.md'), d.after_session_note); }
     } else {
       deliver.innerHTML = '<span aria-hidden="true">✓</span> ' + (delivery.hasLiveSessions ? 'Mark as delivered in class' : 'Post to the cohort');
-      st.textContent = delivery.hasLiveSessions ? 'After the live debrief, mark it delivered: learners get a short recap note.' : 'Posting writes a short after-session note that learners see on their home view.';
+      st.textContent = !r.can_deliver ? 'Only you see this. Nothing is posted to learners.' : delivery.hasLiveSessions ? 'After the live debrief, mark it delivered: learners get a short recap note.' : 'Nothing has been posted yet. Posting writes a short after-session note that learners see on their home view.';
     }
   }
   $('#tutorial-debrief-btn').addEventListener('click', async () => {
@@ -2276,6 +2286,7 @@
 
   // ─── Launch ───
   applyDeliveryLabels();
+  if (window.location.hash === '#ds') { markDisclosureSeen(); try { history.replaceState(null, '', window.location.pathname + window.location.search); } catch { /* the fragment stays: harmless */ } }
   showDisclosureNotice();
   (window.requestIdleCallback || ((fn) => setTimeout(fn, 50)))(loadMdLibs);
   const launchTutorialId = parseInt(document.body.dataset.tutorialId || '', 10);

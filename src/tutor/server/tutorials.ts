@@ -507,7 +507,7 @@ function buildTutorialRules(d: Delivery, kind: TutorialKind): string {
     'Stay grounded in the course materials provided. If none are attached, draw on general knowledge of the subject described in the brief, and say so if asked where something comes from. If the student asks something outside the materials, say what you can and point them to the instructor.',
     'When you draw on a course material, name it — its title and the section, step or activity as the material itself names it — so the student can find the passage themselves in the open textbook or notes. Briefly, in passing; never as a citation list.',
     'Name or number a topic, section, step or activity, and quote code or a command, only as it appears in the materials provided. If you cannot find it there, describe it in plain words without a name or number, and never reconstruct code from memory.',
-    "Never say what the student's own computer, VM or compiler will print or do: you cannot see it. Say what the materials say happens, and ask them to check on their VM.",
+    "Never say what the student's own computer, VM or compiler will print or do: you cannot see it. When the materials set an activity the student is meant to run themselves, never state its result (the output, the sizes, the values, the error it produces) before they have told you what they got: ask what they predict or what they saw, and send them to run it. Once they report a result, you may say how it compares with what the materials say.",
     "Where the materials include the course's own activities or study questions, prefer those as your probes, adapted to the moment, before inventing your own.",
     "Personalise lightly: about one example or analogy in ten should draw on the student's own context and interests. Never make the tutorial about them instead of the subject.",
     "When the student's profile or something they say names a background they already have (another programming language, a field, a job), connect at least one explanation or correction in the session to it, briefly (\"in Java terms, …\").",
@@ -843,6 +843,20 @@ const ATTITUDE = /\b(dis-?engaged|unengaged|not engaged|unmotivated|lacks? motiv
 /** Claims that the student does not know something. */
 const KNOWLEDGE_GAP = /\b(does ?n[o']t|did ?n[o']t|cannot|can'?t|unable to|fails? to) (recogni[sz]e|understand|know|grasp|see|realise|realize|connect)|\bno (clear )?(strategy|understanding|awareness|grasp|knowledge|systematic)\b|\b(conflat|confus|misunderst)\w*|\black(s|ing)? (a |an )?(strategy|understanding|knowledge)/i;
 export const THIN = 'Not enough information in this session.';
+/** "the brief" as a noun (the instructor's notes to the tutor), not "the brief answer": students have never seen it. */
+const THE_BRIEF = /\bthe (?:instructor'?s |tutor'?s |session'?s? )?brief(?='s\b|\s*[.,;:)]|\s*$|\s+(?:says?|said|describes?|lists?|asks?|calls?|names?|expects?|requires?|sets?|gives?|mentions?|includes?|covers?|states?|specifies|is|was|for|and|or|in|as|to)\b)/gi;
+/** A summary line that opens by naming its subject ("The student explained …"): every field is shown to the student. */
+const THIRD_PERSON_OPENING = /^(?:the )?(?:student|learner)\s+(?=[a-z])/i;
+/** Student-facing wording for one summary string: no "the brief", no "The student …" opening. */
+function noBrief(text: string): string {
+  return text.replace(THE_BRIEF, (m) => (/^T/.test(m) ? 'The session plan' : 'the session plan'));
+}
+export function studentFacing(text: string): string {
+  let out = noBrief(text);
+  const lead = out.match(THIRD_PERSON_OPENING)?.[0].length ?? 0;
+  if (lead && /^[a-z]/.test(out.slice(lead))) out = out.charAt(lead).toUpperCase() + out.slice(lead + 1);
+  return out;
+}
 /** The quote and the item share a content word (first four letters), so the quote is about what the item claims. */
 function aboutSameThing(quote: string, text: string): boolean {
   const stop = new Set(['what', 'when', 'that', 'this', 'with', 'they', 'their', 'them', 'have', 'from', 'would', 'could', 'should', 'just', 'like', 'some', 'more', 'than', 'then', 'about', 'only', 'really', 'probably', 'maybe', 'think', 'want', 'wants', 'need', 'name', 'said', 'says', 'does', 'didn', 'doesn', 'student', 'still', 'hard', 'clear', 'unclear', 'specific', 'reflection', 'session']);
@@ -954,6 +968,19 @@ export function groundSummary(
       dropped.push(`${k}: attitude label removed`);
     }
   }
+  // Readiness shows two verdicts side by side (the chip and "where you start from"): they must not disagree.
+  if (draft.kind === 'readiness') {
+    const r = summary as unknown as { mastery: string; prior_knowledge: string; misconceptions_found: string[]; sticking_points: string[] };
+    if (r.prior_knowledge === 'none' && r.mastery === 'solid') r.mastery = 'developing';
+    // "Solid prior knowledge" beside "Partly ready" needs a reason the student can see: a misconception or a sticking point.
+    if (r.prior_knowledge === 'solid' && r.mastery !== 'solid' && !r.misconceptions_found.length && !r.sticking_points.length) r.prior_knowledge = 'some';
+  }
+  // Every field is shown to the student: no "the brief", no "The student …" openings.
+  for (const [k, v] of Object.entries(fields)) {
+    if (k === 'kind' || k === 'mastery') continue;
+    if (typeof v === 'string') fields[k] = k === 'student_note' ? noBrief(v) : studentFacing(v);
+    else if (Array.isArray(v)) fields[k] = v.map((x) => (typeof x === 'string' ? studentFacing(x) : x));
+  }
   if (draft.kind === 'concept') {
     // Decided from the transcript (kinds.ts stageForRun), not from the model's reading of it.
     (summary as unknown as { teachback: string }).teachback =
@@ -970,7 +997,12 @@ export interface GroundedEvidence {
 
 function summarySystemFor(kind: TutorialKind): string {
   const spec = KINDS[kind];
-  return `You read the transcript of a one-on-one ${spec.label.toLowerCase()} (${spec.blurb}) and write a short structured summary for two readers: the student (student_note) and the instructor (everything else). Judge against the brief's learning goal and success criteria.
+  return `You read the transcript of a one-on-one ${spec.label.toLowerCase()} (${spec.blurb}) and write a short structured summary. The student and the instructor both read every field, so every field must read naturally to the student. Judge against the brief's learning goal and success criteria.
+
+Wording rules:
+- Outside student_note, write phrases with no subject ("Explained why the linker needs a definition", "Mixed up declaring with defining", "Holds the false belief that …"): never "the student", "the learner", "they" as the subject, or the student's name. student_note speaks to the student as "you".
+- Never mention the brief, your instructions, the success criteria or the tutor's notes in any field: the student has not seen them. Name the idea itself instead.
+- A sticking point is something the student found hard about the subject. When the student could not follow the tutor's question or wording ("what do you mean?", "I don't get what you're asking"), or the tutor contradicted itself, that is the tutor's unclear wording: leave it out of sticking_points and never count it against the student.
 
 Evidence rules. These matter more than anything else here:
 - Only lines labelled with the student's name are evidence of what the student understood. Lines labelled "Tutor", including the tutor's recaps ("Here's what I heard…", "Let me play back…"), are never evidence, even if the student then says "yes".
@@ -1513,6 +1545,25 @@ Three questions, no answers.
 
 Ground everything in the provided material. Never refer to a lecture, a class, classmates or a schedule.`;
 
+/**
+ * An assignment description is the task itself: "three questions to test
+ * yourself" on it came out as the assignment's own questions. Its debrief
+ * recaps what is asked and ends on questions about getting ready.
+ */
+const ASSIGNMENT_DEBRIEF_NOTE = `
+
+This material is an assignment description, the task the reader must do themselves. That changes three things:
+- "The big ideas" recaps what the assignment asks for, its parts and how it is judged. Never answer, outline, draft or hint at the content of any part of it.
+- The slip section covers common misreadings of the task, not of the subject.
+- Replace the last section with:
+## Three questions to ask yourself before you start
+Three questions about getting ready: what the task asks for, what they need to have read or run first, how they will check their work against the criteria. Never a question the assignment itself asks, never one whose answer could go into the submission, and never a subject-matter question on a topic the assignment assesses.`;
+
+/** The debrief instructions for one material and learner. Pure, for the tests. */
+export function debriefSystemFor(live: boolean, role: MaterialRole | undefined, firstName: string): string {
+  return (live ? LECTURE_DEBRIEF_SYSTEM : STUDY_DEBRIEF_SYSTEM).replace('{FIRST_NAME}', firstName) + (role === 'assignment' ? ASSIGNMENT_DEBRIEF_NOTE : '');
+}
+
 export async function getDebrief(studentId: number, materialId: number): Promise<{ markdown: string; generated_at: string } | null> {
   const rows = await query<{ markdown: string; generated_at: string }>(
     `select markdown, generated_at::text from debrief where student_id = $1 and material_id = $2`,
@@ -1537,7 +1588,7 @@ export async function generateDebrief(params: {
     model: GEN_MODEL,
     ...requestOptions(GEN_MODEL, { maxTokens: 1500, effort: 'medium' }),
     system: [
-      { type: 'text', text: (live ? LECTURE_DEBRIEF_SYSTEM : STUDY_DEBRIEF_SYSTEM).replace('{FIRST_NAME}', firstName) },
+      { type: 'text', text: debriefSystemFor(live, material.role, firstName) },
       { type: 'text', text: materialsBlock([material])!, cache_control: { type: 'ephemeral' } },
     ],
     messages: [
