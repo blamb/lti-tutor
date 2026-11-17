@@ -28,7 +28,7 @@ import type { Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import type { IdToken } from 'ltijs';
 import { z } from 'zod';
-import { lti } from './lti.js';
+import { lti, mintFullscreenNonce } from './lti.js';
 import { registerThemeRoutes } from '../../core/theme-store.js';
 import { env } from './env.js';
 import { studentFromToken, gateTeacher, contextIdOf, attr } from '../../core/reqctx.js';
@@ -147,6 +147,20 @@ lti.app.get('/api/me', async (_req: Request, res: Response) => {
     });
   } catch (e) {
     fail(res, e, 'GET /api/me');
+  }
+});
+
+// The full window does not get the frame's session cookies, so the page asks for a
+// single-use address that carries the session across (see core/lti-provider.ts).
+lti.app.post('/api/fullscreen-init', (req: Request, res: Response) => {
+  try {
+    if (!gateTeacher(res)) return;
+    const ltik = String(req.query.ltik ?? '');
+    const cookieHeader = req.headers.cookie ?? '';
+    if (!ltik || !cookieHeader) return res.status(400).json({ error: 'no session context to hand off' });
+    res.json({ url: `/fullscreen?n=${encodeURIComponent(mintFullscreenNonce(cookieHeader, ltik))}` });
+  } catch (e) {
+    fail(res, e, 'POST /api/fullscreen-init');
   }
 });
 

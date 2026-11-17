@@ -37,6 +37,7 @@
   .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   main:focus { outline: none; }
   header h1 { margin: 0 0 .15rem; font-size: 1.4rem; }
+  header.top { display: flex; gap: 1rem; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; }
   header .sub, .muted { color: var(--muted); font-size: .9rem; }
   button, input, textarea, select { font: inherit; }
   .btn { display: inline-block; padding: .5rem 1.1rem; min-height: 40px; border: 1px solid transparent; border-radius: 6px; background: var(--accent); color: var(--accent-fg); font-weight: 500; cursor: pointer; text-decoration: none; }
@@ -127,9 +128,12 @@
 <body>
 <a class="skip-link" href="#main">Skip to main content</a>
 <div class="wrap">
-  <header>
-    <h1>{{TOOL_NAME}}</h1>
-    <div class="sub">{{CONTEXT_TITLE}} · {{DISPLAY_NAME}}</div>
+  <header class="top">
+    <div>
+      <h1>{{TOOL_NAME}}</h1>
+      <div class="sub">{{CONTEXT_TITLE}} · {{DISPLAY_NAME}}</div>
+    </div>
+    <button class="btn btn-ghost btn-small" id="full-page" type="button" hidden title="Open the tool in the full browser window, outside the course page"><span aria-hidden="true">⛶</span> View full page</button>
   </header>
   <div id="sr-live" class="visually-hidden" aria-live="polite"></div>
 
@@ -221,6 +225,28 @@
     if (!r.ok) throw new Error(data.error || `Server returned ${r.status}`);
     return data;
   }
+  // ─── View full page: leave the course page's frame for the whole browser window ───
+  if ((() => { try { return window.self !== window.top; } catch { return true; } })()) {
+    const fp = $('#full-page');
+    fp.hidden = false;
+    // The handoff address is made ahead of the click, so the click can navigate at once
+    // (browsers drop a frame's permission to navigate the top window across an await).
+    let target = null, mintedAt = 0;
+    const mint = async () => {
+      if (Date.now() - mintedAt < 30000) return;
+      mintedAt = Date.now();
+      try { const d = await api('/api/fullscreen-init', { method: 'POST' }); if (d.url) target = window.location.origin + d.url; } catch { /* fall back to this address */ }
+    };
+    mint();
+    fp.addEventListener('pointerenter', mint);
+    fp.addEventListener('focus', mint);
+    fp.addEventListener('click', () => {
+      const to = target || window.location.href;
+      target = null; mintedAt = 0;
+      try { window.top.location.href = to; } catch { window.open(to, '_blank', 'noopener'); }
+    });
+  }
+
   function friendly(e) {
     const msg = String(e?.message ?? e ?? '');
     if (/529|overloaded/i.test(msg)) return 'The AI is overloaded right now. Wait 30 seconds and try again.';
