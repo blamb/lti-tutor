@@ -34,8 +34,13 @@ lti.onConnect(async (token: IdToken, req, res) => {
     );
   }
   const me = await studentFromToken(token);
+  // Where the course says to send people back to; shown as a link once the tool fills the window.
+  const lp = token.platformContext.launchPresentation as Record<string, unknown> | undefined;
+  const rawReturnUrl = typeof lp?.return_url === 'string' ? lp.return_url : '';
+  const returnUrl = /^https?:\/\//i.test(rawReturnUrl) ? rawReturnUrl : '';
   const html = loadLaunchHtml()
     .replaceAll('{{TOOL_NAME}}', escapeHtml(env.TOOL_NAME))
+    .replaceAll('{{RETURN_URL}}', escapeHtml(returnUrl))
     .replaceAll('{{DISPLAY_NAME}}', escapeHtml(me.display_name))
     .replaceAll('{{CONTEXT_TITLE}}', escapeHtml(token.platformContext.context?.title || ''));
   return res.send(applyThemeToHtml(html, await launchTheme(token.iss, contextIdOf(token))));
