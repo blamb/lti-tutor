@@ -53,7 +53,7 @@ test('a Quiz takes only approved question sets, and only questions it can mark',
   assert.ok(r.judgement.some((j) => j.includes('Practice Questions: Carbon: not in the Quiz, because it has not been approved')));
   assert.ok(r.judgement.some((j) => j.includes('Water: question 3 is not in the Quiz')), 'two correct answers cannot be marked as single choice');
   const tar = archive(r.mbz);
-  assert.ok(tar.includes('activities/quiz_9801/quiz.xml'));
+  assert.ok(tar.includes('activities/quiz_10001/quiz.xml'));
   assert.equal((tar.match(/<question_bank_entry /g) ?? []).length, 2);
   assert.equal((tar.match(/<question_instance /g) ?? []).length, 2);
   assert.ok(tar.includes('<qtype>truefalse</qtype>') && tar.includes('<qtype>multichoice</qtype>'));
@@ -74,7 +74,7 @@ test('"both" keeps the H5P and adds the Quiz and the Glossary; terms are listed 
   assert.equal((xml.match(/<ENTRY>/g) ?? []).length, 2, 'Cohesion from the second reading is a duplicate');
   assert.ok(xml.includes('<CONCEPT>Cohesion</CONCEPT>') && xml.includes('&lt;p&gt;the attraction between water molecules&lt;/p&gt;'));
   const tar = archive(r.mbz);
-  assert.ok(tar.includes('activities/glossary_9831/glossary.xml'));
+  assert.ok(tar.includes('activities/glossary_12001/glossary.xml'));
   assert.ok(!tar.includes('<entry id='), 'entries are user data to Moodle and are not restored for a teacher, so none are written');
   assert.ok(r.todo.some((t) => t.includes('The Glossary arrives empty') && t.includes('(2 terms)')));
 });
@@ -89,7 +89,7 @@ test('buildMbz: a quiz question needs exactly one correct answer; the import fil
   const quiz = { name: 'Q', intro: '', questions: [{ type: 'multichoice' as const, name: 'bad', text: '<p>x</p>', answers: [{ text: 'a', correct: false, feedback: '' }] }] };
   assert.throws(() => buildMbz('m.mbz', { fullname: 'M', shortname: 'M' }, { name: 'M' }, [], { quizzes: [quiz] }), /exactly one correct answer/);
   assert.ok(glossaryImportXml('G & co', [{ concept: 'A<B', definition: '<p>x</p>' }]).includes('<CONCEPT>A&lt;B</CONCEPT>'));
-  assert.equal(quizLink(0), '$@QUIZVIEWBYID*9801@$');
+  assert.equal(quizLink(0), '$@QUIZVIEWBYID*10001@$');
 });
 
 // ─── Discussion, Assignment, and a RhizMode discussion in a practice module ───
@@ -120,7 +120,7 @@ test('a discussion and an assignment become their own activities; the rubric res
   assert.ok(post.includes('This discussion is not graded.') && post.includes('drafted with AI (test-model)'));
   assert.ok(r.chapters[0]!.html.includes('Trust Audit'), 'a RhizMode discussion works in a practice module too');
   const tar = archive(r.mbz);
-  assert.ok(tar.includes('activities/assign_9871/assign.xml') && tar.includes('activities/assign_9871/grading.xml'));
+  assert.ok(tar.includes('activities/assign_11001/assign.xml') && tar.includes('activities/assign_11001/grading.xml'));
   assert.ok(tar.includes('<activemethod>rubric</activemethod>') && tar.includes('<status>20</status>'));
   assert.ok(tar.includes('<description>Accuracy. Learning outcome: Explain why water is a polar molecule.</description>'));
   assert.equal((tar.match(/<level id=/g) ?? []).length, 4);
@@ -135,7 +135,7 @@ test('a criterion whose outcome is not in the outline blocks the assignment; wit
   assert.ok(!archive(bad.mbz).includes('activities/assign_'));
   const plain = buildReadings({ name: 'Chemistry', readings, activities: [assignment({ rubric: [] })] }, { sourceName: 'x' });
   const tar = archive(plain.mbz);
-  assert.ok(tar.includes('activities/assign_9871/assign.xml') && !tar.includes('grading.xml'));
+  assert.ok(tar.includes('activities/assign_11001/assign.xml') && !tar.includes('grading.xml'));
   assert.ok(plain.judgement.some((j) => j.includes('has no rubric')));
   assert.ok(checkPage(assignment({ rubric: [{ criterion: 'x', outcome: 'y', levels: ['only one'] }] })).some((p) => p.includes('each of the 4 levels')));
   assert.ok(checkPage(discussion({ passages: [] })).some((p) => p.includes('no passage to start from')));

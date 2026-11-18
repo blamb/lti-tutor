@@ -5,6 +5,7 @@
  *
  *   GET    /api/me                                -> { name, course, model }
  *   GET    /api/builds                            -> { builds: [summary] }
+ *   GET    /api/course-file?ids=1,2&section=1     several modules as one restore file, one section each; &list=1 for what it would hold
  *   POST   /api/builds                            multipart 'file' (.docx) -> { build }   (starts the AI step)
  *   GET    /api/builds/:id                        -> { build }   (slots, activities, settings, state)
  *   PUT    /api/builds/:id                        { course_shortname?, section_number?, leave_out?, questions_as?, terms_as? } -> { build }
@@ -42,7 +43,7 @@ import { TYPE_LABELS } from './interpret.js';
 import { ROLES, EXTRA_ROLES } from './drafting.js';
 import {
   DRAFT_MAX_BYTES, listBuilds, getBuild, createBuild, deleteBuild, updateSettings, reviewActivity, rereadActivity, runBuild,
-  createReadingsBuild, addReading, addContract, updateReading, removeReading, forClient, READING_MAX_BYTES,
+  runCourseFile, createReadingsBuild, addReading, addContract, updateReading, removeReading, forClient, READING_MAX_BYTES,
   addPage, setOutline, sourceOf, OUTLINE_MAX_CHARS,
   type BuildRow, type Built, type ReadingInput,
 } from './builds.js';
@@ -92,18 +93,20 @@ async function ctx(req: Request, res: Response): Promise<{ token: IdToken; scope
  */
 function view(build: BuildRow): unknown {
   const b = forClient(build);
-  if (build.kind !== 'readings') return b;
+  if (build.kind !== 'readings' && !build.readings.length) return b;
   return {
     ...b,
     activities: build.activities.map((a) => {
+      const slot = build.slots.find((s) => s.n === a.n) as { role?: string } | undefined;
+      if (!a.spec || !slot?.role) return a;      // a spec read from a Word draft has no reading to check against
       const src = sourceOf(build, build.slots.find((s) => s.n === a.n));
-      return a.spec ? { ...a, quotes: checkQuotes(a.spec, src.text, src.outline) } : a;
+      return { ...a, quotes: checkQuotes(a.spec, src.text, src.outline) };
     }),
   };
 }
 
 function withQuotes(build: BuildRow, a: { n: number; spec: Parameters<typeof checkQuotes>[0] | null }): unknown {
-  if (build.kind !== 'readings' || !a.spec) return a;
+  if (!a.spec || !(build.slots.find((s) => s.n === a.n) as { role?: string } | undefined)?.role) return a;
   const src = sourceOf(build, build.slots.find((s) => s.n === a.n));
   return { ...a, quotes: checkQuotes(a.spec, src.text, src.outline) };
 }
@@ -185,6 +188,31 @@ lti.app.get('/api/builds', async (_req: Request, res: Response) => {
     res.json({ builds: await listBuilds(scopeOf(token)) });
   } catch (e) {
     fail(res, e, 'GET /api/builds');
+  }
+});
+
+// Several of the course's modules as one restore file, each in its own section, in the order the ids are given.
+lti.app.get('/api/course-file', async (req: Request, res: Response) => {
+  try {
+    const token = gateTeacher(res);
+    if (!token) return;
+    const q = z.object({
+      ids: z.string().regex(/^\d+(,\d+)*$/).transform((v) => v.split(',').map(Number)),
+      section: z.coerce.number().int().min(0).max(150).default(1),
+      list: z.string().optional(),
+    }).parse(req.query);
+    const scope = scopeOf(token);
+    const builds: BuildRow[] = [];
+    for (const id of [...new Set(q.ids)]) {
+      const b = await getBuild(scope, id);
+      if (!b) { res.status(404).json({ error: 'One of those modules was not found in this course.' }); return; }
+      builds.push(b);
+    }
+    const file = await runCourseFile(builds, { courseTitle: scope.title, firstSection: q.section });
+    if (q.list === '1') { res.json({ file_name: file.fileName, size: file.mbz.byteLength, modules: file.modules }); return; }
+    sendFile(res, file.mbz, 'application/vnd.moodle.backup', file.fileName);
+  } catch (e) {
+    fail(res, e, 'GET /api/course-file');
   }
 });
 

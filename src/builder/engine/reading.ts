@@ -552,6 +552,7 @@ export function buildReadings(mod: ReadingModule, opts: BuildOptions): BuildResu
   return {
     name: mod.name, fileName, mbz: stats.mbz, report, specsFound: '',
     chapters, slots: [], h5p: packages, images: {}, forums: forums.map((f) => ({ name: f.name, html: f.intro })),
+    parts: { name: mod.name, book: { name: mod.name, chapters, files: packages }, forums, quizzes, glossaries, assignments },
     glossaryXml: terms.length ? glossaryImportXml(glossaryName, terms) : undefined,
     quiz: quizzes.length ? { name: quizzes[0]!.name, questions: quizQuestions.length } : undefined,
     counts: Object.fromEntries(rows), todo, judgement,

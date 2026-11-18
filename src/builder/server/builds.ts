@@ -15,6 +15,8 @@ import type { Attribution } from '../../core/costs.js';
 import { ImportError, importFromUrl, extractFromFile } from '../../core/importers.js';
 import { inspectDraft, buildModule, checkActivity, type Activity, type BuildResult, type ModuleSpec, type Slot } from '../engine/index.js';
 import { buildReadings, checkDrafted, type Reading, type ReadingActivity } from '../engine/reading.js';
+import { joinPages, buildCourseFile, type ModuleParts } from '../engine/combine.js';
+import { buildMbz } from '../engine/mbz.js';
 import { readSpec } from './interpret.js';
 import { draftActivity, draftContract, ROLES, MODE_ROLES, TRAIL_ROLES, EXTRA_ROLES, type Role, type Mode } from './drafting.js';
 import { env } from './env.js';
@@ -190,7 +192,8 @@ async function draftPageFor(build: Pick<BuildRow, 'readings' | 'outline' | 'titl
 
 async function readOne(id: number, kind: BuildRow['kind'], slot: Slot, readings: StoredReading[], attribution: Attribution, title = '', outline = ''): Promise<void> {
   try {
-    if (kind === 'readings') {
+    // A slot with a role was drafted from readings, whichever kind of module it is in.
+    if ((slot as ReadingSlot).role) {
       const rs = slot as ReadingSlot;
       if (isPageRole(rs.role)) {
         if (rs.role === 'guide' && !readings.some((r) => r.id === rs.reading)) return; // the reading was removed while its guide was queued
@@ -282,7 +285,7 @@ export async function rereadActivity(build: BuildRow, n: number, note: string, a
   const current = build.activities.find((a) => a.n === n);
   const change = note.trim() && current?.spec ? { previous: current.spec, note: note.trim() } : undefined;
   let entry: ReviewedActivity;
-  if (build.kind === 'readings') {
+  if ((slot as ReadingSlot).role) {
     const rs = slot as ReadingSlot;
     if (isPageRole(rs.role)) {
       const { spec, problems } = await draftPageFor(build, rs, attribution, change);
@@ -315,7 +318,7 @@ export async function reviewActivity(build: BuildRow, n: number, change: { statu
   const current = build.activities.find((a) => a.n === n) ?? { n, status: 'pending' as ActivityStatus, spec: null, problems: [] };
   const entry: ReviewedActivity = { ...current };
   if (change.spec) {
-    if (build.kind === 'readings') {
+    if ((slot as ReadingSlot).role) {
       // An edited question must still rest on a sentence of its reading.
       const rid = (slot as ReadingSlot).reading;
       entry.spec = { ...change.spec, n, reading: rid } as unknown as Activity;
@@ -413,13 +416,60 @@ export async function runBuild(build: BuildRow, opts: { visible?: boolean } = {}
     return { ...result, report: result.report + reviewSection(build), included: (spec.activities ?? []).map((a) => a.n) };
   }
   const docx = await getDocx(build.id);
-  const result = buildModule(docx, spec, {
+  // In a Word-draft module the specs found in the draft are the Word half; anything drafted from a reading added later is the other.
+  const fromReading = new Set(build.slots.filter((s) => (s as ReadingSlot).role).map((s) => s.n));
+  const wordSpec = { ...spec, activities: (spec.activities ?? []).filter((a) => !fromReading.has(a.n)) };
+  const result = buildModule(docx, wordSpec, {
     sourceName: build.source_name,
     course: build.course_shortname || undefined,
     section: build.section_number,
     visible: opts.visible,
   });
-  return { ...result, report: result.report + reviewSection(build), included: (spec.activities ?? []).map((a) => a.n) };
+  const included = (spec.activities ?? []).map((a) => a.n);
+  if (!build.readings.length) return { ...result, report: result.report + reviewSection(build), included };
+
+  // Readings added to a Word draft: their pages follow the draft's pages in the same Book.
+  const extra = buildReadings({
+    name: build.title, prefix: spec.prefix, readings: build.readings, activities: (spec.activities ?? []).filter((a) => fromReading.has(a.n)) as ReadingActivity[],
+    mode: build.mode, model: env.BUILDER_MODEL, outline: build.outline,
+    questions_as: build.questions_as, terms_as: build.terms_as, approved: build.activities.filter((a) => a.status === 'approved').map((a) => a.n),
+  }, { sourceName: `${build.readings.length} reading${build.readings.length === 1 ? '' : 's'}`, course: build.course_shortname || undefined, section: build.section_number, visible: opts.visible });
+  const parts = joinPages(result.parts!, extra.parts!);
+  const stats = buildMbz(result.fileName, { fullname: result.name, shortname: build.course_shortname || result.name.replace(/[^A-Za-z0-9]+/g, '').toUpperCase().slice(0, 40) || 'MODULE' },
+    { name: result.name }, [parts.book], {
+      hidden: !opts.visible, sectionNumber: build.section_number, forums: parts.forums, quizzes: parts.quizzes, glossaries: parts.glossaries, assignments: parts.assignments,
+    });
+  const counts: Record<string, number | string> = { ...result.counts };
+  for (const [k, v] of Object.entries(extra.counts)) counts[k === 'Book pages' ? 'Book pages made from readings' : k === 'Files in the backup' ? 'H5P files from readings' : k] = v;
+  counts['Book chapters'] = parts.book.chapters.length;
+  counts['Files in the backup'] = stats.files;
+  return {
+    ...result, mbz: stats.mbz, parts, counts,
+    chapters: parts.book.chapters, h5p: { ...result.h5p, ...extra.h5p },
+    forums: parts.forums.map((f) => ({ name: f.name, html: f.intro })),
+    todo: [...result.todo, ...extra.todo], judgement: [...result.judgement, ...extra.judgement],
+    glossaryXml: extra.glossaryXml, quiz: extra.quiz,
+    report: result.report + '\n---\n\n# Pages added from readings\n\n' + extra.report.replace(/^# Build report:.*\n/, '') + reviewSection(build),
+    included,
+  };
+}
+
+/** Several modules of one course as one restore file, each in its own section, in the order given. */
+export async function runCourseFile(builds: BuildRow[], opts: { courseTitle: string; firstSection: number }): Promise<{ mbz: Uint8Array; fileName: string; modules: { id: number; title: string; section: number; glossary: boolean }[] }> {
+  if (builds.length < 2) throw new ImportError('Choose at least two modules to put in one file.', 400);
+  if (builds.length > 30) throw new ImportError('One file holds at most 30 modules.', 400);
+  const parts: ModuleParts[] = [];
+  const modules: { id: number; title: string; section: number; glossary: boolean }[] = [];
+  for (const [k, b] of builds.entries()) {
+    const built = await runBuild(b);
+    if (!built.parts) throw new ImportError(`“${b.title}” could not be put in a course file.`, 500);
+    parts.push(built.parts);
+    modules.push({ id: b.id, title: b.title, section: opts.firstSection + k, glossary: Boolean(built.glossaryXml) });
+  }
+  const base = opts.courseTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'course';
+  const fileName = `${base}-${builds.length}-modules.mbz`;
+  const stats = buildCourseFile(parts, { fileName, course: { fullname: opts.courseTitle || 'Modules', shortname: base.toUpperCase() }, firstSection: opts.firstSection });
+  return { mbz: stats.mbz, fileName, modules };
 }
 
 // ─── Modules built from readings ────────────────────────────────────────────
@@ -460,7 +510,6 @@ async function loadReading(input: ReadingInput): Promise<Omit<StoredReading, 'id
 
 /** Add a reading to a readings module and start drafting its activities: the ones its mode calls for. */
 export async function addReading(build: BuildRow, input: ReadingInput, attribution: Attribution): Promise<BuildRow> {
-  if (build.kind !== 'readings') throw new ImportError('Readings can only be added to a module that was started from readings.', 400);
   if (build.readings.length >= READINGS_MAX) throw new ImportError(`A module holds at most ${READINGS_MAX} readings. Start another module for the rest.`, 400);
   const loaded = await loadReading(input);
   if (loaded.text.trim().length < READING_MIN_CHARS) {
@@ -544,7 +593,6 @@ export const OUTLINE_MAX_CHARS = 200_000;
 
 /** Add a course page to a readings module and start drafting it: the overview or takeaways (one each), or the guide for a reading that has none. */
 export async function addPage(build: BuildRow, role: PageRole | Role, rid: number | undefined, attribution: Attribution): Promise<BuildRow> {
-  if (build.kind !== 'readings') throw new ImportError('Course pages are drafted for a module that was started from readings.', 400);
   if (!build.readings.length) throw new ImportError('Add a reading first: course pages are drafted from the module’s readings.', 400);
   // A RhizMode discussion can be added to one reading of a practice module: the same kinds, drafted and built the same way.
   const trail = TRAIL_ROLES.includes(role as Role);
@@ -578,7 +626,6 @@ export async function addPage(build: BuildRow, role: PageRole | Role, rid: numbe
  * that is no longer in it stops the page being built until it is redrafted.
  */
 export async function setOutline(build: BuildRow, input: { text: string } | { file: { name: string; bytes: Uint8Array } }): Promise<BuildRow> {
-  if (build.kind !== 'readings') throw new ImportError('An outline belongs to a module that was started from readings.', 400);
   const text = ('file' in input ? (await extractFromFile(input.file.name, Buffer.from(input.file.bytes))).text : input.text).trim().slice(0, OUTLINE_MAX_CHARS);
   if ('file' in input && text.length < 40) throw new ImportError('No text could be read from that file. A scanned PDF has no text until it has been through OCR; paste the outline instead.', 400);
   const next = { ...build, outline: text };

@@ -300,12 +300,39 @@
     try {
       const { builds } = await api('/api/builds');
       if (!builds.length) { box.innerHTML = '<p class="empty">No modules yet. Start one above.</p>'; return; }
-      box.innerHTML = `<div class="scroll-x"><table class="tbl"><thead><tr><th scope="col">Module</th><th scope="col">Uploaded</th><th scope="col">Activities</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead><tbody>` +
-        builds.map((b) => `<tr><th scope="row" style="font-weight:500;color:inherit;font-size:inherit">${esc(b.title)}<div class="muted">${b.kind === 'readings' ? `From ${b.reading_count} reading${b.reading_count === 1 ? '' : 's'}${b.mode === 'rhizmode' ? ' · RhizMode' : ''}` : esc(b.source_name)}</div></th>
+      box.innerHTML = `<div class="scroll-x"><table class="tbl"><thead><tr><th scope="col"><span class="visually-hidden">Include in one file</span></th><th scope="col">Module</th><th scope="col">Uploaded</th><th scope="col">Activities</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead><tbody>` +
+        builds.map((b) => `<tr><td><input type="checkbox" data-pick="${b.id}" aria-label="Include ${esc(b.title)} in one file"></td><th scope="row" style="font-weight:500;color:inherit;font-size:inherit">${esc(b.title)}<div class="muted">${b.kind === 'readings' ? `From ${b.reading_count} reading${b.reading_count === 1 ? '' : 's'}${b.mode === 'rhizmode' ? ' · RhizMode' : ''}` : esc(b.source_name)}</div></th>
           <td>${when(b.created_at)}</td>
           <td>${b.kind === 'readings' && !b.reading_count ? 'No readings yet' : b.state === 'reading' ? '<span class="chip">Being read…</span>' : b.spec_count ? `${b.approved} of ${b.spec_count} approved${b.to_review ? ` · <span class="chip draft">${b.to_review} to review</span>` : ''}${b.failed ? ` · <span class="chip bad">${b.failed} failed</span>` : ''}` : 'None in this draft'}</td>
           <td><button class="btn btn-small" type="button" data-open="${b.id}">Open<span class="visually-hidden"> ${esc(b.title)}</span></button></td></tr>`).join('') +
-        '</tbody></table></div>';
+        '</tbody></table></div>' + (builds.length < 2 ? '' : `<form id="course-file-form" style="margin-top:1rem"><h3 style="margin:.2rem 0">Several modules in one restore file</h3>
+          <p class="muted">Tick the modules to include. Each goes into its own course section, in the order you tick them, starting at the section number below. One restore then brings them all in, hidden.</p>
+          <label class="field" for="cf-section">First section number <input id="cf-section" type="number" min="0" max="150" value="1" style="max-width:8rem"></label>
+          <button class="btn btn-small" type="submit" style="margin-top:.6rem">Build one file</button> <span id="cf-msg" role="status"></span>
+          <div id="cf-out"></div></form>`);
+      const picked = [];
+      $$('[data-pick]', box).forEach((cb) => cb.addEventListener('change', () => {
+        const id = Number(cb.dataset.pick), i = picked.indexOf(id);
+        if (cb.checked && i < 0) picked.push(id); else if (!cb.checked && i >= 0) picked.splice(i, 1);
+      }));
+      const cf = $('#course-file-form');
+      if (cf) cf.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const msg = $('#cf-msg'), out = $('#cf-out');
+        out.innerHTML = '';
+        if (picked.length < 2) { msg.className = 'err'; msg.textContent = 'Tick at least two modules.'; return; }
+        msg.className = 'muted'; msg.textContent = 'Building…';
+        try {
+          const q = `/api/course-file?ids=${picked.join(',')}&section=${Number($('#cf-section').value) || 0}`;
+          const d = await api(q + '&list=1');
+          msg.textContent = '';
+          out.innerHTML = `<div class="scroll-x" style="margin-top:.6rem"><table class="tbl"><thead><tr><th scope="col">Section</th><th scope="col">Module</th></tr></thead><tbody>${
+            d.modules.map((m) => `<tr><td>${m.section}</td><td>${esc(m.title)}${m.glossary ? ` · <a href="${esc(apiUrl(`/api/builds/${m.id}/glossary.xml`))}">glossary entries to import</a>` : ''}</td></tr>`).join('')}</tbody></table></div>
+            <p style="margin-top:.8rem"><a class="btn" href="${esc(apiUrl(q))}">Download ${esc(d.file_name)} (${(d.size / 1048576).toFixed(1)} MB)</a></p>
+            <p class="muted">Restore it as usual: More › Course reuse › Restore › Merge into this course. Each module’s own build report and To do list are on its page here. The file holds exactly what each module’s own file would.</p>`;
+          announce('The file is ready to download.');
+        } catch (e) { msg.className = 'err'; msg.textContent = friendly(e); }
+      });
       $$('[data-open]', box).forEach((btn) => btn.addEventListener('click', () => openBuild(Number(btn.dataset.open))));
     } catch (e) { box.innerHTML = `<p class="err">${esc(friendly(e))}</p>`; }
   }
@@ -340,6 +367,9 @@
   const ALL_TABS = ['src', 'cp', 'acts', 'pages', 'todo', 'get'];
   const isReadings = () => build && build.kind === 'readings';
   const isRhizo = () => isReadings() && build.mode === 'rhizmode';
+  // A Word-draft module can take readings too; what was drafted from a reading is known by its slot having a role.
+  const hasReadings = () => Boolean(build && (build.kind === 'readings' || (build.readings || []).length));
+  let formFromReading = false;
   const actsTab = () => (isRhizo() ? 'Activities' : 'H5P activities');
   const isRhizoType = (t) => me.types.some((x) => x.id === t && x.asks);
   // Course pages: the overview, reading guides and takeaways drafted from the readings. They have their own tab.
@@ -349,7 +379,7 @@
   const isPageSlot = (s) => Boolean(s && (pageKind(s.role) || (!isRhizo() && rhizoKinds().some((k) => k.id === s.role))));
   const isPageAct = (a) => isPageSlot(build.slots.find((s) => s.n === a.n));
   const actSlots = () => build.slots.filter((s) => !isPageSlot(s));
-  const tabs = () => ALL_TABS.filter((t) => (t !== 'src' && t !== 'cp') || isReadings());
+  const tabs = () => ALL_TABS;
   function selectTab(name, focus) {
     ALL_TABS.forEach((t) => {
       const on = t === name;
@@ -377,8 +407,8 @@
     $('#pane-acts').innerHTML = '<p class="muted" style="margin-top:1rem">Loading…</p>';
     try {
       build = (await api('/api/builds/' + id)).build; pages = null;
-      $('#tab-src').hidden = !isReadings();
-      $('#tab-cp').hidden = !isReadings();
+      $('#tab-src').hidden = false;
+      $('#tab-cp').hidden = false;
       $('#tab-acts').textContent = actsTab();
       renderBuild();
       selectTab(isReadings() && !build.readings.length ? 'src' : 'acts');
@@ -436,7 +466,7 @@
     const pane = $('#pane-acts');
     renderCoursePages();
     // A practice module can ask for more kinds of practice activity from any of its readings.
-    const extraOffer = () => (!isReadings() || isRhizo() || !build.readings.length || !(me.extra_roles || []).length ? '' : `<div class="card"><h2>Draft another practice activity</h2>
+    const extraOffer = () => (!hasReadings() || isRhizo() || !build.readings.length || !(me.extra_roles || []).length ? '' : `<div class="card"><h2>Draft another practice activity</h2>
         <p class="muted">From one reading, on request. Each item rests on a sentence of the reading, checked like the questions above. If the reading does not suit the kind (too few defined terms for a crossword, no dated events for a timeline), nothing is drafted and the note says why.</p>
         <form id="extra-form"><label class="field" for="extra-reading">Reading
             <select id="extra-reading">${build.readings.map((r, i) => `<option value="${r.id}">${i + 1}. ${esc(r.title)}</option>`).join('')}</select></label>
@@ -477,7 +507,7 @@
   // ─── Course pages: the outline, and the pages drafted from the readings ───
   function renderCoursePages() {
     const pane = $('#pane-cp');
-    if (!isReadings()) { pane.innerHTML = ''; return; }
+    if (!hasReadings()) { pane.innerHTML = '<p class="empty" style="margin-top:1rem">Add a reading on the Readings tab first. An overview, reading guides, key takeaways, a discussion and an assignment are drafted from readings; a Word draft alone has its pages already.</p>'; return; }
     const typed = $('#outline-text') ? $('#outline-text').value : null;
     const kind = (id) => pageKind(id) || {};
     const has = build.readings.length > 0;
@@ -688,10 +718,10 @@
     const canApprove = spec && !a.problems.length && a.status !== 'approved';
     el.innerHTML = `<header><h3 id="act-h-${n}">${n}. ${inline(title)}</h3>
         ${spec ? `<span class="chip type">${esc(typeLabel(spec.type))}</span>` : ''}<span class="chip ${cls}">${esc(label)}</span></header>
-      <p class="muted where">${isRhizo() || isPageSlot(slot) ? esc(slot.type) : `${esc(slot.chapter)} › ${esc(slot.under)}${slot.type && !isReadings() ? ` · the draft asks for: ${esc(slot.type)}` : ''}`}</p>
-      <div class="cols"><div>${isReadings()
+      <p class="muted where">${isRhizo() || isPageSlot(slot) ? esc(slot.type) : `${esc(slot.chapter)} › ${esc(slot.under)}${slot.type && !slot.role ? ` · the draft asks for: ${esc(slot.type)}` : ''}`}</p>
+      <div class="cols"><div>${slot.role
         ? `<h4>${isPageSlot(slot) ? (slot.reading ? 'Passages from the reading' : slot.role === 'overview' || slot.role === 'assignment' ? 'From the outline and the readings' : 'Passages from the readings') : isRhizo() ? 'Passages from the reading' : 'Sentences from the reading'}</h4>${spec && spec.type === 'contract' ? '<p class="muted">None. The contract is about the student, not a passage; it draws on the readings only for what the module is about.</p>' : (a.quotes || []).length ? `<ul class="quotes">${a.quotes.map((q) => `<li><span class="lab">${esc(q.label)} · ${q.found ? `<span class="yes">found in the ${q.label.startsWith('Outcome') ? 'outline' : 'reading'}</span>` : `<span class="no">not found in the ${q.label.startsWith('Outcome') ? 'outline' : 'reading'}</span>`}</span>${q.quote ? '“' + esc(q.quote) + '”' : '<em>none given</em>'}</li>`).join('')}</ul>` : '<p class="muted">Nothing yet.</p>'}`
-        : `<h4>In the draft</h4><pre class="spec">${inline(slot.text)}</pre>`}</div><div><h4>${isReadings() ? 'What was drafted' : 'How it was read'}</h4>${right}</div></div>
+        : `<h4>In the draft</h4><pre class="spec">${inline(slot.text)}</pre>`}</div><div><h4>${slot.role ? 'What was drafted' : 'How it was read'}</h4>${right}</div></div>
       <div class="actions">
         ${a.status === 'pending' ? '' : `
         <button class="btn btn-small" type="button" data-do="approve" ${canApprove ? '' : 'disabled'}>${a.status === 'approved' ? 'Approved' : 'Approve'}</button>
@@ -730,7 +760,7 @@
       if (what === 'ask') {
         if (!spec) { run(() => api(`/api/builds/${build.id}/activities/${n}/reread`, { method: 'POST', body: {} }), 'Reading the specification again…'); return; }
         if (openPanel(btn, `<label class="field" for="ask-${n}">What should change?
-            <span class="hint">${isPageSlot(slot) ? 'Say it in your own words, for example “drop the third idea” or “say more about the second topic”. The page is drafted again with your note. Send it with the box empty to draft the page afresh.' : isRhizo() ? 'Say it in your own words, for example “swap the second passage for one about cost” or “make the questions shorter”. The activity is drafted again with your note.' : isReadings() ? 'Say it in your own words, for example “replace question 3 with one about hydrogen bonds” or “make the wrong answers harder”. The activity is drafted again with your note.' : 'Say it in your own words, for example “make this single choice” or “the third answer is also correct”. The specification is read again with your note.'}</span>
+            <span class="hint">${isPageSlot(slot) ? 'Say it in your own words, for example “drop the third idea” or “say more about the second topic”. The page is drafted again with your note. Send it with the box empty to draft the page afresh.' : isRhizo() ? 'Say it in your own words, for example “swap the second passage for one about cost” or “make the questions shorter”. The activity is drafted again with your note.' : slot.role ? 'Say it in your own words, for example “replace question 3 with one about hydrogen bonds” or “make the wrong answers harder”. The activity is drafted again with your note.' : 'Say it in your own words, for example “make this single choice” or “the third answer is also correct”. The specification is read again with your note.'}</span>
             <textarea id="ask-${n}"></textarea></label>
             <button class="btn btn-small" type="button" style="margin-top:.5rem" data-send>Read it again</button>`)) {
           $('#ask-' + n).focus();
@@ -846,6 +876,7 @@
           });
         }
       } else if (what === 'edit' && (H5P_FORMS[spec.type] || spec.type === 'questionset') && btn.dataset.json !== '1') {
+        formFromReading = Boolean(slot.role);
         if (openPanel(btn, `<div data-form><label class="field" for="hf-title-${n}">Title
               <input id="hf-title-${n}" data-k="title" data-kind="short" maxlength="200" value="${esc(String(spec.title || '').replace(/<[^>]+>/g, ''))}"></label>
             ${formHtml(spec.type, spec)}</div>
@@ -920,7 +951,7 @@
   const QUOTE_FIELD = ['text', 'source_quote', 'Supporting sentence from the reading', 'Copied from the reading exactly. Saving checks it is there.'];
   // In a module built from readings every item also carries the sentence it rests on.
   const withQuote = (fields, on) => (on ? [...fields, QUOTE_FIELD] : fields);
-  const rowFields = (type, key, sub) => withQuote(sub, isReadings() && ['cards', 'sets', 'words', 'events'].includes(key) && ['dialogcards', 'summary', 'crossword', 'timeline'].includes(type));
+  const rowFields = (type, key, sub) => withQuote(sub, formFromReading && ['cards', 'sets', 'words', 'events'].includes(key) && ['dialogcards', 'summary', 'crossword', 'timeline'].includes(type));
   let formSeq = 0;
 
   function fieldHtml(type, f, value, ctx) {
@@ -951,7 +982,7 @@
       const qs = spec.questions || [];
       return `<div data-list="questions" data-poly>${qs.map((q, i) => `<div class="trail" data-row data-type="${esc(q.type)}" data-orig="${esc(JSON.stringify(q))}">
           <p class="muted" style="margin:.5rem 0 0"><strong>Question ${i + 1} of ${qs.length}</strong> · ${esc(typeLabel(q.type))} · <label class="opt" style="display:inline"><input type="checkbox" data-drop> Remove this question</label></p>
-          ${withQuote(H5P_FORMS[q.type] || [], isReadings()).map((f) => fieldHtml(q.type, f, q[f[1]], { zones: [] })).join('')}</div>`).join('')}</div>
+          ${withQuote(H5P_FORMS[q.type] || [], formFromReading).map((f) => fieldHtml(q.type, f, q[f[1]], { zones: [] })).join('')}</div>`).join('')}</div>
         <p style="margin-top:.8rem"><label for="add-q-type">Add a question</label> <select id="add-q-type">${SET_TYPES.map((t) => `<option value="${t}">${esc(typeLabel(t))}</option>`).join('')}</select>
           <button class="btn btn-ghost btn-small" type="button" data-add-q>Add</button></p>
         <label class="opt"><input type="checkbox" data-k="check_at_end" data-kind="check" ${spec.check_at_end ? 'checked' : ''}> Check the answers at the end, not after each question</label>`;
@@ -995,9 +1026,8 @@
   function setBuild(b) { build = b; pages = null; renderBuild(); renderSources(); }
   function renderSources() {
     const pane = $('#pane-src');
-    if (!isReadings()) { pane.innerHTML = ''; return; }
     const keep = { url: $('#src-url')?.value || '', title: $('#src-title')?.value || '', text: $('#src-text')?.value || '' };
-    pane.innerHTML = `<div class="card"><h2>Add a reading</h2>
+    pane.innerHTML = `${isReadings() ? '' : '<p class="muted" style="margin-top:1rem">This module comes from a Word draft. A reading added here gets a page of its own after the draft’s pages, in the same Book, with practice questions, key terms and a reading guide drafted from it.</p>'}<div class="card"><h2>Add a reading</h2>
         <div class="add-grid">
           <form id="src-url-form"><h3>From the web</h3>
             <label class="field" for="src-url">Address of the page or chapter
@@ -1176,7 +1206,7 @@
             <label class="field" for="set-section">Section number
               <span class="hint">Which course section the module is filed under in the backup. When you restore into an existing course, Moodle merges it into the section with this number.</span>
               <input id="set-section" type="number" min="0" max="200" value="${esc(build.section_number)}" style="max-width:8rem"></label>
-            ${isReadings() && !isRhizo() ? `<fieldset class="modes"><legend>Where the practice questions go</legend>
+            ${hasReadings() && !isRhizo() ? `<fieldset class="modes"><legend>Where the practice questions go</legend>
               ${[['h5p', 'On each reading’s page', 'as an H5P question set. Not graded.'], ['quiz', 'In one Moodle Quiz for the module', 'with the questions in its question bank. Graded out of 10, unlimited attempts. Only question sets you have approved go in.'], ['both', 'Both', 'practice on the pages, then the Quiz.']]
                 .map(([v, label, hint]) => `<label class="opt"><input type="radio" name="set-questions" value="${v}" ${build.questions_as === v ? 'checked' : ''}> ${label} <span>· ${hint}</span></label>`).join('')}
             </fieldset>

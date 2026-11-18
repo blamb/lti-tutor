@@ -22,6 +22,7 @@ import { Builder, slug, specText, type FoundSlot } from './pages.js';
 import { ACTIVITY_TYPES as TYPES, LIB, checkActivity as check, librariesUsed, packageH5p } from './h5p.js';
 import { buildMbz } from './mbz.js';
 import { S, cmp, pad } from './py.js';
+import type { ModuleParts } from './combine.js';
 
 export interface Activity { n: number; type: string; title: string; interpretation?: string; [k: string]: unknown }
 export interface ModuleSpec {
@@ -47,6 +48,7 @@ export interface BuildResult {
   todo: string[];
   judgement: string[];          // judgement + dropped, as in the report
   forums?: { name: string; html: string }[];  // RhizMode: each discussion's first post
+  parts?: ModuleParts;                        // what went into the backup, for joining with other modules (combine.ts)
   glossaryXml?: string;                       // readings: the Glossary's entries, as a file for its Import entries page
   quiz?: { name: string; questions: number };   // readings: the module's Moodle Quiz, when one is built
 }
@@ -155,6 +157,7 @@ export function buildModule(docx: Uint8Array, spec: ModuleSpec, opts: BuildOptio
     chapters: b.chapters.map(toChapter), slots: b.slots.map(toSlot),
     h5p: packages, images: { ...b.files },
     counts: Object.fromEntries(rows), todo, judgement,
+    parts: { name: b.name, book: { name: b.name, chapters: b.chapters.map(toChapter), files }, forums: [], quizzes: [], glossaries: [], assignments: [] },
   };
 }
 

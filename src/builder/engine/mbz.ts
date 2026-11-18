@@ -51,14 +51,15 @@ const hex = (algorithm: 'sha1' | 'md5', data: Uint8Array | string): string => cr
 
 export interface MbzCourse { fullname: string; shortname: string }
 export interface MbzSection { name: string; summary?: string }
-export interface MbzBook { name: string; intro?: string; chapters: { title: string; html: string }[]; files: Record<string, Uint8Array> }
+/** `section`, on any activity: which section of the file it goes in. 0 (the default) is the first; 1 and up index `moreSections`. */
+export interface MbzBook { name: string; intro?: string; chapters: { title: string; html: string }[]; files: Record<string, Uint8Array>; section?: number }
 /**
  * A discussion forum of Moodle's "single simple discussion" type, ungraded. The
  * backup carries no posts (posts belong to users, and a backup without user
  * data has none); on restore Moodle starts the one discussion itself, with
  * `intro` as its first post.
  */
-export interface MbzForum { name: string; intro: string }
+export interface MbzForum { name: string; intro: string; section?: number }
 /**
  * One question for a Moodle Quiz. `text`, answer texts and feedback are HTML,
  * already safe to store. A multiple-choice question has exactly one correct
@@ -77,13 +78,13 @@ export interface MbzQuestion {
  * attempts, highest grade, one question to a page, answers shuffled, the
  * standard review options. It has a grade item (out of `grade`, default 10).
  */
-export interface MbzQuiz { name: string; intro: string; questions: MbzQuestion[]; grade?: number }
+export interface MbzQuiz { name: string; intro: string; questions: MbzQuestion[]; grade?: number; section?: number }
 /**
  * An empty Glossary. Moodle treats glossary entries as user data and restores
  * them only for someone allowed to restore user data (site managers), so the
  * entries travel separately, as a glossary import file (glossaryImportXml).
  */
-export interface MbzGlossary { name: string; intro: string }
+export interface MbzGlossary { name: string; intro: string; section?: number }
 /**
  * An Assignment: online text and up to three files, one attempt, feedback
  * comments on, marked out of `grade` (default 100). With a rubric, advanced
@@ -91,10 +92,12 @@ export interface MbzGlossary { name: string; intro: string }
  * and Moodle scales the total to the grade.
  */
 export interface MbzRubric { name: string; criteria: { description: string; levels: { score: number; definition: string }[] }[] }
-export interface MbzAssign { name: string; intro: string; grade?: number; rubric?: MbzRubric }
+export interface MbzAssign { name: string; intro: string; grade?: number; rubric?: MbzRubric; section?: number }
 export interface MbzOptions {
   hidden?: boolean; sectionNumber?: number; now?: number;
   forums?: MbzForum[]; quizzes?: MbzQuiz[]; glossaries?: MbzGlossary[]; assignments?: MbzAssign[];
+  /** Sections after the first, for a file that holds several modules. They take the section numbers that follow `sectionNumber`. */
+  moreSections?: MbzSection[];
 }
 
 /** The course-module id book number n (from 0) gets in the backup, and its chapter ids: for links between activities. */
@@ -105,9 +108,9 @@ export const forumCmid = (i: number): number => 9351 + i;
 /** A link to a forum, or to one page of a book, in the form Moodle rewrites on restore. */
 export const forumLink = (i: number): string => `$@FORUMVIEWBYID*${forumCmid(i)}@$`;
 /** The course-module ids quiz and glossary number i (from 0) get in the backup, and links to them. */
-export const quizCmid = (i: number): number => 9801 + i;
-export const glossaryCmid = (i: number): number => 9831 + i;
-export const assignCmid = (i: number): number => 9871 + i;
+export const quizCmid = (i: number): number => 10001 + i;
+export const glossaryCmid = (i: number): number => 12001 + i;
+export const assignCmid = (i: number): number => 11001 + i;
 export const assignLink = (i: number): string => `$@ASSIGNVIEWBYID*${assignCmid(i)}@$`;
 export const quizLink = (i: number): string => `$@QUIZVIEWBYID*${quizCmid(i)}@$`;
 export const glossaryLink = (i: number): string => `$@GLOSSARYVIEWBYID*${glossaryCmid(i)}@$`;
@@ -141,9 +144,17 @@ export function buildMbz(fileName: string, course: MbzCourse, section: MbzSectio
   const general_id = 9200;
 
   if (books.length > 50) throw new Error('Too many books for one backup');
-  const activities: [number, string, string, string][] = [];
-  const module_xml = (cmid: number, modname: string): string => HEAD + raw('module', [
-    x('modulename', modname), x('sectionid', section_id), x('sectionnumber', section_number), x('idnumber', ''),
+  const activities: [number, string, string, string, number][] = [];
+  const all_sections: MbzSection[] = [section, ...(opts.moreSections ?? [])];
+  if (all_sections.length > 40) throw new Error('Too many sections for one backup');
+  const sid_of = (k: number): number => section_id + k;
+  const sec_of = (item: { section?: number }): number => {
+    const k = item.section ?? 0;
+    if (!Number.isInteger(k) || k < 0 || k >= all_sections.length) throw new Error(`No section ${k} in this backup`);
+    return k;
+  };
+  const module_xml = (cmid: number, modname: string, k = 0): string => HEAD + raw('module', [
+    x('modulename', modname), x('sectionid', sid_of(k)), x('sectionnumber', section_number + k), x('idnumber', ''),
     x('added', now), x('score', 0), x('indent', 0), x('visible', hidden ? 0 : 1), x('visibleoncoursepage', 1),
     x('visibleold', hidden ? 0 : 1), x('groupmode', 0), x('groupingid', 0), x('completion', 0),
     x('completiongradeitemnumber', NULL), x('completionpassgrade', 0), x('completionview', 0),
@@ -192,10 +203,10 @@ export function buildMbz(fileName: string, course: MbzCourse, section: MbzSectio
       x('navstyle', 1), x('customtitles', 0), x('timecreated', now), x('timemodified', now),
       raw('chapters', chapters_xml), raw('chaptertags')].join(''), { id: book_id }),
       { id: book_id, moduleid: cmid, modulename: 'book', contextid: ctx }));
-    files.set(folder + '/module.xml', module_xml(cmid, 'book'));
+    files.set(folder + '/module.xml', module_xml(cmid, 'book', sec_of(book)));
     files.set(folder + '/inforef.xml', HEAD + raw('inforef', raw('fileref', file_ids.map((f) => raw('file', x('id', f))).join(''))));
     common_files(folder);
-    activities.push([cmid, book.name, folder, 'book']);
+    activities.push([cmid, book.name, folder, 'book', sec_of(book)]);
   });
 
   (opts.forums ?? []).forEach((forum, i) => {
@@ -211,10 +222,10 @@ export function buildMbz(fileName: string, course: MbzCourse, section: MbzSectio
       x('completiondiscussions', 0), x('completionreplies', 0), x('completionposts', 0), x('displaywordcount', 0),
       x('lockdiscussionafter', 0), x('grade_forum', 0), raw('discussions')].join(''), { id: forum_id }),
       { id: forum_id, moduleid: cmid, modulename: 'forum', contextid: ctx }));
-    files.set(folder + '/module.xml', module_xml(cmid, 'forum'));
+    files.set(folder + '/module.xml', module_xml(cmid, 'forum', sec_of(forum)));
     files.set(folder + '/inforef.xml', HEAD + raw('inforef'));
     common_files(folder);
-    activities.push([cmid, forum.name, folder, 'forum']);
+    activities.push([cmid, forum.name, folder, 'forum', sec_of(forum)]);
   });
 
   // Quizzes. The fields are those Moodle 5.0 writes for a quiz and its question bank, in its order.
@@ -223,8 +234,8 @@ export function buildMbz(fileName: string, course: MbzCourse, section: MbzSectio
   const f5 = (n: number): string => n.toFixed(5);
   let next_question = 97001, next_answer = 980001, next_slot = 96001;
   (opts.quizzes ?? []).forEach((quiz, i) => {
-    if (i >= 5) throw new Error('Too many quizzes for one backup');
-    const cmid = quizCmid(i), quiz_id = 9811 + i, ctx = 9821 + i, top = 9701 + 2 * i, cat = top + 1, grade_item = 9861 + i;
+    if (i >= 50) throw new Error('Too many quizzes for one backup');
+    const cmid = quizCmid(i), quiz_id = 10101 + i, ctx = 10201 + i, top = 10301 + 2 * i, cat = top + 1, grade_item = 10501 + i;
     const folder = `activities/quiz_${cmid}`;
     const grade = quiz.grade ?? 10;
     // A stamp is how Moodle recognises a question it already has. These differ on every build, so a second restore adds its own copy.
@@ -288,7 +299,7 @@ export function buildMbz(fileName: string, course: MbzCourse, section: MbzSectio
       raw('sections', raw('section', x('firstslot', 1) + x('heading', '') + x('shufflequestions', 0), { id: quiz_id })),
       raw('feedbacks'), raw('overrides'), raw('grades'), raw('attempts')].join(''), { id: quiz_id }),
       { id: quiz_id, moduleid: cmid, modulename: 'quiz', contextid: ctx }));
-    files.set(folder + '/module.xml', module_xml(cmid, 'quiz'));
+    files.set(folder + '/module.xml', module_xml(cmid, 'quiz', sec_of(quiz)));
     files.set(folder + '/inforef.xml', HEAD + raw('inforef', raw('grade_itemref', raw('grade_item', x('id', grade_item)))
       + raw('question_categoryref', raw('question_category', x('id', top)) + raw('question_category', x('id', cat)))));
     common_files(folder, raw('grade_item', [
@@ -298,14 +309,14 @@ export function buildMbz(fileName: string, course: MbzCourse, section: MbzSectio
       x('aggregationcoef', f5(0)), x('aggregationcoef2', f5(0)), x('weightoverride', 0), x('sortorder', 1), x('display', 0), x('decimals', NULL),
       x('hidden', 0), x('locked', 0), x('locktime', 0), x('needsupdate', 0), x('timecreated', now), x('timemodified', now),
       raw('grade_grades')].join(''), { id: grade_item }));
-    activities.push([cmid, quiz.name, folder, 'quiz']);
+    activities.push([cmid, quiz.name, folder, 'quiz', sec_of(quiz)]);
   });
 
   // Assignments, with a rubric when one is given. Field lists as Moodle 5.0 writes them.
   let next_criterion = 99001, next_level = 990001;
   (opts.assignments ?? []).forEach((assign, i) => {
-    if (i >= 5) throw new Error('Too many assignments for one backup');
-    const cmid = assignCmid(i), assign_id = 9881 + i, ctx = 9891 + i, grade_item = 9895 + i;
+    if (i >= 50) throw new Error('Too many assignments for one backup');
+    const cmid = assignCmid(i), assign_id = 11101 + i, ctx = 11201 + i, grade_item = 11301 + i;
     const folder = `activities/assign_${cmid}`;
     const grade = assign.grade ?? 100;
     const configs: [string, string, string, Value][] = [
@@ -337,9 +348,9 @@ export function buildMbz(fileName: string, course: MbzCourse, section: MbzSectio
           x('method', 'rubric'), x('name', assign.rubric.name), x('description', ''), x('descriptionformat', 1), x('status', 20),
           x('timecreated', now), x('timemodified', now),
           x('options', '{"sortlevelsasc":1,"lockzeropoints":1,"alwaysshowdefinition":1,"showdescriptionteacher":1,"showdescriptionstudent":1,"showscoreteacher":1,"showscorestudent":1,"enableremarks":1,"showremarksstudent":1}'),
-          raw('plugin_gradingform_rubric_definition', raw('criteria', criteria)), raw('instances')].join(''), { id: 9911 + i }))].join(''), { id: 9901 + i })));
+          raw('plugin_gradingform_rubric_definition', raw('criteria', criteria)), raw('instances')].join(''), { id: 11501 + i }))].join(''), { id: 11401 + i })));
     }
-    files.set(folder + '/module.xml', module_xml(cmid, 'assign'));
+    files.set(folder + '/module.xml', module_xml(cmid, 'assign', sec_of(assign)));
     files.set(folder + '/inforef.xml', HEAD + raw('inforef', raw('grade_itemref', raw('grade_item', x('id', grade_item)))));
     common_files(folder, raw('grade_item', [
       x('categoryid', NULL), x('itemname', assign.name), x('itemtype', 'mod'), x('itemmodule', 'assign'), x('iteminstance', assign_id),
@@ -348,12 +359,12 @@ export function buildMbz(fileName: string, course: MbzCourse, section: MbzSectio
       x('aggregationcoef', f5(0)), x('aggregationcoef2', f5(0)), x('weightoverride', 0), x('sortorder', 1), x('display', 0), x('decimals', NULL),
       x('hidden', 0), x('locked', 0), x('locktime', 0), x('needsupdate', 0), x('timecreated', now), x('timemodified', now),
       raw('grade_grades')].join(''), { id: grade_item }));
-    activities.push([cmid, assign.name, folder, 'assign']);
+    activities.push([cmid, assign.name, folder, 'assign', sec_of(assign)]);
   });
 
   (opts.glossaries ?? []).forEach((glossary, i) => {
-    if (i >= 5) throw new Error('Too many glossaries for one backup');
-    const cmid = glossaryCmid(i), glossary_id = 9841 + i, ctx = 9851 + i;
+    if (i >= 50) throw new Error('Too many glossaries for one backup');
+    const cmid = glossaryCmid(i), glossary_id = 12101 + i, ctx = 12201 + i;
     const folder = `activities/glossary_${cmid}`;
     files.set(folder + '/glossary.xml', HEAD + raw('activity', raw('glossary', [
       x('name', glossary.name), x('intro', glossary.intro), x('introformat', 1), x('allowduplicatedentries', 0), x('displayformat', 'dictionary'),
@@ -362,10 +373,10 @@ export function buildMbz(fileName: string, course: MbzCourse, section: MbzSectio
       x('rssarticles', 0), x('assessed', 0), x('assesstimestart', 0), x('assesstimefinish', 0), x('scale', 0), x('timecreated', now),
       x('timemodified', now), x('completionentries', 0), raw('entries'), raw('entriestags'), raw('categories')].join(''), { id: glossary_id }),
       { id: glossary_id, moduleid: cmid, modulename: 'glossary', contextid: ctx }));
-    files.set(folder + '/module.xml', module_xml(cmid, 'glossary'));
+    files.set(folder + '/module.xml', module_xml(cmid, 'glossary', sec_of(glossary)));
     files.set(folder + '/inforef.xml', HEAD + raw('inforef'));
     common_files(folder);
-    activities.push([cmid, glossary.name, folder, 'glossary']);
+    activities.push([cmid, glossary.name, folder, 'glossary', sec_of(glossary)]);
   });
 
   const section_xml = (sid: number, number: number, name: string, summary: string, seq: string): string =>
@@ -373,10 +384,12 @@ export function buildMbz(fileName: string, course: MbzCourse, section: MbzSectio
       x('number', number), x('name', name), x('summary', summary), x('summaryformat', 1), x('sequence', seq),
       x('visible', 1), x('availabilityjson', NULL), x('component', NULL), x('itemid', NULL),
       x('timemodified', now)].join(''), { id: sid });
-  const sections: [number, string][] = [[section_id, section.name]];
-  files.set(`sections/section_${section_id}/section.xml`, section_xml(
-    section_id, section_number, section.name, section.summary ?? '', activities.map((a) => String(a[0])).join(',')));
-  files.set(`sections/section_${section_id}/inforef.xml`, HEAD + raw('inforef'));
+  const sections: [number, string][] = all_sections.map((sec, k) => [sid_of(k), sec.name]);
+  all_sections.forEach((sec, k) => {
+    files.set(`sections/section_${sid_of(k)}/section.xml`, section_xml(
+      sid_of(k), section_number + k, sec.name, sec.summary ?? '', activities.filter((a) => a[4] === k).map((a) => String(a[0])).join(',')));
+    files.set(`sections/section_${sid_of(k)}/inforef.xml`, HEAD + raw('inforef'));
+  });
   if (section_number !== 0) {
     sections.unshift([general_id, 'General']);
     files.set(`sections/section_${general_id}/section.xml`, section_xml(general_id, 0, NULL, '', ''));
@@ -432,8 +445,8 @@ export function buildMbz(fileName: string, course: MbzCourse, section: MbzSectio
         + x('name', `${modname}_${cmid}_${suffix}`) + x('value', v));
     }
   }
-  let contents = raw('activities', activities.map(([cmid, title, folder, modname]) => raw('activity', [
-    x('moduleid', cmid), x('sectionid', section_id), x('modulename', modname), x('title', title),
+  let contents = raw('activities', activities.map(([cmid, title, folder, modname, k]) => raw('activity', [
+    x('moduleid', cmid), x('sectionid', sid_of(k)), x('modulename', modname), x('title', title),
     x('directory', folder), x('insubsection', '')].join(''))).join(''));
   contents += raw('sections', sections.map(([sid, title]) => raw('section', [
     x('sectionid', sid), x('title', title), x('directory', `sections/section_${sid}`), x('parentcmid', ''),

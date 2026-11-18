@@ -217,6 +217,20 @@ Checked locally: a question edited and another removed in a question set, and a 
 
 The home page was rewritten the same day to say what the tool now builds, with readings first.
 
+## Readings in a Word-draft module, and several modules in one file (17 Nov 2026)
+
+**Readings in a Word-draft module.** A module that started from a Word draft now has the Readings and Course content tabs too. A reading added there gets a page of its own after the draft's pages, in the same Book, with practice questions, key terms and a reading guide drafted from it, and everything else a readings module can have: the overview, takeaways, a discussion, an assignment, a Quiz, a Glossary, a RhizMode discussion. The two halves keep their own rules. A specification read from the draft is shown beside the author's wording and built in the author's words; an activity drafted from a reading is shown beside the sentence it rests on and checked against it. The build report has the draft's report first and the readings' report after it.
+
+How it is built: the draft and the readings are built separately, as before, and each hands back the parts it would have put in a backup (`BuildResult.parts`). `joinPages` in `engine/combine.ts` puts the readings' pages after the draft's and rewrites the readings' links to their own pages, which have moved down. A Word-draft module with no readings takes the old path unchanged.
+
+**Several modules in one file.** On the home page, under the list of modules, the designer ticks two or more, gives a first section number, and gets one restore file. Each module goes into its own course section, named after the module, in the order ticked; one restore brings them all in, hidden. The file holds exactly what each module's own file would. Each module keeps its own build report and To do list, and a module with a Glossary still needs its entries imported from its own file (the list links to it).
+
+How it is built: `buildCourseFile` in `engine/combine.ts` gives each module the next Book number and the next forum, quiz, glossary and assignment numbers, rewrites every link between activities to match, and writes one backup with several sections (`MbzOptions.moreSections`, and a `section` on each activity). The ids of quizzes, assignments and glossaries were renumbered to leave room for fifty of each in a file; a file holds at most 30 modules.
+
+Restoring by "Merge into this course" puts section N of the file into section N of the course, alongside whatever is already there, and names the section only if it had no name. So the first section number should be the first free section, or the sections the modules are meant for.
+
+Tested locally: a pasted reading added to the COMP 2131 Module 8 draft (16 specifications, 11 pages) gave a twelfth page with its three drafts, all 18 supporting sentences found, and the 16 Word activities unchanged. That module, a readings module with two forums, an assignment and a glossary, and a second readings module were built into one file starting at section 2 and restored into Moodle 5.0.1: three sections, each named after its module and holding its own activities, three Books of 12, 4 and 2 pages, no link left undecoded, and all ten links between pages pointing inside their own Book. The Word-plus-reading module's own file restored as one Book of 12 pages. Not yet tested: a merge into a course that already has content in those sections, a course file on moodbox, RhizMode in a Word-draft module, and a file of many modules.
+
 ## Why a restore file
 
 LTI can add links to a course but not pages, Books or H5P activities, and Moodle's core web services cannot create activities. A backup file is the one route that works on a stock Moodle with no plugin and no administrator action: any editing teacher can restore it.
@@ -253,6 +267,5 @@ Not yet tested: a real LTI launch from Moodle (the launch and session code is th
 
 - The page rules were written against one real draft (COMP 2131 Module 8). A second team's notes will use other wording; anything unrecognised is left visible on the page and listed in the report, and the fix is a new rule.
 - The page preview is plain: no Moodle theme and no icons.
-- One module per file. A whole course is several uploads and several restores.
-- A module is either a Word draft or a set of readings. Adding readings to a Word-draft module is not built yet.
+- A course file joins modules that already exist; an outline does not yet lay out a whole course by itself.
 - Not yet checked with a screen reader, or in the Moodle mobile app.
