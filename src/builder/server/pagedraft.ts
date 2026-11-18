@@ -16,11 +16,11 @@ import { jsonCall } from '../../core/llm.js';
 import type { Attribution } from '../../core/costs.js';
 import type { Activity } from '../engine/index.js';
 import { checkDrafted, type Reading } from '../engine/reading.js';
-import { PAGE_KINDS } from '../engine/coursepage.js';
+import { PAGE_KINDS, RUBRIC_LEVELS } from '../engine/coursepage.js';
 import { env } from './env.js';
 
-export type PageRole = 'overview' | 'guide' | 'takeaways';
-export const PAGE_ROLES: PageRole[] = ['overview', 'guide', 'takeaways'];
+export type PageRole = 'overview' | 'guide' | 'takeaways' | 'discussion' | 'assignment';
+export const PAGE_ROLES: PageRole[] = ['overview', 'guide', 'takeaways', 'discussion', 'assignment'];
 export const isPageRole = (role: string): role is PageRole => (PAGE_ROLES as string[]).includes(role);
 
 /** One reading sent whole for its guide, up to this many characters. */
@@ -101,9 +101,67 @@ Return { "interpretation", "points": [ ... ] }.
 Do not introduce the list and do not sum it up.
 
 ${RULES}`,
+
+  discussion: `You draft the opening prompt of one discussion forum for a module in a university course. Students post an answer and reply to each other. It is not graded. A course designer reads every word and approves it before students see it.
+
+# What the prompt is for
+A good discussion prompt gives students something specific to respond to and room to answer differently from each other. It starts from particular places in the readings, and asks for a view, an application or a comparison that the readings inform but do not settle. A question with one right answer makes a poor discussion, because the second student has nothing left to say.
+
+${OUTLINE_USE}
+
+# What to write
+Return { "interpretation", "prompt", "passages": [ ... ] }.
+
+"prompt": two to four sentences to the student that set up the discussion: what the readings raise, and the main question you are asking them to answer from their own reasoning or experience. One main question, not a list.
+
+"passages": one to three places in the readings the discussion starts from, in the order the readings appear. Each is { "passage", "question" }: "question" is one question to the student about that passage, which the passage raises and does not answer. Students should be able to answer it having done the readings, without outside research.
+
+Do not tell students how to post or reply, how long to write, or that it is ungraded: fixed wording under the prompt does that.
+
+${RULES}`,
+
+  assignment: `You draft one assignment for a module in a university course: the task, what students hand in, suggested steps and a marking rubric. It will be graded by an instructor. A course designer and the instructor read every word and approve it before students see it, and they will adjust it to the course.
+
+# What the assignment is for
+It asks students to use what the module's readings say, not to repeat it: to apply an idea to a case, compare two positions, or explain something to a particular audience. A student should not be able to do it without the readings, and should not need sources beyond them unless the outline says the course expects that.
+
+${OUTLINE_USE} If the outline describes an assignment for this module, draft that assignment and keep to what the outline says about it.
+
+# What to write
+Return { "interpretation", "task", "deliverable", "steps": [ ... ], "passages": [ ... ], "rubric": [ ... ] }.
+
+"task": two to five sentences to the student saying what they are to do and why it matters for this module.
+
+"deliverable": one to three sentences saying what they hand in: its form and a sensible length. No due date, no marks, no weighting, no late policy and no citation style unless the outline gives one for this assignment.
+
+"steps": two to five short suggested steps, each a sentence.
+
+"passages": one to three places in the readings the student should draw on, each { "passage", "why" }: "why" is one sentence saying what to use it for.
+
+"rubric": the marking criteria, and only where the outline supports them. If a course outline is given and it lists learning outcomes, write three to five criteria, each { "criterion", "outcome", "levels" }:
+- "criterion": a name of two to six words for one thing the work is marked on.
+- "outcome": the learning outcome from the outline that this criterion assesses, copied word for word, without its number or bullet. A program checks it against the outline, and a reworded or invented outcome is rejected. Use only outcomes this task really lets a student show; two criteria may share an outcome.
+- "levels": exactly ${RUBRIC_LEVELS.length} strings, best first (${RUBRIC_LEVELS.map((l) => l.label).join(', ')}). Each is one sentence describing what work at that level looks like for this criterion, in terms an instructor can see in the work. Describe the work, not the student. The lowest level describes work that does not yet do the thing, without scorn.
+With no outline, or an outline with no learning outcomes, return an empty "rubric" array and say so in "interpretation". Never write an outcome yourself.
+
+${RULES}`,
 };
 
 const Passage = z.string().min(1);
+const Discussion = z.object({
+  interpretation: z.string(),
+  prompt: z.string(),
+  passages: z.array(z.object({ passage: Passage, question: z.string().min(1) })).max(4),
+});
+const Assignment = z.object({
+  interpretation: z.string(),
+  task: z.string(),
+  deliverable: z.string(),
+  steps: z.array(z.string().min(1)).max(6).default([]),
+  passages: z.array(z.object({ passage: Passage, why: z.string() })).max(4).default([]),
+  rubric: z.array(z.object({ criterion: z.string().min(1), outcome: z.string().min(1), levels: z.array(z.string().min(1)).length(RUBRIC_LEVELS.length) })).max(6).default([]),
+});
+
 const Guide = z.object({
   interpretation: z.string(),
   why: z.string(),
@@ -167,15 +225,20 @@ export async function draftPage(input: PageDraftInput, attribution: Attribution,
   material += cutOutline
     ? `\n\nThe course outline:\n\n<outline>\n${cutOutline}\n</outline>`
     : '\n\nNo course outline was given.';
+  if (role === 'assignment' && !cutOutline) notes.push('No course outline was given, so the assignment has no rubric: criteria are only written against learning outcomes copied from the outline. Add the outline and draft the assignment again for one.');
   if (role === 'overview' && !cutOutline) notes.push('No course outline was given, so the page has no learning outcomes. Add the outline on the Course pages tab and draft the overview again to include them.');
 
   const ask = async (extra: string, endpoint: string): Promise<Record<string, unknown>> => {
-    const common = { system: SYSTEM[role], userPrompt: material + extra, maxTokens: 5000, effort: 'medium' as const, attribution, endpoint, model: env.BUILDER_MODEL, promptOnly: true, preprocess: dropNulls };
+    const common = { system: SYSTEM[role], userPrompt: material + extra, maxTokens: role === 'assignment' ? 7000 : 5000, effort: 'medium' as const, attribution, endpoint, model: env.BUILDER_MODEL, promptOnly: true, preprocess: dropNulls };
     if (role === 'guide') return await jsonCall({ ...common, schema: Guide });
+    if (role === 'discussion') return await jsonCall({ ...common, schema: Discussion });
+    if (role === 'assignment') return await jsonCall({ ...common, schema: Assignment });
     return role === 'overview' ? await jsonCall({ ...common, schema: Overview }) : await jsonCall({ ...common, schema: Takeaways });
   };
   const bodyOf = (r: Record<string, unknown>): Record<string, unknown> =>
     role === 'guide' ? { why: r.why, points: r.points, questions: r.questions }
+      : role === 'discussion' ? { prompt: r.prompt, passages: r.passages }
+      : role === 'assignment' ? { task: r.task, deliverable: r.deliverable, steps: r.steps, passages: r.passages, rubric: r.rubric }
       : role === 'overview' ? { intro: r.intro, outcomes: r.outcomes, covers: r.covers }
         : { points: r.points };
   const title = role === 'guide' ? `${PAGE_KINDS.guide!.title}: ${input.reading!.title}` : `${PAGE_KINDS[role]!.title}: ${moduleName}`;
@@ -183,7 +246,7 @@ export async function draftPage(input: PageDraftInput, attribution: Attribution,
     n, type: role, title: title.slice(0, 120), interpretation: [String(r.interpretation ?? '').trim(), ...notes].filter(Boolean).join(' '),
     reading: role === 'guide' ? input.reading!.id : 0, ...bodyOf(r),
   } as Activity);
-  const check = (spec: Activity): string[] => checkDrafted(spec, source, role === 'overview' ? outline : '');
+  const check = (spec: Activity): string[] => checkDrafted(spec, source, role === 'overview' || role === 'assignment' ? outline : '');
 
   let extra = '';
   if (change) {

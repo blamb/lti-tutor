@@ -59,7 +59,43 @@ export interface MbzBook { name: string; intro?: string; chapters: { title: stri
  * `intro` as its first post.
  */
 export interface MbzForum { name: string; intro: string }
-export interface MbzOptions { hidden?: boolean; sectionNumber?: number; now?: number; forums?: MbzForum[] }
+/**
+ * One question for a Moodle Quiz. `text`, answer texts and feedback are HTML,
+ * already safe to store. A multiple-choice question has exactly one correct
+ * answer; a true/false question says which is right and explains it once.
+ */
+export interface MbzQuestion {
+  type: 'multichoice' | 'truefalse';
+  name: string;
+  text: string;
+  answers?: { text: string; correct: boolean; feedback: string }[];
+  correct?: boolean;
+  feedback?: string;
+}
+/**
+ * A Quiz with its questions in the quiz's own question bank. Unlimited
+ * attempts, highest grade, one question to a page, answers shuffled, the
+ * standard review options. It has a grade item (out of `grade`, default 10).
+ */
+export interface MbzQuiz { name: string; intro: string; questions: MbzQuestion[]; grade?: number }
+/**
+ * An empty Glossary. Moodle treats glossary entries as user data and restores
+ * them only for someone allowed to restore user data (site managers), so the
+ * entries travel separately, as a glossary import file (glossaryImportXml).
+ */
+export interface MbzGlossary { name: string; intro: string }
+/**
+ * An Assignment: online text and up to three files, one attempt, feedback
+ * comments on, marked out of `grade` (default 100). With a rubric, advanced
+ * grading is set to it and it is ready to use; level scores are per criterion
+ * and Moodle scales the total to the grade.
+ */
+export interface MbzRubric { name: string; criteria: { description: string; levels: { score: number; definition: string }[] }[] }
+export interface MbzAssign { name: string; intro: string; grade?: number; rubric?: MbzRubric }
+export interface MbzOptions {
+  hidden?: boolean; sectionNumber?: number; now?: number;
+  forums?: MbzForum[]; quizzes?: MbzQuiz[]; glossaries?: MbzGlossary[]; assignments?: MbzAssign[];
+}
 
 /** The course-module id book number n (from 0) gets in the backup, and its chapter ids: for links between activities. */
 export const bookCmid = (n: number): number => 9301 + n;
@@ -68,6 +104,24 @@ export const chapterId = (n: number, page: number): number => 9601 + n * 500 + p
 export const forumCmid = (i: number): number => 9351 + i;
 /** A link to a forum, or to one page of a book, in the form Moodle rewrites on restore. */
 export const forumLink = (i: number): string => `$@FORUMVIEWBYID*${forumCmid(i)}@$`;
+/** The course-module ids quiz and glossary number i (from 0) get in the backup, and links to them. */
+export const quizCmid = (i: number): number => 9801 + i;
+export const glossaryCmid = (i: number): number => 9831 + i;
+export const assignCmid = (i: number): number => 9871 + i;
+export const assignLink = (i: number): string => `$@ASSIGNVIEWBYID*${assignCmid(i)}@$`;
+export const quizLink = (i: number): string => `$@QUIZVIEWBYID*${quizCmid(i)}@$`;
+export const glossaryLink = (i: number): string => `$@GLOSSARYVIEWBYID*${glossaryCmid(i)}@$`;
+
+/** A file for a Glossary's own "Import entries" page: the terms and their definitions (HTML). */
+export function glossaryImportXml(name: string, entries: { concept: string; definition: string }[]): string {
+  return HEAD + raw('GLOSSARY', raw('INFO', [
+    x('NAME', name), x('INTRO', ''), x('INTROFORMAT', 1), x('ALLOWDUPLICATEDENTRIES', 0), x('DISPLAYFORMAT', 'dictionary'),
+    x('SHOWSPECIAL', 1), x('SHOWALPHABET', 1), x('SHOWALL', 1), x('ALLOWCOMMENTS', 0), x('USEDYNALINK', 1),
+    x('DEFAULTAPPROVAL', 1), x('GLOBALGLOSSARY', 0), x('ENTBYPAGE', 10),
+    raw('ENTRIES', entries.map((e) => raw('ENTRY', [
+      x('CONCEPT', e.concept), x('DEFINITION', e.definition), x('FORMAT', 1), x('USEDYNALINK', 1), x('CASESENSITIVE', 0),
+      x('FULLMATCH', 0), x('TEACHERENTRY', 1)].join(''))).join(''))].join('')));
+}
 export const bookPageLink = (n: number, page: number): string => `$@BOOKVIEWBYIDCH*${bookCmid(n)}*${chapterId(n, page)}@$`;
 export interface MbzResult { mbz: Uint8Array; files: number; entries: number }
 
@@ -95,8 +149,8 @@ export function buildMbz(fileName: string, course: MbzCourse, section: MbzSectio
     x('completiongradeitemnumber', NULL), x('completionpassgrade', 0), x('completionview', 0),
     x('completionexpected', 0), x('availability', NULL), x('showdescription', 0), x('downloadcontent', 1),
     x('lang', NULL), raw('tags')].join(''), { id: cmid, version: MOODLE_VERSION });
-  const common_files = (folder: string): void => {
-    files.set(folder + '/grades.xml', HEAD + raw('activity_gradebook', raw('grade_items') + raw('grade_letters')));
+  const common_files = (folder: string, gradeItems = ''): void => {
+    files.set(folder + '/grades.xml', HEAD + raw('activity_gradebook', raw('grade_items', gradeItems) + raw('grade_letters')));
     files.set(folder + '/roles.xml', HEAD + raw('roles', raw('role_overrides') + raw('role_assignments')));
     files.set(folder + '/filters.xml', HEAD + raw('filters', raw('filter_actives') + raw('filter_configs')));
     files.set(folder + '/calendar.xml', HEAD + raw('events'));
@@ -163,6 +217,157 @@ export function buildMbz(fileName: string, course: MbzCourse, section: MbzSectio
     activities.push([cmid, forum.name, folder, 'forum']);
   });
 
+  // Quizzes. The fields are those Moodle 5.0 writes for a quiz and its question bank, in its order.
+  let question_categories = '';
+  const f7 = (n: number): string => n.toFixed(7);
+  const f5 = (n: number): string => n.toFixed(5);
+  let next_question = 97001, next_answer = 980001, next_slot = 96001;
+  (opts.quizzes ?? []).forEach((quiz, i) => {
+    if (i >= 5) throw new Error('Too many quizzes for one backup');
+    const cmid = quizCmid(i), quiz_id = 9811 + i, ctx = 9821 + i, top = 9701 + 2 * i, cat = top + 1, grade_item = 9861 + i;
+    const folder = `activities/quiz_${cmid}`;
+    const grade = quiz.grade ?? 10;
+    // A stamp is how Moodle recognises a question it already has. These differ on every build, so a second restore adds its own copy.
+    const stamp = (what: string): string => `module-builder.invalid+${now}+${hex('md5', `${now}:${fileName}:${i}:${what}`).slice(0, 12)}`;
+    const category = (id: number, name: string, info: string, parent: number, sortorder: number, entries: string): string => raw('question_category', [
+      x('name', name), x('contextid', ctx), x('contextlevel', 70), x('contextinstanceid', cmid), x('info', info), x('infoformat', 0),
+      x('stamp', stamp('cat' + id)), x('parent', parent), x('sortorder', sortorder), x('idnumber', NULL),
+      raw('question_bank_entries', entries)].join(''), { id });
+    let entries = '', slots = '';
+    quiz.questions.forEach((q, k) => {
+      const qid = next_question++;
+      const answer = (text: string, format: number, right: boolean, feedback: string): [number, string] => {
+        const aid = next_answer++;
+        return [aid, raw('answer', [x('answertext', text), x('answerformat', format), x('fraction', f7(right ? 1 : 0)),
+          x('feedback', feedback), x('feedbackformat', 1)].join(''), { id: aid })];
+      };
+      let plugin: string;
+      if (q.type === 'truefalse') {
+        const t = answer('True', 0, q.correct === true, q.feedback ?? ''), f = answer('False', 0, q.correct !== true, q.feedback ?? '');
+        plugin = raw('plugin_qtype_truefalse_question', raw('answers', t[1] + f[1])
+          + raw('truefalse', x('trueanswer', t[0]) + x('falseanswer', f[0]) + x('showstandardinstruction', 0), { id: qid }));
+      } else {
+        const answers = q.answers ?? [];
+        if (answers.filter((a) => a.correct).length !== 1) throw new Error(`Quiz question "${q.name}" must have exactly one correct answer`);
+        plugin = raw('plugin_qtype_multichoice_question', raw('answers', answers.map((a) => answer(a.text, 1, a.correct, a.feedback)[1]).join(''))
+          + raw('multichoice', [
+            x('layout', 0), x('single', 1), x('shuffleanswers', 1), x('correctfeedback', ''), x('correctfeedbackformat', 1),
+            x('partiallycorrectfeedback', ''), x('partiallycorrectfeedbackformat', 1), x('incorrectfeedback', ''),
+            x('incorrectfeedbackformat', 1), x('answernumbering', 'abc'), x('shownumcorrect', 0), x('showstandardinstruction', 0)].join(''), { id: qid }));
+      }
+      entries += raw('question_bank_entry', [
+        x('questioncategoryid', cat), x('idnumber', NULL), x('ownerid', NULL),
+        raw('question_version', raw('question_versions', [
+          x('version', 1), x('status', 'ready'),
+          raw('questions', raw('question', [
+            x('parent', 0), x('name', q.name), x('questiontext', q.text), x('questiontextformat', 1), x('generalfeedback', ''),
+            x('generalfeedbackformat', 1), x('defaultmark', f7(1)), x('penalty', f7(q.type === 'truefalse' ? 1 : 1 / 3)), x('qtype', q.type),
+            x('length', 1), x('stamp', stamp('q' + k)), x('timecreated', now), x('timemodified', now), x('createdby', NULL), x('modifiedby', NULL),
+            plugin, raw('plugin_qbank_comment_question', raw('comments')), raw('plugin_qbank_customfields_question', raw('customfields')),
+            raw('question_hints'), raw('tags')].join(''), { id: qid }))].join(''), { id: qid }))].join(''), { id: qid });
+      const slot = next_slot++;
+      slots += raw('question_instance', [
+        x('quizid', quiz_id), x('slot', k + 1), x('page', k + 1), x('displaynumber', NULL), x('requireprevious', 0), x('maxmark', f7(1)),
+        x('quizgradeitemid', NULL),
+        raw('question_reference', [x('usingcontextid', ctx), x('component', 'mod_quiz'), x('questionarea', 'slot'),
+          x('questionbankentryid', qid), x('version', NULL)].join(''), { id: slot })].join(''), { id: slot });
+    });
+    question_categories += category(top, 'top', '', 0, 0, '')
+      + category(cat, `Default for ${quiz.name}`.slice(0, 255), `The default category for questions shared in context '${quiz.name}'.`, top, 999, entries);
+    const review = 69904;   // during the attempt off; straight after, later while open, and after close: on
+    files.set(folder + '/quiz.xml', HEAD + raw('activity', raw('quiz', [
+      x('name', quiz.name), x('intro', quiz.intro), x('introformat', 1), x('timeopen', 0), x('timeclose', 0), x('timelimit', 0),
+      x('overduehandling', 'autosubmit'), x('graceperiod', 86400), x('preferredbehaviour', 'deferredfeedback'), x('canredoquestions', 0),
+      x('attempts_number', 0), x('attemptonlast', 0), x('grademethod', 1), x('decimalpoints', 2), x('questiondecimalpoints', -1),
+      x('reviewattempt', review), x('reviewcorrectness', review), x('reviewmaxmarks', review), x('reviewmarks', review),
+      x('reviewspecificfeedback', review), x('reviewgeneralfeedback', review), x('reviewrightanswer', review), x('reviewoverallfeedback', 4368),
+      x('questionsperpage', 1), x('navmethod', 'free'), x('shuffleanswers', 1), x('sumgrades', f5(quiz.questions.length)), x('grade', f5(grade)),
+      x('timecreated', now), x('timemodified', now), x('password', ''), x('subnet', ''), x('browsersecurity', ''), x('delay1', 0), x('delay2', 0),
+      x('showuserpicture', 0), x('showblocks', 0), x('completionattemptsexhausted', 0), x('completionminattempts', 0), x('allowofflineattempts', 0),
+      x('precreateattempts', NULL), raw('subplugin_quizaccess_seb_quiz'), raw('quiz_grade_items'), raw('question_instances', slots),
+      raw('sections', raw('section', x('firstslot', 1) + x('heading', '') + x('shufflequestions', 0), { id: quiz_id })),
+      raw('feedbacks'), raw('overrides'), raw('grades'), raw('attempts')].join(''), { id: quiz_id }),
+      { id: quiz_id, moduleid: cmid, modulename: 'quiz', contextid: ctx }));
+    files.set(folder + '/module.xml', module_xml(cmid, 'quiz'));
+    files.set(folder + '/inforef.xml', HEAD + raw('inforef', raw('grade_itemref', raw('grade_item', x('id', grade_item)))
+      + raw('question_categoryref', raw('question_category', x('id', top)) + raw('question_category', x('id', cat)))));
+    common_files(folder, raw('grade_item', [
+      x('categoryid', NULL), x('itemname', quiz.name), x('itemtype', 'mod'), x('itemmodule', 'quiz'), x('iteminstance', quiz_id),
+      x('itemnumber', 0), x('iteminfo', NULL), x('idnumber', ''), x('calculation', NULL), x('gradetype', 1), x('grademax', f5(grade)),
+      x('grademin', f5(0)), x('scaleid', NULL), x('outcomeid', NULL), x('gradepass', f5(0)), x('multfactor', f5(1)), x('plusfactor', f5(0)),
+      x('aggregationcoef', f5(0)), x('aggregationcoef2', f5(0)), x('weightoverride', 0), x('sortorder', 1), x('display', 0), x('decimals', NULL),
+      x('hidden', 0), x('locked', 0), x('locktime', 0), x('needsupdate', 0), x('timecreated', now), x('timemodified', now),
+      raw('grade_grades')].join(''), { id: grade_item }));
+    activities.push([cmid, quiz.name, folder, 'quiz']);
+  });
+
+  // Assignments, with a rubric when one is given. Field lists as Moodle 5.0 writes them.
+  let next_criterion = 99001, next_level = 990001;
+  (opts.assignments ?? []).forEach((assign, i) => {
+    if (i >= 5) throw new Error('Too many assignments for one backup');
+    const cmid = assignCmid(i), assign_id = 9881 + i, ctx = 9891 + i, grade_item = 9895 + i;
+    const folder = `activities/assign_${cmid}`;
+    const grade = assign.grade ?? 100;
+    const configs: [string, string, string, Value][] = [
+      ['onlinetext', 'assignsubmission', 'enabled', 1], ['onlinetext', 'assignsubmission', 'wordlimit', 0], ['onlinetext', 'assignsubmission', 'wordlimitenabled', 0],
+      ['file', 'assignsubmission', 'enabled', 1], ['file', 'assignsubmission', 'maxfilesubmissions', 3], ['file', 'assignsubmission', 'maxsubmissionsizebytes', NULL],
+      ['file', 'assignsubmission', 'filetypeslist', ''], ['comments', 'assignsubmission', 'enabled', 0], ['comments', 'assignfeedback', 'enabled', 1],
+      ['comments', 'assignfeedback', 'commentinline', 0], ['editpdf', 'assignfeedback', 'enabled', 0], ['offline', 'assignfeedback', 'enabled', 0],
+      ['file', 'assignfeedback', 'enabled', 0]];
+    files.set(folder + '/assign.xml', HEAD + raw('activity', raw('assign', [
+      x('name', assign.name), x('intro', assign.intro), x('introformat', 1), x('alwaysshowdescription', 1), x('submissiondrafts', 0),
+      x('sendnotifications', 0), x('sendlatenotifications', 0), x('sendstudentnotifications', 1), x('duedate', 0), x('cutoffdate', 0),
+      x('gradingduedate', 0), x('allowsubmissionsfromdate', 0), x('grade', grade), x('timemodified', now), x('completionsubmit', 0),
+      x('requiresubmissionstatement', 0), x('teamsubmission', 0), x('requireallteammemberssubmit', 0), x('teamsubmissiongroupingid', 0),
+      x('blindmarking', 0), x('hidegrader', 0), x('revealidentities', 0), x('attemptreopenmethod', 'untilpass'), x('maxattempts', 1),
+      x('markingworkflow', 0), x('markingallocation', 0), x('markinganonymous', 0), x('preventsubmissionnotingroup', 0), x('activity', NULL),
+      x('activityformat', 0), x('timelimit', 0), x('submissionattachments', 0), x('gradepenalty', 0), raw('userflags'), raw('submissions'), raw('grades'),
+      raw('plugin_configs', configs.map(([plugin, subtype, name, value], k) => raw('plugin_config',
+        x('plugin', plugin) + x('subtype', subtype) + x('name', name) + x('value', value), { id: 98001 + i * 20 + k })).join('')),
+      raw('overrides')].join(''), { id: assign_id }),
+      { id: assign_id, moduleid: cmid, modulename: 'assign', contextid: ctx }));
+    if (assign.rubric) {
+      const criteria = assign.rubric.criteria.map((c, k) => raw('criterion', [
+        x('sortorder', k + 1), x('description', c.description), x('descriptionformat', 0),
+        raw('levels', [...c.levels].sort((a, b) => a.score - b.score).map((l) => raw('level',
+          x('score', f5(l.score)) + x('definition', l.definition) + x('definitionformat', 0), { id: next_level++ })).join(''))].join(''), { id: next_criterion++ })).join('');
+      files.set(folder + '/grading.xml', HEAD + raw('areas', raw('area', [
+        x('areaname', 'submissions'), x('activemethod', 'rubric'),
+        raw('definitions', raw('definition', [
+          x('method', 'rubric'), x('name', assign.rubric.name), x('description', ''), x('descriptionformat', 1), x('status', 20),
+          x('timecreated', now), x('timemodified', now),
+          x('options', '{"sortlevelsasc":1,"lockzeropoints":1,"alwaysshowdefinition":1,"showdescriptionteacher":1,"showdescriptionstudent":1,"showscoreteacher":1,"showscorestudent":1,"enableremarks":1,"showremarksstudent":1}'),
+          raw('plugin_gradingform_rubric_definition', raw('criteria', criteria)), raw('instances')].join(''), { id: 9911 + i }))].join(''), { id: 9901 + i })));
+    }
+    files.set(folder + '/module.xml', module_xml(cmid, 'assign'));
+    files.set(folder + '/inforef.xml', HEAD + raw('inforef', raw('grade_itemref', raw('grade_item', x('id', grade_item)))));
+    common_files(folder, raw('grade_item', [
+      x('categoryid', NULL), x('itemname', assign.name), x('itemtype', 'mod'), x('itemmodule', 'assign'), x('iteminstance', assign_id),
+      x('itemnumber', 0), x('iteminfo', NULL), x('idnumber', ''), x('calculation', NULL), x('gradetype', 1), x('grademax', f5(grade)),
+      x('grademin', f5(0)), x('scaleid', NULL), x('outcomeid', NULL), x('gradepass', f5(0)), x('multfactor', f5(1)), x('plusfactor', f5(0)),
+      x('aggregationcoef', f5(0)), x('aggregationcoef2', f5(0)), x('weightoverride', 0), x('sortorder', 1), x('display', 0), x('decimals', NULL),
+      x('hidden', 0), x('locked', 0), x('locktime', 0), x('needsupdate', 0), x('timecreated', now), x('timemodified', now),
+      raw('grade_grades')].join(''), { id: grade_item }));
+    activities.push([cmid, assign.name, folder, 'assign']);
+  });
+
+  (opts.glossaries ?? []).forEach((glossary, i) => {
+    if (i >= 5) throw new Error('Too many glossaries for one backup');
+    const cmid = glossaryCmid(i), glossary_id = 9841 + i, ctx = 9851 + i;
+    const folder = `activities/glossary_${cmid}`;
+    files.set(folder + '/glossary.xml', HEAD + raw('activity', raw('glossary', [
+      x('name', glossary.name), x('intro', glossary.intro), x('introformat', 1), x('allowduplicatedentries', 0), x('displayformat', 'dictionary'),
+      x('mainglossary', 0), x('showspecial', 1), x('showalphabet', 1), x('showall', 1), x('allowcomments', 0), x('allowprintview', 1),
+      x('usedynalink', 1), x('defaultapproval', 1), x('globalglossary', 0), x('entbypage', 10), x('editalways', 0), x('rsstype', 0),
+      x('rssarticles', 0), x('assessed', 0), x('assesstimestart', 0), x('assesstimefinish', 0), x('scale', 0), x('timecreated', now),
+      x('timemodified', now), x('completionentries', 0), raw('entries'), raw('entriestags'), raw('categories')].join(''), { id: glossary_id }),
+      { id: glossary_id, moduleid: cmid, modulename: 'glossary', contextid: ctx }));
+    files.set(folder + '/module.xml', module_xml(cmid, 'glossary'));
+    files.set(folder + '/inforef.xml', HEAD + raw('inforef'));
+    common_files(folder);
+    activities.push([cmid, glossary.name, folder, 'glossary']);
+  });
+
   const section_xml = (sid: number, number: number, name: string, summary: string, seq: string): string =>
     HEAD + raw('section', [
       x('number', number), x('name', name), x('summary', summary), x('summaryformat', 1), x('sequence', seq),
@@ -196,7 +401,7 @@ export function buildMbz(fileName: string, course: MbzCourse, section: MbzSectio
   files.set('course/contentbank.xml', HEAD + raw('contents'));
 
   files.set('files.xml', HEAD + raw('files', file_rows.join('')));
-  files.set('questions.xml', HEAD + raw('question_categories'));
+  files.set('questions.xml', HEAD + raw('question_categories', question_categories));
   files.set('groups.xml', HEAD + raw('groups', raw('groupcustomfields') + raw('groupings', raw('groupingcustomfields'))));
   files.set('outcomes.xml', HEAD + raw('outcomes_definition'));
   files.set('roles.xml', HEAD + raw('roles_definition'));

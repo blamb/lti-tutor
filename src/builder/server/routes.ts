@@ -7,7 +7,7 @@
  *   GET    /api/builds                            -> { builds: [summary] }
  *   POST   /api/builds                            multipart 'file' (.docx) -> { build }   (starts the AI step)
  *   GET    /api/builds/:id                        -> { build }   (slots, activities, settings, state)
- *   PUT    /api/builds/:id                        { course_shortname?, section_number?, leave_out? } -> { build }
+ *   PUT    /api/builds/:id                        { course_shortname?, section_number?, leave_out?, questions_as?, terms_as? } -> { build }
  *   DELETE /api/builds/:id
  *   POST   /api/builds/readings                   { title, mode? } -> { build }   (an empty module to add readings to; mode 'practice' | 'rhizmode')
  *   POST   /api/builds/:id/readings               multipart 'file' | { url } | { text, title } -> { build }   (starts drafting its activities)
@@ -22,6 +22,7 @@
  *   POST   /api/builds/:id/activities/:n/reread   { note? } -> { activity }   (the AI step again, with the designer's note)
  *   GET    /api/builds/:id/download               the restore file (.mbz); ?visible=1 to restore shown to students
  *   GET    /api/builds/:id/report.md              the build report
+ *   GET    /api/builds/:id/glossary.xml           the Glossary's entries, as a file for Moodle's "Import entries"
  *   GET    /api/builds/:id/h5p/:name              one activity as a loose .h5p file
  */
 
@@ -46,7 +47,7 @@ import {
 } from './builds.js';
 import { checkQuotes } from '../engine/reading.js';
 import { RHIZO_KINDS, RHIZO_TYPES, CONTRACT_PARTS, CREDIT_TEXT } from '../engine/rhizo.js';
-import { PAGE_KINDS, PAGE_TYPES } from '../engine/coursepage.js';
+import { PAGE_KINDS, PAGE_TYPES, RUBRIC_LEVELS, DISCUSSION_HOW } from '../engine/coursepage.js';
 
 lti.app.use('/api', express.json({ limit: '2mb' }));
 
@@ -151,6 +152,8 @@ lti.app.get('/api/me', async (_req: Request, res: Response) => {
       ],
       contract_parts: CONTRACT_PARTS,
       rhizo_credit: CREDIT_TEXT,
+      rubric_levels: RUBRIC_LEVELS.map((l) => l.label),
+      discussion_how: DISCUSSION_HOW,
     });
   } catch (e) {
     fail(res, e, 'GET /api/me');
@@ -250,7 +253,7 @@ lti.app.post('/api/builds/:id/pages', async (req: Request, res: Response) => {
   try {
     const c = await ctx(req, res);
     if (!c) return;
-    const { role, reading } = z.object({ role: z.enum(['overview', 'guide', 'takeaways']), reading: z.number().int().positive().optional() }).parse(req.body);
+    const { role, reading } = z.object({ role: z.enum(['overview', 'guide', 'takeaways', 'discussion', 'assignment', 'breadcrumb', 'trust', 'unsettled', 'missing']), reading: z.number().int().positive().optional() }).parse(req.body);
     const me = await studentFromToken(c.token);
     res.json({ build: view(await addPage(c.build, role, reading, attr(c.token, me.id, null, 'builder.page.draft'))) });
   } catch (e) {
@@ -318,6 +321,8 @@ const Settings = z.object({
   course_shortname: z.string().trim().max(100).optional(),
   section_number: z.number().int().min(0).max(200).optional(),
   leave_out: z.array(z.string().trim().min(3).max(300)).max(50).optional(),
+  questions_as: z.enum(['h5p', 'quiz', 'both']).optional(),
+  terms_as: z.enum(['h5p', 'glossary', 'both']).optional(),
 });
 
 lti.app.put('/api/builds/:id', async (req: Request, res: Response) => {
@@ -351,7 +356,7 @@ lti.app.get('/api/builds/:id/pages', async (req: Request, res: Response) => {
     const b = await builtFor(c.build);
     res.json({
       chapters: b.chapters, forums: b.forums ?? [], todo: b.todo, judgement: b.judgement, counts: b.counts, included: b.included, file_name: b.fileName,
-      h5p: Object.keys(b.h5p), size: b.mbz.byteLength,
+      h5p: Object.keys(b.h5p), size: b.mbz.byteLength, quiz: b.quiz ?? null, glossary: Boolean(b.glossaryXml),
     });
   } catch (e) {
     fail(res, e, 'GET /api/builds/:id/pages');
@@ -401,6 +406,19 @@ lti.app.get('/api/builds/:id/download', async (req: Request, res: Response) => {
   }
 });
 
+// The Glossary's entries, for its own Import entries page (Moodle does not restore entries from a backup for a teacher).
+lti.app.get('/api/builds/:id/glossary.xml', async (req: Request, res: Response) => {
+  try {
+    const c = await ctx(req, res);
+    if (!c) return;
+    const b = await builtFor(c.build);
+    if (!b.glossaryXml) { res.status(404).json({ error: 'This module has no Glossary. Choose it on the Download tab first.' }); return; }
+    sendFile(res, new TextEncoder().encode(b.glossaryXml), 'application/xml; charset=utf-8', b.fileName.replace(/\.mbz$/, '') + '-glossary.xml');
+  } catch (e) {
+    fail(res, e, 'GET /api/builds/:id/glossary.xml');
+  }
+});
+
 lti.app.get('/api/builds/:id/report.md', async (req: Request, res: Response) => {
   try {
     const c = await ctx(req, res);
@@ -432,12 +450,13 @@ lti.app.put('/api/builds/:id/activities/:n', async (req: Request, res: Response)
       // An edit keeps the kind it was drafted as: a Trust Audit does not become a contract, nor a reading guide a quiz.
       const was = c.build.activities.find((a) => a.n === n)?.spec?.type;
       const page = PAGE_TYPES.includes(String(was ?? change.spec.type));
-      const allowed = page ? PAGE_TYPES : c.build.mode === 'rhizmode' ? RHIZO_TYPES : ACTIVITY_TYPES;
+      const rhizo = c.build.mode === 'rhizmode' || RHIZO_TYPES.includes(String(was));
+      const allowed = page ? PAGE_TYPES : rhizo ? RHIZO_TYPES : ACTIVITY_TYPES;
       if (!allowed.includes(String(change.spec.type))) {
         res.status(400).json({ error: `"type" must be one of: ${allowed.join(', ')}.` });
         return;
       }
-      if ((c.build.mode === 'rhizmode' || page) && was && was !== change.spec.type) {
+      if ((rhizo || page) && was && was !== change.spec.type) {
         res.status(400).json({ error: 'An activity keeps the kind it was drafted as.' });
         return;
       }

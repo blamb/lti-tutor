@@ -190,7 +190,7 @@
       </div>
       <div class="tabs" role="tablist" aria-label="Parts of this draft">
         <button role="tab" id="tab-src" aria-controls="pane-src" aria-selected="false" tabindex="-1" type="button" hidden>Readings</button>
-        <button role="tab" id="tab-cp" aria-controls="pane-cp" aria-selected="false" tabindex="-1" type="button" hidden>Course pages</button>
+        <button role="tab" id="tab-cp" aria-controls="pane-cp" aria-selected="false" tabindex="-1" type="button" hidden>Course content</button>
         <button role="tab" id="tab-acts" aria-controls="pane-acts" aria-selected="true" type="button">H5P activities</button>
         <button role="tab" id="tab-pages" aria-controls="pane-pages" aria-selected="false" tabindex="-1" type="button">Pages</button>
         <button role="tab" id="tab-todo" aria-controls="pane-todo" aria-selected="false" tabindex="-1" type="button">To do</button>
@@ -330,7 +330,9 @@
   const isRhizoType = (t) => me.types.some((x) => x.id === t && x.asks);
   // Course pages: the overview, reading guides and takeaways drafted from the readings. They have their own tab.
   const pageKind = (t) => me.types.find((x) => x.id === t && x.page);
-  const isPageSlot = (s) => Boolean(s && pageKind(s.role));
+  // In a practice module a RhizMode discussion added to a reading is reviewed with them.
+  const rhizoKinds = () => me.types.filter((x) => x.asks && x.id !== 'contract');
+  const isPageSlot = (s) => Boolean(s && (pageKind(s.role) || (!isRhizo() && rhizoKinds().some((k) => k.id === s.role))));
   const isPageAct = (a) => isPageSlot(build.slots.find((s) => s.n === a.n));
   const actSlots = () => build.slots.filter((s) => !isPageSlot(s));
   const tabs = () => ALL_TABS.filter((t) => (t !== 'src' && t !== 'cp') || isReadings());
@@ -462,9 +464,18 @@
           <button class="btn btn-small" type="submit" style="margin-top:.6rem">Save the outline</button> <span id="outline-msg" role="status"></span>
         </form></div>
       ${has ? '' : '<p class="empty">Add a reading on the Readings tab first. Course pages are drafted from the readings.</p>'}
-      <section class="grp"><h3>The whole module</h3><p class="muted">Drafted from all the readings together, so add those first.</p>
+      <section class="grp"><h3>The whole module: pages</h3><p class="muted">Drafted from all the readings together, so add those first.</p>
         ${part('overview', undefined, 'Draft the module overview')}${part('takeaways', undefined, 'Draft the key takeaways')}</section>
-      ${build.readings.map((r, i) => `<section class="grp"><h3>Reading ${i + 1}: ${esc(r.title)}</h3>${part('guide', r.id, 'Draft a reading guide')}</section>`).join('')}`;
+      <section class="grp"><h3>The whole module: discussion and assignment</h3><p class="muted">Each becomes its own Moodle activity after the Book: an ungraded forum, and an Assignment marked out of 100. ${isRhizo() ? '' : 'For a discussion in the RhizMode manner, with no answer key and nothing graded, use the choice under a reading below.'}</p>
+        ${part('discussion', undefined, 'Draft a discussion prompt')}${part('assignment', undefined, 'Draft an assignment and rubric')}</section>
+      ${build.readings.map((r, i) => `<section class="grp"><h3>Reading ${i + 1}: ${esc(r.title)}</h3>${part('guide', r.id, 'Draft a reading guide')}
+        ${isRhizo() ? '' : build.slots.filter((s) => s.reading === r.id && rhizoKinds().some((k) => k.id === s.role)).map(article).join('') + (() => {
+          const left = rhizoKinds().filter((k) => !slotFor(k.id, r.id));
+          return left.length ? `<div class="q"><p><strong>A RhizMode discussion.</strong> <span class="muted">An open prompt about how this reading knows what it says, answered in an ungraded forum. No answer key. ${esc(me.rhizo_credit || '')}</span></p>
+            <p><label class="visually-hidden" for="rz-kind-${r.id}">Kind of RhizMode discussion</label>
+              <select id="rz-kind-${r.id}">${left.map((k) => `<option value="${k.id}">${esc(k.label)}: ${esc(k.asks)}</option>`).join('')}</select>
+              <button class="btn btn-ghost btn-small" type="button" data-draft-rhizo="${r.id}" style="margin-top:.4rem">Draft it</button> <span class="msg" role="status"></span></p></div>` : '';
+        })()}</section>`).join('')}`;
     if (typed !== null) $('#outline-text').value = typed;
     $$('[data-draft-page]', pane).forEach((btn) => btn.addEventListener('click', async () => {
       const msg = $('.msg', btn.parentElement);
@@ -473,6 +484,14 @@
         const body = { role: btn.dataset.draftPage, ...(btn.dataset.rid ? { reading: Number(btn.dataset.rid) } : {}) };
         setBuild((await api(`/api/builds/${build.id}/pages`, { method: 'POST', body })).build);
         announce('The page is being drafted.');
+      } catch (e) { btn.disabled = false; msg.className = 'msg err'; msg.textContent = friendly(e); }
+    }));
+    $$('[data-draft-rhizo]', pane).forEach((btn) => btn.addEventListener('click', async () => {
+      const msg = $('.msg', btn.parentElement), rid = Number(btn.dataset.draftRhizo);
+      btn.disabled = true; msg.className = 'msg muted'; msg.textContent = 'Drafting…';
+      try {
+        setBuild((await api(`/api/builds/${build.id}/pages`, { method: 'POST', body: { role: $('#rz-kind-' + rid).value, reading: rid } })).build);
+        announce('The discussion is being drafted.');
       } catch (e) { btn.disabled = false; msg.className = 'msg err'; msg.textContent = friendly(e); }
     }));
     $('#outline-form').addEventListener('submit', async (ev) => {
@@ -546,6 +565,25 @@
       return `<p class="muted">No outline for type “${esc(q.type)}”.</p>`;
     };
     const placeLine = (x) => `<p class="muted">${x.place === 'page' ? 'Students answer on their own, from the page. No discussion forum is made.' : 'Students answer in a discussion forum made for this activity. This prompt is its first post.'}</p>`;
+    if (a.type === 'discussion') {
+      if (!(a.passages || []).length) return '<p class="muted">Nothing was drafted. The AI’s note says why.</p>';
+      return `<div class="q"><span class="muted">Opening prompt</span><p><strong>${esc(a.prompt)}</strong></p></div>` +
+        a.passages.map((t, i) => `<div class="q"><span class="muted">Passage ${i + 1} of ${a.passages.length}</span><blockquote>“${esc(t.passage)}”</blockquote><p>${esc(t.question)}</p></div>`).join('') +
+        `<div class="q"><span class="muted">Fixed wording under the prompt</span><p class="muted">${esc(me.discussion_how || '')}</p>
+          <p class="muted">Built as one discussion forum for the module, with this as its first post. Not graded.</p></div>`;
+    }
+    if (a.type === 'assignment') {
+      if (!a.task) return '<p class="muted">Nothing was drafted. The AI’s note says why.</p>';
+      const levels = me.rubric_levels || [];
+      return `<div class="q"><span class="muted">The task</span><p>${esc(a.task)}</p></div>
+        <div class="q"><span class="muted">What to hand in</span><p>${esc(a.deliverable)}</p></div>
+        ${(a.steps || []).length ? `<div class="q"><span class="muted">Suggested steps</span><ol>${a.steps.map((x) => `<li>${esc(x)}</li>`).join('')}</ol></div>` : ''}
+        ${(a.passages || []).map((t, i) => `<div class="q"><span class="muted">Passage to draw on, ${i + 1} of ${a.passages.length}</span><blockquote>“${esc(t.passage)}”</blockquote><p>${esc(t.why)}</p></div>`).join('')}
+        <div class="q"><span class="muted">Rubric</span>${(a.rubric || []).length ? `<div class="scroll-x"><table class="tbl"><thead><tr><th scope="col">Criterion and outcome</th>${levels.map((l) => `<th scope="col">${esc(l)}</th>`).join('')}</tr></thead><tbody>${
+          a.rubric.map((c) => `<tr><th scope="row" style="font-weight:500">${esc(c.criterion)}<div class="muted">Outcome: ${esc(c.outcome)}</div></th>${levels.map((_l, k) => `<td>${esc((c.levels || [])[k] || '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`
+          : '<p class="muted">None. Criteria are only written against learning outcomes copied from the course outline, and none was given or it lists none. The Assignment would be marked out of 100 by direct grading.</p>'}
+          <p class="muted">Built as one Moodle Assignment, marked out of 100, taking online text or files, with no due date. Yours and the instructor’s to adjust.</p></div>`;
+    }
     if (a.type === 'guide') {
       if (!(a.points || []).length) return '<p class="muted">Nothing was drafted: the AI found too little in this reading to write a guide from. Its note says why.</p>';
       return `<div class="q"><span class="muted">Why this reading</span><p>${esc(a.why)}</p></div>` +
@@ -600,7 +638,7 @@
         ${spec ? `<span class="chip type">${esc(typeLabel(spec.type))}</span>` : ''}<span class="chip ${cls}">${esc(label)}</span></header>
       <p class="muted where">${isRhizo() || isPageSlot(slot) ? esc(slot.type) : `${esc(slot.chapter)} › ${esc(slot.under)}${slot.type && !isReadings() ? ` · the draft asks for: ${esc(slot.type)}` : ''}`}</p>
       <div class="cols"><div>${isReadings()
-        ? `<h4>${isPageSlot(slot) ? (slot.role === 'guide' ? 'Passages from the reading' : slot.role === 'overview' ? 'From the outline and the readings' : 'Passages from the readings') : isRhizo() ? 'Passages from the reading' : 'Sentences from the reading'}</h4>${spec && spec.type === 'contract' ? '<p class="muted">None. The contract is about the student, not a passage; it draws on the readings only for what the module is about.</p>' : (a.quotes || []).length ? `<ul class="quotes">${a.quotes.map((q) => `<li><span class="lab">${esc(q.label)} · ${q.found ? `<span class="yes">found in the ${q.label.startsWith('Outcome') ? 'outline' : 'reading'}</span>` : `<span class="no">not found in the ${q.label.startsWith('Outcome') ? 'outline' : 'reading'}</span>`}</span>${q.quote ? '“' + esc(q.quote) + '”' : '<em>none given</em>'}</li>`).join('')}</ul>` : '<p class="muted">Nothing yet.</p>'}`
+        ? `<h4>${isPageSlot(slot) ? (slot.reading ? 'Passages from the reading' : slot.role === 'overview' || slot.role === 'assignment' ? 'From the outline and the readings' : 'Passages from the readings') : isRhizo() ? 'Passages from the reading' : 'Sentences from the reading'}</h4>${spec && spec.type === 'contract' ? '<p class="muted">None. The contract is about the student, not a passage; it draws on the readings only for what the module is about.</p>' : (a.quotes || []).length ? `<ul class="quotes">${a.quotes.map((q) => `<li><span class="lab">${esc(q.label)} · ${q.found ? `<span class="yes">found in the ${q.label.startsWith('Outcome') ? 'outline' : 'reading'}</span>` : `<span class="no">not found in the ${q.label.startsWith('Outcome') ? 'outline' : 'reading'}</span>`}</span>${q.quote ? '“' + esc(q.quote) + '”' : '<em>none given</em>'}</li>`).join('')}</ul>` : '<p class="muted">Nothing yet.</p>'}`
         : `<h4>In the draft</h4><pre class="spec">${inline(slot.text)}</pre>`}</div><div><h4>${isReadings() ? 'What was drafted' : 'How it was read'}</h4>${right}</div></div>
       <div class="actions">
         ${a.status === 'pending' ? '' : `
@@ -619,7 +657,7 @@
         const { activity } = await fn();
         const i = build.activities.findIndex((x) => x.n === n);
         if (i >= 0) build.activities[i] = activity; else build.activities.push(activity);
-        pages = null; renderHead(); if (isRhizo()) { renderBuild(); } else { renderAct(n); }
+        pages = null; renderHead(); if (isRhizo()) { const y = window.scrollY; renderBuild(); window.scrollTo(0, y); } else { renderAct(n); }
         announce(`Activity ${n}: ${(STATUS[activity.status] || [activity.status])[0]}.`);
         $('#act-' + n + ' [data-do]')?.focus();
       } catch (e) { renderAct(n); const m = $('#act-' + n + ' .msg'); m.className = 'msg err'; m.textContent = friendly(e); }
@@ -655,7 +693,36 @@
               <label class="opt"><input type="radio" name="rz-place-${n}" value="page" ${spec.place === 'page' ? 'checked' : ''}> On their own <span>· the prompt stays on the page and no forum is made</span></label>
             </fieldset>`;
       const placeValue = () => ($(`input[name=rz-place-${n}]:checked`, panel) || {}).value || 'discussion';
-      if (what === 'edit' && pageKind(spec.type)) {
+      if (what === 'edit' && (spec.type === 'discussion' || spec.type === 'assignment')) {
+        const ta = (id, label, value, hint = '', attrs = '') => `<label class="field" for="${id}">${label}${hint ? ` <span class="hint">${hint}</span>` : ''}
+              <textarea id="${id}" ${attrs}>${esc(value)}</textarea></label>`;
+        const isAssign = spec.type === 'assignment', levels = me.rubric_levels || [];
+        const anchors = [...(spec.passages || []), {}], rubric = isAssign ? [...(spec.rubric || []), {}] : [];
+        if (openPanel(btn, `<label class="field" for="cp-title-${n}">Title <span class="hint">For your reference; the activity is named after the module.</span>
+              <input id="cp-title-${n}" maxlength="120" value="${esc(spec.title)}"></label>
+            ${isAssign ? ta(`cp-task-${n}`, 'The task', spec.task || '') + ta(`cp-deliv-${n}`, 'What to hand in', spec.deliverable || '') + ta(`cp-steps-${n}`, 'Suggested steps', (spec.steps || []).join('\n'), 'One per line.')
+              : ta(`cp-prompt-${n}`, 'Opening prompt', spec.prompt || '')}
+            ${anchors.map((t, i) => `<div class="trail" data-anchor>
+              ${ta(`cp-ap-${n}-${i}`, i < anchors.length - 1 ? `Passage ${i + 1}` : 'Add a passage (optional)', t.passage || '', 'Copied from a reading exactly. Saving checks it is there. Clear this box to remove it.', 'data-f="passage"')}
+              ${ta(`cp-an-${n}-${i}`, isAssign ? 'What to use it for' : 'The question it raises', (isAssign ? t.why : t.question) || '', '', `data-f="${isAssign ? 'why' : 'question'}"`)}</div>`).join('')}
+            ${rubric.map((c, i) => `<div class="trail" data-crit>
+              <label class="field" for="cp-rc-${n}-${i}">${i < rubric.length - 1 ? `Criterion ${i + 1}` : 'Add a criterion (optional)'} <span class="hint">A short name. Clear this box to remove the criterion.</span>
+                <input id="cp-rc-${n}-${i}" data-f="criterion" maxlength="160" value="${esc(c.criterion || '')}"></label>
+              ${ta(`cp-ro-${n}-${i}`, 'Learning outcome it assesses', c.outcome || '', 'Exactly as it is written in the course outline. Saving checks it is there.', 'data-f="outcome"')}
+              ${levels.map((l, k) => ta(`cp-rl-${n}-${i}-${k}`, esc(l), (c.levels || [])[k] || '', '', 'data-level')).join('')}</div>`).join('')}
+            <button class="btn btn-small" type="button" style="margin-top:.6rem" data-save>Save changes</button>`)) {
+          $('#cp-title-' + n).focus();
+          $('[data-save]', panel).addEventListener('click', () => {
+            const val = (id) => ($('#' + id) || { value: '' }).value.trim();
+            const passages = $$('[data-anchor]', panel).map((box) => Object.fromEntries($$('[data-f]', box).map((f) => [f.dataset.f, f.value.trim()]))).filter((r) => r.passage);
+            const base = { type: spec.type, title: val('cp-title-' + n), interpretation: spec.interpretation || '', passages };
+            const crits = $$('[data-crit]', panel).map((box) => ({ criterion: $('[data-f=criterion]', box).value.trim(), outcome: $('[data-f=outcome]', box).value.trim(),
+              levels: $$('[data-level]', box).map((t) => t.value.trim()) })).filter((c) => c.criterion);
+            put({ spec: isAssign ? { ...base, task: val('cp-task-' + n), deliverable: val('cp-deliv-' + n), steps: val('cp-steps-' + n).split('\n').map((x) => x.trim()).filter(Boolean), rubric: crits }
+              : { ...base, prompt: val('cp-prompt-' + n) } }, 'Saving…');
+          });
+        }
+      } else if (what === 'edit' && pageKind(spec.type)) {
         const ta = (id, label, value, hint = '', attrs = '') => `<label class="field" for="${id}">${label}${hint ? ` <span class="hint">${hint}</span>` : ''}
               <textarea id="${id}" ${attrs}>${esc(value)}</textarea></label>`;
         const PASSAGE_HINT = 'Copied from the reading exactly. Saving checks it is there.';
@@ -927,10 +994,19 @@
             <label class="field" for="set-section">Section number
               <span class="hint">Which course section the module is filed under in the backup. When you restore into an existing course, Moodle merges it into the section with this number.</span>
               <input id="set-section" type="number" min="0" max="200" value="${esc(build.section_number)}" style="max-width:8rem"></label>
+            ${isReadings() && !isRhizo() ? `<fieldset class="modes"><legend>Where the practice questions go</legend>
+              ${[['h5p', 'On each reading’s page', 'as an H5P question set. Not graded.'], ['quiz', 'In one Moodle Quiz for the module', 'with the questions in its question bank. Graded out of 10, unlimited attempts. Only question sets you have approved go in.'], ['both', 'Both', 'practice on the pages, then the Quiz.']]
+                .map(([v, label, hint]) => `<label class="opt"><input type="radio" name="set-questions" value="${v}" ${build.questions_as === v ? 'checked' : ''}> ${label} <span>· ${hint}</span></label>`).join('')}
+            </fieldset>
+            <fieldset class="modes"><legend>Where the key terms go</legend>
+              ${[['h5p', 'On each reading’s page', 'as H5P flashcards.'], ['glossary', 'In one Moodle Glossary for the module', 'so the terms are linked wherever they appear in the course. The Glossary arrives empty and you import its entries from a second file; see below.'], ['both', 'Both', 'flashcards on the pages and the Glossary.']]
+                .map(([v, label, hint]) => `<label class="opt"><input type="radio" name="set-terms" value="${v}" ${build.terms_as === v ? 'checked' : ''}> ${label} <span>· ${hint}</span></label>`).join('')}
+            </fieldset>` : ''}
             <button class="btn btn-ghost btn-small" type="submit" style="margin-top:.6rem">Save settings</button> <span id="set-msg" role="status"></span>
           </form>
           <p style="margin-top:1.1rem"><a class="btn" id="dl" href="${esc(apiUrl(`/api/builds/${build.id}/download`))}">Download ${esc(p.file_name)} (${mb} MB)</a>
-            <a class="btn btn-ghost" href="${esc(apiUrl(`/api/builds/${build.id}/report.md?download=1`))}">Download the build report</a></p>
+            <a class="btn btn-ghost" href="${esc(apiUrl(`/api/builds/${build.id}/report.md?download=1`))}">Download the build report</a>
+            ${p.glossary ? `<a class="btn btn-ghost" href="${esc(apiUrl(`/api/builds/${build.id}/glossary.xml`))}">Download the glossary entries</a>` : ''}</p>
         </div>
         <div class="card"><h2>Restoring it in Moodle</h2>
           <ol class="steps"><li>In the course: <strong>More › Course reuse › Restore</strong>.</li>
@@ -939,12 +1015,18 @@
             <li>${isRhizo()
               ? 'Open the Book and each forum, work through any yellow “To do” boxes, then show them to students. Each forum’s first post appears under the name of whoever restored the file.'
               : 'Open the Book, work through the yellow “To do” boxes, try each activity, then show it to students.'}</li></ol>
+          ${(p.chapters && build.activities.some((a) => a.status === 'approved' && a.spec && (a.spec.type === 'assignment' || a.spec.type === 'discussion'))) ? '<p><strong>The Assignment and the Discussion.</strong> Each arrives as its own activity after the Book, hidden. The Assignment is marked out of 100 with its rubric attached as advanced grading, takes online text or files, and has no due date; set dates and check the rubric with the instructor before showing it. The Discussion is an ungraded forum whose first post appears under the name of whoever restored the file.</p>' : ''}
+          ${p.quiz ? `<p><strong>The Quiz.</strong> “${esc(p.quiz.name)}” arrives after the Book with ${p.quiz.questions} questions in its own question bank, hidden. It is marked out of 10 with unlimited attempts and the highest grade kept, and it has a gradebook column. Preview it, then set dates, attempts and grade to suit before showing it.</p>` : ''}
+          ${p.glossary ? '<p><strong>The Glossary.</strong> Moodle restores glossary entries only for site managers, so the Glossary arrives empty. Open it, choose <strong>Import entries</strong>, and give it the glossary entries file from the button above. Import into the <em>current</em> glossary.</p>' : ''}
           ${isRhizo() ? '<p class="muted">The forums are ungraded and need nothing installed on the Moodle site.</p>' : '<p class="muted">The H5P activities need the matching H5P content types on the Moodle site. They are listed at the end of the build report.</p>'}</div>`;
       $('#settings-form').addEventListener('submit', async (ev) => {
         ev.preventDefault();
         const msg = $('#set-msg');
         try {
           const body = { course_shortname: $('#set-short').value.trim(), section_number: Number($('#set-section').value) || 0 };
+          const qa = $('input[name=set-questions]:checked'), ta = $('input[name=set-terms]:checked');
+          if (qa) body.questions_as = qa.value;
+          if (ta) body.terms_as = ta.value;
           build = (await api('/api/builds/' + build.id, { method: 'PUT', body })).build; pages = null;
           await renderGet();
           $('#set-msg').className = 'ok'; $('#set-msg').textContent = 'Saved.';

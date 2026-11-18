@@ -47,6 +47,8 @@ export interface BuildResult {
   todo: string[];
   judgement: string[];          // judgement + dropped, as in the report
   forums?: { name: string; html: string }[];  // RhizMode: each discussion's first post
+  glossaryXml?: string;                       // readings: the Glossary's entries, as a file for its Import entries page
+  quiz?: { name: string; questions: number };   // readings: the module's Moodle Quiz, when one is built
 }
 
 const NOTES_LEFT = new RegExp(`\\[@?${S}*Production`, 'g');

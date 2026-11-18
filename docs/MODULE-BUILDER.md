@@ -71,7 +71,7 @@ Known rough edges: a passage copied from a web page keeps that page's artefacts 
 
 ## Course pages: an overview, reading guides and key takeaways (added 17 Nov 2026)
 
-A module started from readings, in either mode, can also carry page content drafted from those readings. It is reviewed on its own tab, **Course pages**.
+A module started from readings, in either mode, can also carry page content drafted from those readings. It is reviewed on its own tab, **Course content** (first named Course pages).
 
 | Page | Where it goes | What is drafted | What is not drafted |
 |---|---|---|---|
@@ -99,6 +99,52 @@ Code: `engine/coursepage.ts` (the kinds, checks and page HTML), the page parts o
 Tested locally on 17 Nov 2026: a practice-mode module from two Wikipedia articles (Digital divide, Digital literacy) with a made-up outline listing four outcomes. Both guides, the overview and the takeaways were drafted; all 26 passages and all three copied outcomes passed their checks on the first pass. The model left out the fourth outcome (evaluating a Canadian policy response) and noted that neither reading covers it. An outcome typed in by hand that is not in the outline blocked approval. A request to drop one takeaway did that and left the rest. With the four pages approved, the file restored into the local Moodle 5.0.1 as a Book of four pages in the right order, with the overview's and the takeaways' links pointing at the right reading pages. Not yet tested: the pages seen in Moodle's own theme, a RhizMode module with course pages and a contract together, an uploaded outline file, a real course outline and real course readings, moodbox.
 
 Limits: one outline per module (paste the whole course outline into each, or the part that applies); the outline does not yet lay out a whole course; a passage shown to students has a web page's note markers ("[12]") removed, and nothing else.
+
+## Native Moodle activities: a Quiz and a Glossary (added 17 Nov 2026)
+
+A practice-mode module built from readings can send what it has already drafted to Moodle's own activities, chosen on the Download tab. Nothing new is drafted for this: the Quiz uses the practice questions and the Glossary uses the key terms.
+
+| Setting | Choices | Default |
+|---|---|---|
+| Where the practice questions go | On each reading's page as an H5P question set; in one Moodle Quiz for the module; both | On the pages |
+| Where the key terms go | On each reading's page as H5P flashcards; in one Moodle Glossary for the module; both | On the pages |
+
+**The Quiz.** One per module, placed after the Book and hidden like it. Its questions are in the quiz's own question bank (Moodle 5 keeps a quiz's questions with the quiz), one to a page, answers shuffled, each answer with its feedback. It is marked out of 10, allows unlimited attempts, keeps the highest grade and has a gradebook column; all of that is ordinary quiz settings the designer can change after restoring. Because it is graded:
+
+- only question sets a person has **approved** go in, where the H5P route also builds unreviewed drafts;
+- only questions Moodle can mark the same way go in: true/false, and multiple choice with exactly one correct answer. Anything else is listed under "Notes on the pages" and left out;
+- the build report lists every quiz question with its key and supporting sentence.
+
+A second restore of the same module adds a second quiz with its own copy of the questions. It does not update the first.
+
+**The Glossary.** Moodle treats glossary entries as user data and restores them only for someone allowed to restore user data, which by default is a site manager, not a teacher. So the backup carries an empty Glossary, and the entries come as a second file for the Glossary's own **Import entries** page (a button on the Download tab; the To do list says so). A term defined in two readings is listed once, from the first. The Glossary links its terms automatically wherever they appear in the course, which is its advantage over flashcards.
+
+When the module has an overview page, its "What you will do" list links to the Quiz and the Glossary.
+
+Code: the quiz, question-bank and glossary writers and `glossaryImportXml` in `engine/mbz.ts` (field lists copied from a backup made by Moodle 5.0.1), the routing in `engine/reading.ts`, migration `005_native_activities.sql` (`build.questions_as`, `build.terms_as`), `GET /api/builds/:id/glossary.xml`.
+
+Tested locally on 17 Nov 2026 with the same two-article module: with one of the two question sets approved, the file restored into Moodle 5.0.1 with a hidden Quiz of 7 questions (6 multiple choice, 1 true/false), 7 slots, a grade item out of 10 and an empty Glossary; the unapproved set was left out and reported. Loaded through Moodle's question engine, every question graded its keyed answer as correct, and every answer carried its feedback. The overview's links to the Quiz and Glossary pointed at the restored activities. The glossary file (22 terms) parsed with Moodle's own XML reader into the structure its importer reads. Not yet tested: the Import entries page itself, a student attempt in the browser, the Quiz in the gradebook view, moodbox (Moodle 5.2), and an older Moodle 4 site.
+
+## A discussion and an assignment (added 17 Nov 2026)
+
+Two more things can be drafted for a module built from readings, from the tab now called **Course content** (it was Course pages). Each is drafted on request from all the readings, reviewed like a course page, built only when approved, and becomes its own Moodle activity after the Book, hidden.
+
+**Discussion.** One ungraded forum for the module (Moodle's "single simple discussion", the same type RhizMode uses). The model drafts an opening prompt with one main question and one to three passages of the readings, each with a question the passage raises and does not answer. The page adds the name of the reading each passage comes from, and fixed wording on how to take part. The passage check applies.
+
+**A RhizMode discussion, as an option.** In a practice-mode module, under each reading, the designer can instead (or as well) ask for a RhizMode discussion of a chosen kind: Breadcrumb Trail, Trust Audit, What's Unsettled or Who's Missing. It is drafted, checked, edited and built exactly as in a RhizMode module: a section on the reading's page plus its own ungraded forum, no answer key, built only when approved, with the same disclosure and credit line. RhizMode is not offered for the assignment, because it is by design ungraded.
+
+**Assignment.** One Moodle Assignment for the module. The model drafts the task, what to hand in, suggested steps, one to three passages to draw on, and a rubric. If the outline describes an assignment for the module, the model is told to draft that one.
+
+- **The rubric rests on the outline.** Each criterion names the learning outcome it assesses, copied from the course outline word for word, and code checks it is there, as for the overview's outcomes. A criterion with a reworded or invented outcome blocks the assignment. With no outline, or one with no outcomes, no rubric is drafted and the Assignment is marked by direct grading.
+- **Fixed shape.** Three to five criteria (six at most), four levels each: Excellent 3, Good 2, Developing 1, Beginning 0. The labels and scores are fixed and the description of each level is drafted. Moodle scales the rubric total to the Assignment's grade of 100.
+- **In Moodle** the rubric is attached as advanced grading and marked ready, so it shows to students and in the grader. The Assignment takes online text or up to three files, one attempt, no due date, feedback comments on, and has a gradebook column. All of that is ordinary settings.
+- The model is told to give no dates, marks, weighting or citation style unless the outline gives them.
+
+This is the first thing the tool drafts that a person will be graded on by an instructor. The checks show that each criterion points at a real outcome and each passage at a real place in the readings. They do not show that the task is a good one or the level descriptions fair; that is for the designer and the instructor, and the Download tab says to check the rubric with the instructor before showing it.
+
+Code: the two kinds, their checks and wording in `engine/coursepage.ts`; the Assignment and rubric writer in `engine/mbz.ts` (field lists copied from a Moodle 5.0.1 backup); the prompts in `server/pagedraft.ts`; `addPage` in `server/builds.ts`, which also adds a RhizMode kind to one reading of a practice module.
+
+Tested locally on 17 Nov 2026 with the same module and outline. The discussion (3 passages), the assignment (4 criteria, 3 passages) and a Trust Audit on the first reading (4 passages) were drafted, and every passage and every criterion's outcome passed its check on the first pass. The model tied two criteria to the same outcome and left the outline's fourth outcome unassessed, saying the readings do not cover it. An outcome edited to one not in the outline blocked the assignment until it was put back. Restored into Moodle 5.0.1, the course held the Book, two forums with their discussions started and their links to the Book working, the Quiz, the Glossary, and the Assignment with rubric as its active grading method, the rubric ready, four criteria with levels scored 0 to 3, the right submission types and a grade item out of 100. Not yet tested: grading a submission with the rubric in the browser, moodbox, and an assignment drafted from an outline that itself describes one.
 
 ## The two steps, and where AI is used
 

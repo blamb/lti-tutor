@@ -16,9 +16,9 @@ import { ImportError, importFromUrl, extractFromFile } from '../../core/importer
 import { inspectDraft, buildModule, checkActivity, type Activity, type BuildResult, type ModuleSpec, type Slot } from '../engine/index.js';
 import { buildReadings, checkDrafted, type Reading, type ReadingActivity } from '../engine/reading.js';
 import { readSpec } from './interpret.js';
-import { draftActivity, draftContract, ROLES, MODE_ROLES, type Role, type Mode } from './drafting.js';
+import { draftActivity, draftContract, ROLES, MODE_ROLES, TRAIL_ROLES, type Role, type Mode } from './drafting.js';
 import { env } from './env.js';
-import { TRAIL_TYPES } from '../engine/rhizo.js';
+import { TRAIL_TYPES, isRhizo } from '../engine/rhizo.js';
 import { isPageKind, PAGE_KINDS } from '../engine/coursepage.js';
 import { draftPage, isPageRole, type PageRole } from './pagedraft.js';
 
@@ -58,6 +58,9 @@ export interface BuildRow {
   /** For a readings module: practice questions with a key, or RhizMode's open prompts with none. */
   mode: Mode;
   readings: StoredReading[];
+  /** Where the practice questions and the key terms go: H5P on the pages, a native Moodle activity, or both. */
+  questions_as: 'h5p' | 'quiz' | 'both';
+  terms_as: 'h5p' | 'glossary' | 'both';
   /** The course outline the designer pasted or uploaded, '' if none. Course pages draw on it. */
   outline: string;
   lti_iss: string;
@@ -75,7 +78,7 @@ export interface BuildRow {
   updated_at: string;
 }
 
-const COLUMNS = `id, kind, mode, readings, outline, lti_iss, lti_context_id, created_by, title, source_name, slots, activities, leave_out,
+const COLUMNS = `id, kind, mode, readings, outline, questions_as, terms_as, lti_iss, lti_context_id, created_by, title, source_name, slots, activities, leave_out,
   course_shortname, section_number, state, created_at, updated_at`;
 
 function escapeRegExp(s: string): string {
@@ -172,8 +175,8 @@ async function saveActivity(id: number, entry: ReviewedActivity): Promise<void> 
 /** What a drafted item's passages are checked against: its reading, or for a page drafted from the whole module, all the readings and the outline. */
 export function sourceOf(build: Pick<BuildRow, 'readings' | 'outline'>, slot: Slot | undefined): { text: string; outline: string } {
   const rs = slot as ReadingSlot | undefined;
-  if (rs && (rs.role === 'overview' || rs.role === 'takeaways')) {
-    return { text: build.readings.map((r) => r.text).join('\n\n'), outline: rs.role === 'overview' ? build.outline : '' };
+  if (rs && (rs.role === 'overview' || rs.role === 'takeaways' || rs.role === 'discussion' || rs.role === 'assignment')) {
+    return { text: build.readings.map((r) => r.text).join('\n\n'), outline: rs.role === 'overview' || rs.role === 'assignment' ? build.outline : '' };
   }
   return { text: build.readings.find((r) => r.id === rs?.reading)?.text ?? '', outline: '' };
 }
@@ -221,7 +224,7 @@ function draftedEntry(n: number, spec: Activity, problems: string[]): ReviewedAc
   const empty = (spec.type === 'dialogcards' && none(spec.cards))
     || (TRAIL_TYPES.includes(spec.type) && none(spec.trails))
     // A course page the model declined: the material was too thin to draft from.
-    || (isPageKind(spec) && none(spec.type === 'overview' ? spec.covers : spec.points));
+    || (isPageKind(spec) && none(spec.type === 'overview' ? spec.covers : spec.type === 'discussion' ? spec.passages : spec.type === 'assignment' ? (spec.task ? null : []) : spec.points));
   return empty ? { n, status: 'skipped', spec, problems: [] } : { n, status: 'draft', spec, problems };
 }
 
@@ -339,15 +342,17 @@ export async function reviewActivity(build: BuildRow, n: number, change: { statu
   return entry;
 }
 
-export async function updateSettings(scope: Scope, id: number, s: { course_shortname?: string; section_number?: number; leave_out?: string[] }): Promise<BuildRow | null> {
+export async function updateSettings(scope: Scope, id: number, s: { course_shortname?: string; section_number?: number; leave_out?: string[]; questions_as?: string; terms_as?: string }): Promise<BuildRow | null> {
   const rows = await query<BuildRow>(
     `update build set
        course_shortname = coalesce($4, course_shortname),
        section_number = coalesce($5, section_number),
        leave_out = coalesce($6::jsonb, leave_out),
+       questions_as = coalesce($7, questions_as),
+       terms_as = coalesce($8, terms_as),
        updated_at = now()
      where id = $1 and lti_iss = $2 and lti_context_id = $3 returning ${COLUMNS}`,
-    [id, scope.iss, scope.contextId, s.course_shortname ?? null, s.section_number ?? null, s.leave_out ? JSON.stringify(s.leave_out) : null]
+    [id, scope.iss, scope.contextId, s.course_shortname ?? null, s.section_number ?? null, s.leave_out ? JSON.stringify(s.leave_out) : null, s.questions_as ?? null, s.terms_as ?? null]
   );
   return rows[0] ?? null;
 }
@@ -361,7 +366,7 @@ function specFor(build: BuildRow): ModuleSpec {
     prefix: prefixFor(build.id),
     overrides: overridesOf(build.leave_out),
     activities: build.activities
-      .filter((a) => a.spec && !a.problems.length && (isPageKind(a.spec) ? a.status === 'approved' : statuses.includes(a.status)))
+      .filter((a) => a.spec && !a.problems.length && (isPageKind(a.spec) || isRhizo(a.spec) ? a.status === 'approved' : statuses.includes(a.status)))
       .map((a) => a.spec!),
   };
 }
@@ -380,7 +385,7 @@ function reviewSection(build: BuildRow): string {
   for (const s of build.slots) {
     const a = build.activities.find((x) => x.n === s.n);
     const status = !a ? label.pending : a.spec && a.problems.length && a.status !== 'skipped' ? 'Not built: ' + a.problems.join(' ')
-      : a.status === 'draft' && a.spec && isPageKind(a.spec) ? 'Not built: waiting for a person to approve it' : label[a.status];
+      : a.status === 'draft' && a.spec && (isPageKind(a.spec) || isRhizo(a.spec)) ? 'Not built: waiting for a person to approve it' : label[a.status];
     lines.push(`| ${s.n} | ${(a?.spec?.title || s.title || '(no title)').replace(/\|/g, '/')} | ${status.replace(/\|/g, '/')} | ${a?.edited ? 'yes' : ''} |`);
   }
   return lines.join('\n') + '\n';
@@ -398,6 +403,7 @@ export async function runBuild(build: BuildRow, opts: { visible?: boolean } = {}
     const result = buildReadings({
       name: build.title, prefix: spec.prefix, readings: build.readings, activities: (spec.activities ?? []) as ReadingActivity[],
       mode: build.mode, model: env.BUILDER_MODEL, outline: build.outline,
+      questions_as: build.questions_as, terms_as: build.terms_as, approved: build.activities.filter((a) => a.status === 'approved').map((a) => a.n),
     }, {
       sourceName: `${build.readings.length} reading${build.readings.length === 1 ? '' : 's'}`,
       course: build.course_shortname || undefined, section: build.section_number, visible: opts.visible,
@@ -535,19 +541,22 @@ export async function addContract(build: BuildRow, attribution: Attribution): Pr
 export const OUTLINE_MAX_CHARS = 200_000;
 
 /** Add a course page to a readings module and start drafting it: the overview or takeaways (one each), or the guide for a reading that has none. */
-export async function addPage(build: BuildRow, role: PageRole, rid: number | undefined, attribution: Attribution): Promise<BuildRow> {
+export async function addPage(build: BuildRow, role: PageRole | Role, rid: number | undefined, attribution: Attribution): Promise<BuildRow> {
   if (build.kind !== 'readings') throw new ImportError('Course pages are drafted for a module that was started from readings.', 400);
   if (!build.readings.length) throw new ImportError('Add a reading first: course pages are drafted from the module’s readings.', 400);
-  const scope = PAGE_KINDS[role]!.scope;
+  // A RhizMode discussion can be added to one reading of a practice module: the same kinds, drafted and built the same way.
+  const trail = TRAIL_ROLES.includes(role as Role);
+  if (!trail && !PAGE_KINDS[role]) throw new ImportError('Unknown kind of page.', 400);
+  const scope = trail ? 'reading' : PAGE_KINDS[role]!.scope;
   const reading = scope === 'reading' ? build.readings.find((r) => r.id === rid) : undefined;
   if (scope === 'reading' && !reading) throw new ImportError('That reading is not in this module.', 404);
   if (build.slots.some((s) => (s as ReadingSlot).role === role && (scope === 'module' || (s as ReadingSlot).reading === rid))) {
-    throw new ImportError(`This ${scope === 'module' ? 'module' : 'reading'} already has a ${ROLES[role].title}. Ask for a change to it instead.`, 400);
+    throw new ImportError(`This ${scope === 'module' ? 'module' : 'reading'} already has a ${ROLES[role as Role].title}. Ask for a change to it instead.`, 400);
   }
   const n = Math.max(0, ...build.slots.map((s) => s.n)) + 1;
   const slot: ReadingSlot = {
-    n, title: ROLES[role].title, chapter: reading ? reading.title : 'The whole module', under: reading ? 'Drafted by AI from this reading' : 'Drafted by AI from the readings',
-    type: ROLES[role].asks, text: '', reading: reading ? reading.id : 0, role,
+    n, title: ROLES[role as Role].title, chapter: reading ? reading.title : 'The whole module', under: reading ? 'Drafted by AI from this reading' : 'Drafted by AI from the readings',
+    type: ROLES[role as Role].asks, text: '', reading: reading ? reading.id : 0, role: role as Role,
   };
   const rows = await query<BuildRow>(
     `update build set slots = slots || $2::jsonb, activities = activities || $3::jsonb, state = 'reading', updated_at = now()
@@ -570,7 +579,7 @@ export async function setOutline(build: BuildRow, input: { text: string } | { fi
   const next = { ...build, outline: text };
   const activities = build.activities.map((a) => {
     const slot = build.slots.find((s) => s.n === a.n);
-    if (!a.spec || a.spec.type !== 'overview') return a;
+    if (!a.spec || (a.spec.type !== 'overview' && a.spec.type !== 'assignment')) return a;
     const src = sourceOf(next, slot);
     const problems = checkDrafted(a.spec, src.text, src.outline);
     return { ...a, problems, status: problems.length && a.status === 'approved' ? 'draft' as ActivityStatus : a.status };

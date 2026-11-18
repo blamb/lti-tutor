@@ -103,7 +103,7 @@ test('buildReadings: the overview is the first page, guides top their readings, 
   assert.ok(last.includes(`From <a href="${bookPageLink(0, 2)}">Water</a>.`));
   assert.ok(last.includes(`From <a href="${bookPageLink(0, 3)}">Carbon</a>.`));
 
-  assert.equal(r.counts['AI-drafted course pages (overview, reading guides, takeaways)'], 3);
+  assert.equal(r.counts['AI-drafted pages and activities (overview, guides, takeaways, discussion, assignment)'], 3);
   assert.ok(r.report.includes('## Every AI-drafted course page, for the reviewer'));
   assert.ok(r.report.includes('| Module Overview | Outcome 1 | Explain why carbon is the basis of biological molecules. | the course outline | yes |'));
   assert.ok(r.report.includes('| Reading Guide: Water | Key idea 1 | Water is polar: The charges on a water molecule are uneven. | Water is a polar molecule. | yes |'));

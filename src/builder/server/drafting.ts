@@ -34,11 +34,13 @@ export const ROLES = {
   overview: { title: PAGE_KINDS.overview!.title, type: 'overview', asks: PAGE_KINDS.overview!.asks },
   guide: { title: PAGE_KINDS.guide!.title, type: 'guide', asks: PAGE_KINDS.guide!.asks },
   takeaways: { title: PAGE_KINDS.takeaways!.title, type: 'takeaways', asks: PAGE_KINDS.takeaways!.asks },
+  discussion: { title: PAGE_KINDS.discussion!.title, type: 'discussion', asks: PAGE_KINDS.discussion!.asks },
+  assignment: { title: PAGE_KINDS.assignment!.title, type: 'assignment', asks: PAGE_KINDS.assignment!.asks },
 } as const;
 export type Role = keyof typeof ROLES;
 /** The RhizMode kinds drafted from one reading. The contract is drafted from the whole module (draftContract). */
 export type TrailRole = 'breadcrumb' | 'trust' | 'unsettled' | 'missing';
-const TRAIL_ROLES: Role[] = ['breadcrumb', 'trust', 'unsettled', 'missing'];
+export const TRAIL_ROLES: Role[] = ['breadcrumb', 'trust', 'unsettled', 'missing'];
 const isTrail = (role: Role): role is TrailRole => TRAIL_ROLES.includes(role);
 export type Mode = 'practice' | 'rhizmode';
 /** practice: questions with an answer key. rhizmode: open prompts with none (engine/rhizo.ts). */
@@ -230,7 +232,7 @@ export async function draftActivity(n: number, reading: Reading, role: Role, att
   const ask = async (extra: string, endpoint: string): Promise<Record<string, unknown>> => {
     const common = { system: isTrail(role) ? trailSystem(role) : SYSTEM[role as 'questions' | 'cards'], userPrompt: base + extra, maxTokens: 6000, effort: 'medium' as const, attribution, endpoint, model: env.BUILDER_MODEL, promptOnly: true, preprocess: dropNulls };
     if (role === 'contract') throw new Error('A Community Contract is drafted from the whole module, not from one reading.');
-    if (role === 'overview' || role === 'guide' || role === 'takeaways') throw new Error('Course pages are drafted by pagedraft.ts.');
+    if (!isTrail(role) && role !== 'questions' && role !== 'cards') throw new Error('Course pages, discussions and assignments are drafted by pagedraft.ts.');
     if (isTrail(role)) return await jsonCall({ ...common, schema: Trails });
     return role === 'questions' ? await jsonCall({ ...common, schema: Questions }) : await jsonCall({ ...common, schema: Cards });
   };
