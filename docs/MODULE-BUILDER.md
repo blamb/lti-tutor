@@ -7,7 +7,7 @@ It is the Moodle counterpart to what D2L sells as Creator+ and Lumi for Brightsp
 ## What the designer does
 
 1. **Upload** the `.docx` from the tool's home page (the tool is launched from a course as an external tool; only instructor and designer roles get in).
-2. **Review the H5P activities.** Each specification is shown as the author wrote it, beside how it was read. Per activity: *Approve*, *Ask for a change* (in words; the spec is read again with that note), *Edit the details* (the structured form of the activity, as JSON), or *Leave out*.
+2. **Review the H5P activities.** Each specification is shown as the author wrote it, beside how it was read. Per activity: *Approve*, *Ask for a change* (in words; the spec is read again with that note), *Edit the details* (a form for that type of activity), or *Leave out*.
 3. **Check the pages** in the preview, and the **To do** list: things the draft asks for that it does not contain (a video link, a handout file, alt text), judgement calls the page rules made, and a box for dropping stray notes that were not marked as notes.
 4. **Download** the restore file and the build report, then restore in Moodle: *More › Course reuse › Restore › Merge into this course*. The module arrives hidden.
 
@@ -209,6 +209,14 @@ Tested locally on 17 Nov 2026. One hand-written activity of each of the six type
 
 Not built: interactive video, course presentation, branching scenario, interactive book, essay, image hotspots, or anything that needs media the draft does not contain. The AI step is told to say so rather than substitute a different task.
 
+## Editing an activity (forms, 17 Nov 2026)
+
+"Edit the details" on any H5P activity opens a form for its type, in place of the JSON box it used to show. All fourteen types have one. A list (answers, cards, drop zones, crossword words, timeline events) shows one block per item with an empty block at the end for adding another; clearing an item's first box removes it. A question set shows each question with the form of its own type, a tick box to remove it, and a control to add a question of a chosen type. In a module built from readings each item also shows its supporting sentence, which is checked again on saving. Anything the form does not show is kept as it was. "Edit as JSON instead" is still there for the rare case the form does not cover.
+
+Checked locally: a question edited and another removed in a question set, and a crossword word removed and one added with its supporting sentence; both saved with no problems and the quotation check re-run. Not yet tried by hand: the drag-and-drop form, where removing a zone renumbers the zones after it and each item's zone needs checking.
+
+The home page was rewritten the same day to say what the tool now builds, with readings first.
+
 ## Why a restore file
 
 LTI can add links to a course but not pages, Books or H5P activities, and Moodle's core web services cannot create activities. A backup file is the one route that works on a stock Moodle with no plugin and no administrator action: any editing teacher can restore it.
@@ -245,7 +253,6 @@ Not yet tested: a real LTI launch from Moodle (the launch and session code is th
 
 - The page rules were written against one real draft (COMP 2131 Module 8). A second team's notes will use other wording; anything unrecognised is left visible on the page and listed in the report, and the fix is a new rule.
 - The page preview is plain: no Moodle theme and no icons.
-- Editing an activity's details means editing JSON. A form per activity type is the next step.
 - One module per file. A whole course is several uploads and several restores.
 - A module is either a Word draft or a set of readings. Adding readings to a Word-draft module is not built yet.
 - Not yet checked with a screen reader, or in the Moodle mobile app.

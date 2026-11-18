@@ -22,7 +22,7 @@ const loadLaunchHtml = launchHtmlLoader(join(HERE, '..', 'web', 'launch.html'));
 
 const lti = setupLti({
   name: env.TOOL_NAME,
-  description: 'Turns a Word course draft with production notes into a Moodle restore file: Book pages, accordions, hints, callouts and H5P activities',
+  description: 'Builds a Moodle module from readings or a Word course draft as one restore file: Book pages, H5P activities, a Quiz, Glossary, discussion and Assignment, each reviewed before it is built',
 });
 
 lti.onConnect(async (token: IdToken, req, res) => {

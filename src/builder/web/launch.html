@@ -57,7 +57,7 @@
   .chip.done { background: var(--good-bg); border-color: var(--good-bg); color: var(--good); }
   .chip.bad { background: var(--bad-bg); border-color: var(--bad-bg); color: var(--bad); }
   .view { display: none; } .view.active { display: block; }
-  ol.steps { margin: .25rem 0 0 1.2rem; padding: 0; } ol.steps li { margin: .2rem 0; }
+  .steps { margin: .25rem 0 0 1.2rem; padding: 0; } .steps li { margin: .2rem 0; }
   table.tbl { border-collapse: collapse; width: 100%; font-size: .92rem; }
   table.tbl th, table.tbl td { text-align: left; padding: .45rem .5rem; border-bottom: 1px solid var(--border); vertical-align: top; }
   table.tbl th { color: var(--muted); font-weight: 500; font-size: .82rem; }
@@ -142,10 +142,40 @@
     <!-- ─── Home: upload and the list of drafts ─── -->
     <section class="view active" id="view-home" aria-labelledby="home-h">
       <div class="card">
-        <h2 id="home-h">Start from a Word course draft</h2>
+        <h2 id="home-h">Build a module for this course</h2>
+        <p>Start from readings or from a Word course draft. The tool lays out the pages, drafts or reads the activities, and shows you every one to approve, change or leave out. You then download one restore file, and the module arrives in Moodle hidden from students.</p>
+        <p class="muted" style="margin-bottom:.3rem">A module can hold:</p>
+        <ul class="steps">
+          <li><strong>A Book of pages</strong>: each reading or chapter, with a module overview, a guide to each reading and key takeaways.</li>
+          <li><strong>H5P practice activities</strong> on the pages, in fourteen types: question sets, flashcards, fill in the blanks, drag and drop, summary, crossword, timeline, accordion and more.</li>
+          <li><strong>Moodle’s own activities</strong>: a Quiz with its question bank, a Glossary, a discussion forum, and an Assignment with a rubric tied to the course’s learning outcomes.</li>
+          <li><strong>RhizMode discussions</strong>: open prompts with no answer key, about how a reading knows what it says.</li>
+        </ul>
+        <p class="muted">Anything written by AI is shown beside the passage of the reading it rests on, and a program checks the passage is really there. Nothing is graded or shown to students until you have reviewed it in Moodle.</p>
+      </div>
+      <div class="card">
+        <h2 id="readings-h">Start from readings</h2>
+        <p class="muted">Give the module a name, then add readings: an open textbook chapter or web page by address, a file (PDF, Word, text), or pasted text. Each reading becomes a page, and its activities are drafted from it by AI for you to review. Add the course outline and it can also draft the overview page with the course’s own learning outcomes, a discussion and an assignment.</p>
+        <form id="readings-form">
+          <label class="field" for="readings-title">Module name
+            <input id="readings-title" maxlength="160" required placeholder="Unit 3: The Chemistry of Life"></label>
+          <fieldset class="modes"><legend>What is drafted from each reading to begin with</legend>
+            <label class="opt"><input type="radio" name="readings-mode" value="practice" checked> <strong>Practice</strong>
+              <span>· practice questions and key-term flashcards, with an answer key checked against the reading. You can then add a summary, a crossword or a timeline, send the questions to a Moodle Quiz and the terms to a Glossary, and add a RhizMode discussion to any reading.</span></label>
+            <label class="opt"><input type="radio" name="readings-mode" value="rhizmode"> <strong>RhizMode</strong>
+              <span>· open prompts with no answer key, about how the reading knows what it says. Students answer in a discussion forum. Nothing is graded. <span id="rhizo-credit"></span></span></label>
+          </fieldset>
+          <p class="muted">Either way, a guide to each reading is drafted too, and the overview, key takeaways, discussion and assignment are drafted when you ask for them.</p>
+          <button class="btn" type="submit" style="margin-top:.8rem">Start the module</button>
+          <div id="readings-msg" role="status"></div>
+        </form>
+      </div>
+      <div class="card">
+        <h2>Start from a Word course draft</h2>
+        <p class="muted">For a module already written in Word with the team’s production notes. The notes are acted on by fixed rules: accordions, hints, callouts, code blocks, tables and images. AI is used only to read each H5P specification into a working activity, in the author’s own words.</p>
         <ol class="steps">
           <li>Upload the draft, with its <code>[@Production: …]</code> notes and H5P specifications left in.</li>
-          <li>Check how each H5P specification was read. Approve it, ask for a change, or leave it out.</li>
+          <li>Check how each H5P specification was read. Approve it, ask for a change, edit it, or leave it out.</li>
           <li>Download one restore file and restore it into the course. The module arrives hidden from students.</li>
         </ol>
         <form id="upload-form" style="margin-top:1rem">
@@ -155,22 +185,6 @@
           </label>
           <button class="btn" type="submit" id="upload-btn" style="margin-top:.8rem">Upload and read the draft</button>
           <div id="upload-msg" role="status"></div>
-        </form>
-      </div>
-      <div class="card">
-        <h2 id="readings-h">Or start from readings</h2>
-        <p class="muted">No Word draft? Give the module a name, then add readings: an open textbook chapter or web page by address, a file (PDF, Word, text), or pasted text. Each reading becomes a page, with activities drafted from it by AI for you to review.</p>
-        <form id="readings-form">
-          <label class="field" for="readings-title">Module name
-            <input id="readings-title" maxlength="160" required placeholder="Unit 3: The Chemistry of Life"></label>
-          <fieldset class="modes"><legend>What is drafted from each reading</legend>
-            <label class="opt"><input type="radio" name="readings-mode" value="practice" checked> <strong>Practice</strong>
-              <span>· practice questions and key-term flashcards, with an answer key checked against the reading</span></label>
-            <label class="opt"><input type="radio" name="readings-mode" value="rhizmode"> <strong>RhizMode</strong>
-              <span>· open prompts with no answer key, about how the reading knows what it says. Students answer in a discussion forum. Nothing is graded. <span id="rhizo-credit"></span></span></label>
-          </fieldset>
-          <button class="btn" type="submit" style="margin-top:.8rem">Start the module</button>
-          <div id="readings-msg" role="status"></div>
         </form>
       </div>
       <div class="card">
@@ -285,7 +299,7 @@
     const box = $('#build-list');
     try {
       const { builds } = await api('/api/builds');
-      if (!builds.length) { box.innerHTML = '<p class="empty">No drafts yet. Upload one above.</p>'; return; }
+      if (!builds.length) { box.innerHTML = '<p class="empty">No modules yet. Start one above.</p>'; return; }
       box.innerHTML = `<div class="scroll-x"><table class="tbl"><thead><tr><th scope="col">Module</th><th scope="col">Uploaded</th><th scope="col">Activities</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead><tbody>` +
         builds.map((b) => `<tr><th scope="row" style="font-weight:500;color:inherit;font-size:inherit">${esc(b.title)}<div class="muted">${b.kind === 'readings' ? `From ${b.reading_count} reading${b.reading_count === 1 ? '' : 's'}${b.mode === 'rhizmode' ? ' · RhizMode' : ''}` : esc(b.source_name)}</div></th>
           <td>${when(b.created_at)}</td>
@@ -831,7 +845,31 @@
               place: placeValue(), trails: kept, your_turn: $('#rz-turn-' + n).value.trim() } }, 'Saving…');
           });
         }
+      } else if (what === 'edit' && (H5P_FORMS[spec.type] || spec.type === 'questionset') && btn.dataset.json !== '1') {
+        if (openPanel(btn, `<div data-form><label class="field" for="hf-title-${n}">Title
+              <input id="hf-title-${n}" data-k="title" data-kind="short" maxlength="200" value="${esc(String(spec.title || '').replace(/<[^>]+>/g, ''))}"></label>
+            ${formHtml(spec.type, spec)}</div>
+            <p style="margin-top:.7rem"><button class="btn btn-small" type="button" data-save>Save changes</button>
+              <button class="btn btn-ghost btn-small" type="button" data-as-json>Edit as JSON instead</button> <span class="err" data-err></span></p>
+            <p class="muted">A few inline tags are kept as typed: &lt;code&gt;, &lt;strong&gt;, &lt;em&gt;. Saving checks the activity and tells you if something is missing.</p>`)) {
+          const form = $('[data-form]', panel);
+          const addQ = $('[data-add-q]', panel);
+          if (addQ) addQ.addEventListener('click', () => {
+            // Keep what has been typed, add an empty question of the chosen type, and draw the form again.
+            const now = mergeForm(spec, readScope(form));
+            now.questions = [...(now.questions || []), { type: $('#add-q-type').value, ...($('#add-q-type').value === 'truefalse' ? { correct: true } : {}) }];
+            const title = $('[data-k=title]', form).value;
+            form.innerHTML = form.firstElementChild.outerHTML + formHtml(spec.type, now);
+            $('[data-k=title]', form).value = title;
+          });
+          $('[data-as-json]', panel).addEventListener('click', () => { btn.setAttribute('aria-expanded', 'false'); btn.dataset.json = '1'; btn.click(); });
+          $('[data-save]', panel).addEventListener('click', () => {
+            const { n: _n, ...kept } = spec;
+            put({ spec: { ...mergeForm(kept, readScope($('[data-form]', panel))), type: spec.type } }, 'Saving…');
+          });
+        }
       } else if (what === 'edit') {
+        btn.dataset.json = '';
         const { n: _n, ...editable } = spec;
         if (openPanel(btn, `<label class="field" for="edit-${n}">The activity’s details
             <span class="hint">This is exactly what gets built. Change wording, mark a different answer correct, or reorder items, keeping the punctuation and quotation marks of the format. Saving checks it and tells you if something is missing.</span>
@@ -845,6 +883,112 @@
         }
       }
     }));
+  }
+
+
+  // ─── Edit forms for the H5P activities ───
+  // One description per type of what a person may change. A field is [kind, key, label, hint?, extra?]:
+  //   text (a box), short (one line), lines (a box, one item per line), check (a tick box), tf (true or false),
+  //   zone (which drop zone an item belongs in), list (repeating rows; the last empty row adds one).
+  const STAR = 'Put *asterisks* round each answer.';
+  const FB = ['text', 'feedback', 'Feedback after checking', 'Optional.'];
+  const INSTR = ['text', 'instructions', 'Instructions to the learner'];
+  const H5P_FORMS = {
+    multichoice: [['text', 'question', 'Question'],
+      ['list', 'answers', 'Answer', 'Clear the answer’s text to remove it.', [['text', 'text', 'Answer'], ['check', 'correct', 'This answer is correct'], ['text', 'feedback', 'Feedback if chosen', 'Optional.']]], FB],
+    truefalse: [['text', 'question', 'Statement'], ['tf', 'correct', 'The statement is'], FB,
+      ['text', 'feedback_correct', 'Feedback if right', 'Optional. Used instead of the line above.'], ['text', 'feedback_wrong', 'Feedback if wrong', 'Optional.']],
+    blanks: [INSTR, ['lines', 'text', 'Text with blanks', STAR + ' A slash separates accepted answers: *uses/calls*. One passage per line.'], ['check', 'case_sensitive', 'Capital letters matter'], FB],
+    dragtext: [INSTR, ['lines', 'text', 'Text with words to drag', STAR + ' One sentence or line per line. Plain text only.'], FB],
+    markwords: [INSTR, ['lines', 'text', 'Text with the words to click', 'Put *asterisks* round each correct word. Single words only. One paragraph per line.'], FB],
+    dragdrop: [INSTR,
+      ['list', 'zones', 'Drop zone', 'Clear the label to remove the zone. Removing a zone renumbers the ones after it, so check each item’s zone afterwards.', [['short', 'label', 'Label'], ['text', 'feedback', 'Note shown for this zone', 'Optional.']]],
+      ['list', 'items', 'Item to drag', 'Clear the text to remove the item.', [['text', 'text', 'Text'], ['zone', 'zone', 'Belongs in']]],
+      ['text', 'feedback_correct', 'Feedback when all correct', 'Optional.'], ['text', 'feedback_incorrect', 'Feedback otherwise', 'Optional.']],
+    dialogcards: [['text', 'description', 'Line telling the learner what to do', 'Optional.'],
+      ['list', 'cards', 'Card', 'Clear the front to remove the card.', [['text', 'front', 'Front'], ['text', 'back', 'Back']]]],
+    sort: [INSTR, ['lines', 'paragraphs', 'Paragraphs, in the correct order', 'One per line. They are shuffled for the learner.'], FB],
+    accordion: [['list', 'panels', 'Panel', 'Clear the title to remove the panel.', [['short', 'title', 'Title'], ['text', 'text', 'Text']]]],
+    summary: [INSTR, ['list', 'sets', 'Group of statements', 'Clear the correct statement to remove the group.', [['text', 'correct', 'The correct statement'], ['lines', 'wrong', 'Wrong statements', 'One per line.']]], FB],
+    singlechoice: [['list', 'questions', 'Question', 'Clear the question to remove it.', [['text', 'question', 'Question'], ['text', 'correct', 'The correct answer'], ['lines', 'wrong', 'Wrong answers', 'One per line.']]], FB],
+    crossword: [INSTR, ['list', 'words', 'Word', 'Clear the clue to remove the word.', [['text', 'clue', 'Clue'], ['short', 'answer', 'Answer', 'Spaces and hyphens are taken out in the grid.']]]],
+    timeline: [['short', 'headline', 'Title of the timeline'], ['text', 'intro', 'Introduction', 'Optional.'],
+      ['list', 'events', 'Event', 'Clear the date to remove the event.', [['short', 'date', 'Date', 'A year (1998), year and month (1998-03) or full date (1998-03-07).'], ['short', 'headline', 'Headline'], ['text', 'text', 'What happened', 'Optional.']]]],
+  };
+  // A question set holds questions of these types, each edited with that type's own form.
+  const SET_TYPES = ['multichoice', 'truefalse', 'blanks', 'dragtext'];
+  const QUOTE_FIELD = ['text', 'source_quote', 'Supporting sentence from the reading', 'Copied from the reading exactly. Saving checks it is there.'];
+  // In a module built from readings every item also carries the sentence it rests on.
+  const withQuote = (fields, on) => (on ? [...fields, QUOTE_FIELD] : fields);
+  const rowFields = (type, key, sub) => withQuote(sub, isReadings() && ['cards', 'sets', 'words', 'events'].includes(key) && ['dialogcards', 'summary', 'crossword', 'timeline'].includes(type));
+  let formSeq = 0;
+
+  function fieldHtml(type, f, value, ctx) {
+    const [kind, key, label, hint, sub] = f;
+    const id = 'hf-' + (++formSeq);
+    const lab = (inner) => `<label class="field" for="${id}">${esc(label)}${hint ? ` <span class="hint">${esc(hint)}</span>` : ''}${inner}</label>`;
+    if (kind === 'list') {
+      const rows = [...(Array.isArray(value) ? value : []), null];
+      return `<div data-list="${key}">${rows.map((r, i) => rowHtml(type, key, label, hint, rowFields(type, key, sub), r, i, rows.length, ctx)).join('')}</div>`;
+    }
+    if (kind === 'check') return `<label class="opt" for="${id}"><input type="checkbox" id="${id}" data-k="${key}" data-kind="check" ${value ? 'checked' : ''}> ${esc(label)}</label>`;
+    if (kind === 'tf') return lab(`<select id="${id}" data-k="${key}" data-kind="tf"><option value="true" ${value === true ? 'selected' : ''}>True</option><option value="false" ${value === false ? 'selected' : ''}>False</option></select>`);
+    if (kind === 'zone') return lab(`<select id="${id}" data-k="${key}" data-kind="zone">${(ctx.zones || []).map((z, i) => `<option value="${i}" ${Number(value) === i ? 'selected' : ''}>${i + 1}. ${esc(String(z.label || '').replace(/<[^>]+>/g, ''))}</option>`).join('')}</select>`);
+    if (kind === 'short') return lab(`<input id="${id}" data-k="${key}" data-kind="short" value="${esc(value ?? '')}">`);
+    const text = kind === 'lines' ? (Array.isArray(value) ? value : value ? [value] : []).join('\n') : (value ?? '');
+    return lab(`<textarea id="${id}" data-k="${key}" data-kind="${kind}">${esc(text)}</textarea>`);
+  }
+  function rowHtml(type, key, label, hint, fields, row, i, count, ctx) {
+    const added = row === null;
+    const head = added ? `Add ${/^[aeiou]/i.test(label) ? 'an' : 'a'} ${label.toLowerCase()} (optional)` : `${label} ${i + 1}`;
+    // What the form does not show (a reading's link to its question, say) is kept as it was.
+    return `<div class="trail" data-row data-orig="${esc(JSON.stringify(row || {}))}"><p class="muted" style="margin:.5rem 0 0"><strong>${esc(head)}</strong>${i === 0 && hint ? ` · ${esc(hint)}` : ''}</p>
+      ${fields.map((f) => fieldHtml(type, f, (row || {})[f[1]], ctx)).join('')}</div>`;
+  }
+  function formHtml(type, spec) {
+    const ctx = { zones: spec.zones || [] };
+    if (type === 'questionset') {
+      const qs = spec.questions || [];
+      return `<div data-list="questions" data-poly>${qs.map((q, i) => `<div class="trail" data-row data-type="${esc(q.type)}" data-orig="${esc(JSON.stringify(q))}">
+          <p class="muted" style="margin:.5rem 0 0"><strong>Question ${i + 1} of ${qs.length}</strong> · ${esc(typeLabel(q.type))} · <label class="opt" style="display:inline"><input type="checkbox" data-drop> Remove this question</label></p>
+          ${withQuote(H5P_FORMS[q.type] || [], isReadings()).map((f) => fieldHtml(q.type, f, q[f[1]], { zones: [] })).join('')}</div>`).join('')}</div>
+        <p style="margin-top:.8rem"><label for="add-q-type">Add a question</label> <select id="add-q-type">${SET_TYPES.map((t) => `<option value="${t}">${esc(typeLabel(t))}</option>`).join('')}</select>
+          <button class="btn btn-ghost btn-small" type="button" data-add-q>Add</button></p>
+        <label class="opt"><input type="checkbox" data-k="check_at_end" data-kind="check" ${spec.check_at_end ? 'checked' : ''}> Check the answers at the end, not after each question</label>`;
+    }
+    return H5P_FORMS[type].map((f) => fieldHtml(type, f, spec[f[1]], ctx)).join('');
+  }
+  // Read a form back. Fields belong to the nearest row (or to the form itself), so rows inside rows stay separate.
+  function readScope(scope) {
+    const out = {};
+    const mine = (el) => el.parentElement.closest('[data-row], [data-form]') === scope;
+    $$('[data-k]', scope).filter(mine).forEach((el) => {
+      const k = el.dataset.k, kind = el.dataset.kind;
+      if (kind === 'check') out[k] = el.checked;
+      else if (kind === 'tf') out[k] = el.value === 'true';
+      else if (kind === 'zone') out[k] = Number(el.value);
+      else if (kind === 'lines') out[k] = el.value.split('\n').map((x) => x.trim()).filter(Boolean);
+      else out[k] = el.value.trim();
+    });
+    $$('[data-list]', scope).filter(mine).forEach((box) => {
+      out[box.dataset.list] = $$('[data-row]', box).filter((r) => r.parentElement === box).map((r) => {
+        if ($('[data-drop]', r) && $('[data-drop]', r).checked) return null;
+        const first = $('[data-k]', r);
+        const row = mergeForm(JSON.parse(r.dataset.orig || '{}'), readScope(r));
+        if (r.dataset.type) row.type = r.dataset.type;
+        // An emptied first box removes the row; so does the untouched "add" row.
+        return box.hasAttribute('data-poly') || (first && first.value.trim() !== '') ? row : null;
+      }).filter(Boolean);
+    });
+    return out;
+  }
+  // What was typed replaces what was there; optional text left empty is taken out, as the drafts leave it out.
+  function mergeForm(base, typed) {
+    const out = { ...base };
+    for (const [k, v] of Object.entries(typed)) {
+      if (v === '' && !['question', 'title', 'text', 'front', 'back', 'label', 'correct'].includes(k)) delete out[k]; else out[k] = v;
+    }
+    return out;
   }
 
   // ─── Readings (modules started from readings) ───
