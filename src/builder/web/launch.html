@@ -1196,7 +1196,8 @@
     try {
       const p = await loadPages();
       const c = counts();
-      const mb = (p.size / 1048576).toFixed(1);
+      const mb = p.size < 104858 ? '' : (p.size / 1048576).toFixed(1);
+      const sizeLabel = mb ? `${mb} MB` : `${Math.max(1, Math.round(p.size / 1024))} KB`;
       pane.innerHTML = `<div class="card"><h2>The restore file</h2>
           ${c.pending ? '<div class="banner warn">Some specifications are still being read. A file downloaded now will not include them.</div>' : ''}
           ${(() => {
@@ -1223,7 +1224,7 @@
             </fieldset>` : ''}
             <button class="btn btn-ghost btn-small" type="submit" style="margin-top:.6rem">Save settings</button> <span id="set-msg" role="status"></span>
           </form>
-          <p style="margin-top:1.1rem"><a class="btn" id="dl" href="${esc(apiUrl(`/api/builds/${build.id}/download`))}">Download ${esc(p.file_name)} (${mb} MB)</a>
+          <p style="margin-top:1.1rem"><a class="btn" id="dl" href="${esc(apiUrl(`/api/builds/${build.id}/download`))}">Download ${esc(p.file_name)} (${sizeLabel})</a>
             <a class="btn btn-ghost" href="${esc(apiUrl(`/api/builds/${build.id}/report.md?download=1`))}">Download the build report</a>
             ${p.glossary ? `<a class="btn btn-ghost" href="${esc(apiUrl(`/api/builds/${build.id}/glossary.xml`))}">Download the glossary entries</a>` : ''}</p>
         </div>
@@ -1234,9 +1235,9 @@
               <p>Use the <strong>Download</strong> button above. The file is saved where your browser keeps downloads, usually the <strong>Downloads</strong> folder, as <code>${esc(p.file_name)}</code>. Leave it as it is: do not open, rename or unzip it.</p></li>
             <li><h3>Open the restore page in Moodle</h3>
               ${me.reuse_url ? `<p><a class="btn btn-small" href="${esc(me.reuse_url)}" target="_blank" rel="noopener">Open Course reuse for this course <span class="visually-hidden">(opens in a new tab)</span>↗</a></p>
-                <p>It opens in a new tab. In the menu at the top left of that page, choose <strong>Restore</strong>.</p>
-                <p class="muted">Or from the course itself: <strong>More › Course reuse</strong>, then choose <strong>Restore</strong> in the menu.</p>`
-                : '<p>In the course, choose <strong>More › Course reuse</strong>. In the menu at the top left of that page, choose <strong>Restore</strong>.</p>'}</li>
+                <p>It opens in a new tab. On that page, choose <strong>Restore</strong>. Depending on the site’s theme it is a link in a short list or an entry in a menu near the top.</p>
+                <p class="muted">Or from the course itself: <strong>More › Course reuse</strong>, then <strong>Restore</strong>.</p>`
+                : '<p>In the course, choose <strong>More › Course reuse</strong>. On that page, choose <strong>Restore</strong>: a link in a short list, or an entry in a menu near the top, depending on the site’s theme.</p>'}</li>
             <li><h3>Give Moodle the file</h3>
               <p>Under <strong>Upload a backup file</strong>, drag the file from your Downloads folder into the box with the arrow, or press <strong>Choose a file…</strong> and pick it. When its name shows in the box, press <strong>Restore</strong>.</p></li>
             <li><h3>Click through Moodle’s screens</h3>
