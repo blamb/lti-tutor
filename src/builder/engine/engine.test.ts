@@ -96,6 +96,12 @@ const SAMPLES: Record<string, Activity> = {
       { type: 'truefalse', question: 'Two is even.', correct: true },
       { type: 'multichoice', question: 'Pick the vowel.', answers: [{ text: 'a', correct: true }, { text: 'b' }] },
       { type: 'blanks', title: 'Fill', text: 'One plus one is *two*.' }] },
+  accordion: { n: 9, type: 'accordion', title: 'Panels', panels: [{ title: 'One', text: 'First.' }, { title: 'Two', text: 'Second.' }] },
+  summary: { n: 10, type: 'summary', title: 'Summary', sets: [{ correct: 'Water is wet.', wrong: ['Water is dry.'] }] },
+  markwords: { n: 11, type: 'markwords', title: 'Mark', instructions: 'Click the fruit.', text: ['An *apple* and a chair.'] },
+  singlechoice: { n: 12, type: 'singlechoice', title: 'Quick', questions: [{ question: 'A fruit?', correct: 'Apple', wrong: ['Chair'] }] },
+  crossword: { n: 13, type: 'crossword', title: 'Crossword', words: [{ clue: 'A fruit', answer: 'apple' }, { clue: 'A seat', answer: 'chair' }] },
+  timeline: { n: 14, type: 'timeline', title: 'Timeline', headline: 'Events', events: [{ date: '1998', headline: 'First' }, { date: '2001-05', headline: 'Second' }] },
 };
 
 // A tiny made-up Word file: enough structure for the reader and the page rules.
@@ -144,9 +150,9 @@ function tinyDocx(): Uint8Array {
 
 // ─── (a) unit tests ─────────────────────────────────────────────────────────
 
-test('ACTIVITY_TYPES lists the eight types and each has a sample here', () => {
+test('ACTIVITY_TYPES lists every type and each has a sample here', () => {
   assert.deepEqual([...ACTIVITY_TYPES].sort(), Object.keys(SAMPLES).sort());
-  assert.equal(ACTIVITY_TYPES.length, 8);
+  assert.equal(ACTIVITY_TYPES.length, 14);
 });
 
 for (const [type, spec] of Object.entries(SAMPLES)) {
@@ -161,7 +167,8 @@ for (const [type, spec] of Object.entries(SAMPLES)) {
     assert.equal(deps[0]!.machineName, LIB[type]);
     for (const d of deps) assert.ok(Number.isInteger(d.majorVersion) && Number.isInteger(d.minorVersion), 'versions are whole numbers');
     assert.equal(typeof content, 'object');
-    assert.ok(Object.keys(content).length > 3, 'content has the built fields plus the library defaults');
+    // An accordion and a timeline have one or two fields in all; the others also carry the library's interface wording.
+    assert.ok(Object.keys(content).length > (type === 'accordion' || type === 'timeline' ? 0 : 3), 'content has the built fields plus the library defaults');
   });
 }
 
@@ -208,7 +215,7 @@ test('checkActivity: catches bad specs and passes good ones', () => {
     const problems = checkActivity(act as Activity);
     assert.ok(problems.some((p) => pattern.test(p)), `expected ${pattern} in ${JSON.stringify(problems)}`);
   };
-  bad({ n: 1, type: 'crossword', title: 'X' }, /unknown type/);
+  bad({ n: 1, type: 'hotspots', title: 'X' }, /unknown type/);
   bad({ n: 1, type: 'truefalse', question: 'Q', correct: true }, /title/);
   bad({ type: 'truefalse', title: 'T', question: 'Q', correct: true }, /"n"/);
   bad({ n: 1, type: 'truefalse', title: 'T', question: 'Q' }, /correct/);

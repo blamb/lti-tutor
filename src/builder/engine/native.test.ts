@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { gunzipSync } from 'node:zlib';
-import { buildReadings, type Reading, type ReadingActivity } from './reading.js';
+import { buildReadings, checkDrafted, type Reading, type ReadingActivity } from './reading.js';
 import { buildMbz, glossaryImportXml, quizLink } from './mbz.js';
 import { checkPage } from './coursepage.js';
 
@@ -139,4 +139,66 @@ test('a criterion whose outcome is not in the outline blocks the assignment; wit
   assert.ok(plain.judgement.some((j) => j.includes('has no rubric')));
   assert.ok(checkPage(assignment({ rubric: [{ criterion: 'x', outcome: 'y', levels: ['only one'] }] })).some((p) => p.includes('each of the 4 levels')));
   assert.ok(checkPage(discussion({ passages: [] })).some((p) => p.includes('no passage to start from')));
+});
+
+// ─── The H5P types added after the first eight ───
+
+import { packageJson, checkActivity, crosswordAnswer, timelineDate, ACTIVITY_TYPES } from './h5p.js';
+
+const content = (spec: Record<string, unknown>): Record<string, any> => JSON.parse(packageJson({ n: 1, title: 'T', ...spec }).content);
+const deps = (spec: Record<string, unknown>): string[] => JSON.parse(packageJson({ n: 1, title: 'T', ...spec }).h5p).preloadedDependencies.map((d: { machineName: string }) => d.machineName);
+
+test('six more H5P types are buildable, each in the shape its library reads', () => {
+  for (const t of ['accordion', 'summary', 'markwords', 'singlechoice', 'crossword', 'timeline']) assert.ok(ACTIVITY_TYPES.includes(t), t);
+
+  const acc = content({ type: 'accordion', panels: [{ title: 'One', text: 'Body' }] });
+  assert.equal(acc.panels[0].title, 'One');
+  assert.equal(acc.panels[0].content.params.text, '<p>Body</p>');
+  assert.ok(acc.panels[0].content.library.startsWith('H5P.AdvancedText '));
+  assert.ok(deps({ type: 'accordion', panels: [{ title: 'One', text: 'Body' }] }).includes('H5P.AdvancedText'));
+
+  // Summary and Single Choice Set take the first statement or answer as the correct one.
+  const sum = content({ type: 'summary', sets: [{ correct: 'Right', wrong: ['Wrong a', 'Wrong b'] }] });
+  assert.deepEqual(sum.summaries[0].summary, ['<p>Right</p>', '<p>Wrong a</p>', '<p>Wrong b</p>']);
+  const scs = content({ type: 'singlechoice', questions: [{ question: 'Q?', correct: 'Yes', wrong: ['No'] }] });
+  assert.deepEqual(scs.choices[0].answers, ['<p>Yes</p>', '<p>No</p>']);
+  assert.ok(!deps({ type: 'singlechoice', questions: [{ question: 'Q?', correct: 'Yes', wrong: ['No'] }] }).includes('H5P.MultiChoice'), 'its questions are not sub-activities');
+
+  const mark = content({ type: 'markwords', instructions: 'Click the nouns.', text: ['The *cat* sat.', 'A *dog* ran.'] });
+  assert.equal(mark.textField, '<p>The *cat* sat.</p><p>A *dog* ran.</p>');
+
+  const cw = content({ type: 'crossword', words: [{ clue: 'A weak attraction', answer: 'Hydrogen bond' }, { clue: 'Sticking together', answer: 'cohesion' }] });
+  assert.deepEqual(cw.words.map((w: { answer: string }) => w.answer), ['HYDROGENBOND', 'COHESION']);
+  assert.equal(cw.words[0].clue, 'A weak attraction (8, 4)', 'a phrase loses its space in the grid, so the clue gives the word lengths');
+  assert.equal(cw.theme.backgroundColor, '#173354');
+
+  const tl = content({ type: 'timeline', headline: 'History', events: [{ date: '1998-03-07', headline: 'A' }, { date: '2001', headline: 'B', text: 'Body' }] });
+  assert.deepEqual(tl.timeline.date.map((d: { startDate: string }) => d.startDate), ['1998,3,7', '2001']);
+  assert.deepEqual(tl.timeline.date[0].asset, {}, 'the player fails on an event with no media group');
+});
+
+test('the new types are checked before building', () => {
+  const problems = (spec: Record<string, unknown>): string => checkActivity({ n: 1, title: 'T', ...spec }).join(' | ');
+  assert.equal(problems({ type: 'accordion', panels: [{ title: 'One', text: 'Body' }] }), '');
+  assert.match(problems({ type: 'markwords', instructions: 'Click.', text: ['The *big cat* sat.'] }), /can only mark single words/);
+  assert.match(problems({ type: 'crossword', words: [{ clue: 'x', answer: 'cat' }] }), /at least two words/);
+  assert.match(problems({ type: 'crossword', words: [{ clue: 'x', answer: 'Co-hesion' }, { clue: 'y', answer: 'cohesion' }] }), /repeats the answer "COHESION"/);
+  assert.match(problems({ type: 'timeline', headline: 'H', events: [{ date: 'the late 1990s', headline: 'A' }] }), /not a date the timeline can place/);
+  assert.match(problems({ type: 'summary', sets: [{ correct: 'Right', wrong: [] }] }), /at least one "wrong" statement/);
+  assert.equal(crosswordAnswer('Café-au-lait 2'), 'CAFÉAULAIT2');
+  assert.equal(timelineDate('1998/3'), '1998,3');
+  assert.throws(() => timelineDate('1998-13'), /no such month/);
+});
+
+test('a drafted summary, crossword and timeline are checked against the reading and built onto its page', () => {
+  const summary: ReadingActivity = { n: 20, reading: 1, type: 'summary', title: 'Summary: Water', sets: [{ correct: 'Water is polar.', wrong: ['Water is not polar.'], source_quote: 'Water is a polar molecule.' }] };
+  const crossword: ReadingActivity = { n: 21, reading: 1, type: 'crossword', title: 'Crossword: Water', words: [
+    { clue: 'The attraction between water molecules', answer: 'cohesion', source_quote: COH },
+    { clue: 'The attraction between water and other molecules', answer: 'adhesion', source_quote: 'Adhesion is the attraction between water and other molecules.' }] };
+  const bad: ReadingActivity = { n: 22, reading: 1, type: 'timeline', title: 'Timeline: Water', headline: 'Water', events: [{ date: '1900', headline: 'Invented', source_quote: 'Water was invented in 1900.' }] };
+  const r = buildReadings({ name: 'Chemistry', readings, activities: [summary, crossword], approved: [] }, { sourceName: 'x' });
+  assert.deepEqual(Object.keys(r.h5p).sort(), ['r-h5p-20-summary-water.h5p', 'r-h5p-21-crossword-water.h5p']);
+  assert.ok(r.chapters[0]!.html.includes('<h5>Summary</h5>') && r.chapters[0]!.html.includes('<h5>Crossword</h5>'));
+  assert.ok(r.report.includes('| Water | Crossword: Water | The attraction between water molecules | cohesion |'));
+  assert.deepEqual(checkDrafted(bad, WATER), ['Event 1: the supporting sentence is not in the reading as quoted.']);
 });

@@ -25,6 +25,10 @@ import { env } from './env.js';
 export const ROLES = {
   questions: { title: 'Practice Questions', type: 'questionset', asks: 'Practice questions (multiple choice and true/false)' },
   cards: { title: 'Key Terms', type: 'dialogcards', asks: 'Flashcards of the key terms the reading defines' },
+  // More practice types, drafted from one reading when the designer asks for them.
+  summary: { title: 'Summary', type: 'summary', asks: 'Choose the correct statement, group by group, until the reading’s main points are built up' },
+  crossword: { title: 'Crossword', type: 'crossword', asks: 'A crossword of the terms the reading defines' },
+  timeline: { title: 'Timeline', type: 'timeline', asks: 'The dated events the reading describes, on a timeline to scroll through (nothing is scored)' },
   breadcrumb: { title: 'Breadcrumb Trail', type: 'breadcrumb', asks: RHIZO_KINDS.breadcrumb!.asks },
   trust: { title: 'Trust Audit', type: 'trust', asks: RHIZO_KINDS.trust!.asks },
   unsettled: { title: 'What’s Unsettled', type: 'unsettled', asks: RHIZO_KINDS.unsettled!.asks },
@@ -41,6 +45,10 @@ export type Role = keyof typeof ROLES;
 /** The RhizMode kinds drafted from one reading. The contract is drafted from the whole module (draftContract). */
 export type TrailRole = 'breadcrumb' | 'trust' | 'unsettled' | 'missing';
 export const TRAIL_ROLES: Role[] = ['breadcrumb', 'trust', 'unsettled', 'missing'];
+/** Practice types a designer can add to a reading on request. */
+export const EXTRA_ROLES: Role[] = ['summary', 'crossword', 'timeline'];
+type PracticeRole = 'questions' | 'cards' | 'summary' | 'crossword' | 'timeline';
+const isPractice = (role: Role): role is PracticeRole => role === 'questions' || role === 'cards' || EXTRA_ROLES.includes(role);
 const isTrail = (role: Role): role is TrailRole => TRAIL_ROLES.includes(role);
 export type Mode = 'practice' | 'rhizmode';
 /** practice: questions with an answer key. rhizmode: open prompts with none (engine/rhizo.ts). */
@@ -62,6 +70,20 @@ const Questions = z.object({ interpretation: z.string(), questions: z.array(Ques
 const Cards = z.object({
   interpretation: z.string(),
   cards: z.array(z.object({ front: z.string().min(1), back: z.string().min(1), source_quote: z.string().min(1) })).max(24),
+});
+
+const Summary = z.object({
+  interpretation: z.string(),
+  sets: z.array(z.object({ correct: z.string().min(1), wrong: z.array(z.string().min(1)).min(1).max(3), source_quote: z.string().min(1) })).max(8),
+});
+const Crossword = z.object({
+  interpretation: z.string(),
+  words: z.array(z.object({ clue: z.string().min(1), answer: z.string().min(1), source_quote: z.string().min(1) })).max(14),
+});
+const Timeline = z.object({
+  interpretation: z.string(),
+  headline: z.string(),
+  events: z.array(z.object({ date: z.string().min(1), headline: z.string().min(1), text: z.string().optional(), source_quote: z.string().min(1) })).max(16),
 });
 
 const Trails = z.object({
@@ -189,7 +211,33 @@ const COMMON = `You write practice activities for a university course from one r
 
 Reply with the JSON object only: no text before or after it, no code fence.`;
 
-const SYSTEM: Record<'questions' | 'cards', string> = {
+const SYSTEM: Record<PracticeRole, string> = {
+  summary: `${COMMON}
+
+# This task: a summary activity
+The student is shown a few statements at a time and picks the one that is true according to the reading. Each correct pick is added to a growing list, so that the finished list is a summary of the reading.
+Return { "interpretation", "sets": [ ... ] } with 4 to 6 sets (fewer if the reading is short; never pad), in the order the reading presents the ideas.
+- Each set is { "correct", "wrong": [ ... ], "source_quote" }. "correct" is one sentence stating a main point of the reading in plain words. Read in order, the correct statements should make a fair summary of the reading.
+- "wrong": two statements on the same point that the reading contradicts, each a mistake a student could plausibly make from this reading, similar in length and form to the correct one. Not jokes, and not statements about something else.
+- "source_quote" supports the correct statement.`,
+  crossword: `${COMMON}
+
+# This task: a crossword
+Return { "interpretation", "words": [ ... ] }.
+- One word for each important term the reading itself defines or explains: "answer" is the term, "clue" is its meaning in the reading's own words, shortened only by leaving words out, and without the term itself or any form of it in the clue. "source_quote" is the sentence that defines the term.
+- Prefer single-word terms of 4 to 14 letters. A two-word term is acceptable; do not use longer phrases, abbreviations of two letters, or numbers.
+- Between 6 and 12 words, no answer twice. If the reading defines fewer than four usable terms, return an empty "words" array and say so in "interpretation".
+- No HTML in clues or answers.`,
+  timeline: `${COMMON}
+
+# This task: a timeline
+Students scroll through the dated events the reading describes. Nothing is answered or scored.
+Return { "interpretation", "headline", "events": [ ... ] }.
+- "headline": a title of a few words for the whole timeline, naming what the events are about.
+- One event for each thing the reading says happened at a stated time: { "date", "headline", "text"?, "source_quote" }. "date" is the year ("1998"), or year and month ("1998-03"), or the full date ("1998-03-07"), exactly as precise as the reading gives it. Never estimate a date and never turn "the late 1990s" or "recently" into a year: leave such events out.
+- "headline": two to seven words naming the event. "text": one sentence, in the reading's terms, saying what happened. "source_quote" is the sentence that gives the date.
+- In order of date. Between 4 and 12 events. If the reading dates fewer than four events, return an empty "events" array and say so in "interpretation": most readings are not histories, and a designer would rather have no timeline than a thin one.
+- No HTML.`,
   questions: `${COMMON}
 
 # This task: practice questions
@@ -230,9 +278,12 @@ export async function draftActivity(n: number, reading: Reading, role: Role, att
   const text = cut ? reading.text.slice(0, DRAFT_MAX_CHARS) : reading.text;
   const base = `The reading is titled "${reading.title}".\n\n<reading>\n${text}\n</reading>`;
   const ask = async (extra: string, endpoint: string): Promise<Record<string, unknown>> => {
-    const common = { system: isTrail(role) ? trailSystem(role) : SYSTEM[role as 'questions' | 'cards'], userPrompt: base + extra, maxTokens: 6000, effort: 'medium' as const, attribution, endpoint, model: env.BUILDER_MODEL, promptOnly: true, preprocess: dropNulls };
+    const common = { system: isTrail(role) ? trailSystem(role) : SYSTEM[role as PracticeRole], userPrompt: base + extra, maxTokens: 6000, effort: 'medium' as const, attribution, endpoint, model: env.BUILDER_MODEL, promptOnly: true, preprocess: dropNulls };
     if (role === 'contract') throw new Error('A Community Contract is drafted from the whole module, not from one reading.');
-    if (!isTrail(role) && role !== 'questions' && role !== 'cards') throw new Error('Course pages, discussions and assignments are drafted by pagedraft.ts.');
+    if (!isTrail(role) && !isPractice(role)) throw new Error('Course pages, discussions and assignments are drafted by pagedraft.ts.');
+    if (role === 'summary') return await jsonCall({ ...common, schema: Summary });
+    if (role === 'crossword') return await jsonCall({ ...common, schema: Crossword });
+    if (role === 'timeline') return await jsonCall({ ...common, schema: Timeline });
     if (isTrail(role)) return await jsonCall({ ...common, schema: Trails });
     return role === 'questions' ? await jsonCall({ ...common, schema: Questions }) : await jsonCall({ ...common, schema: Cards });
   };
@@ -241,7 +292,11 @@ export async function draftActivity(n: number, reading: Reading, role: Role, att
     const body = isTrail(role)
       // Where students answer is the designer's choice; a redraft keeps it.
       ? { place: (change?.previous as { place?: unknown } | undefined)?.place === 'page' ? 'page' : 'discussion', trails: r.trails, your_turn: r.your_turn }
-      : role === 'questions' ? { questions: r.questions } : { description: 'Read the term, say what it means to yourself, then turn the card.', cards: r.cards };
+      : role === 'questions' ? { questions: r.questions }
+      : role === 'summary' ? { sets: r.sets }
+      : role === 'crossword' ? { words: r.words }
+      : role === 'timeline' ? { headline: r.headline, events: r.events }
+      : { description: 'Read the term, say what it means to yourself, then turn the card.', cards: r.cards };
     return { n, type: ROLES[role].type, title: `${ROLES[role].title}: ${reading.title}`.slice(0, 120), interpretation: note, reading: reading.id, ...body } as Activity;
   };
 
@@ -256,7 +311,7 @@ export async function draftActivity(n: number, reading: Reading, role: Role, att
   let problems = checkDrafted(spec, reading.text);
   const quoteProblems = problems.filter((p) => /supporting sentence|not in the reading as quoted|no passage was given/.test(p));
   if (quoteProblems.length) {
-    const retry = `${extra}\n\nYou drafted this:\n<draft>\n${JSON.stringify(isTrail(role) ? { trails: spec.trails, your_turn: spec.your_turn } : role === 'questions' ? spec.questions : spec.cards, null, 1)}\n</draft>\n\n`
+    const retry = `${extra}\n\nYou drafted this:\n<draft>\n${JSON.stringify(isTrail(role) ? { trails: spec.trails, your_turn: spec.your_turn } : role === 'questions' ? spec.questions : role === 'summary' ? spec.sets : role === 'crossword' ? spec.words : role === 'timeline' ? spec.events : spec.cards, null, 1)}\n</draft>\n\n`
       + `A program compared each ${isTrail(role) ? '"passage"' : '"source_quote"'} with the reading and these did not match:\n${quoteProblems.map((p) => '- ' + p).join('\n')}\n\n`
       + (isTrail(role)
         ? 'Return the whole activity again. For each passage listed, copy it from the reading exactly, or choose another passage you can copy exactly and rewrite its notice and questions to fit. Leave the others unchanged.'

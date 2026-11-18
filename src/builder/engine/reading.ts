@@ -174,6 +174,9 @@ export function checkQuotes(act: Activity, readingText: string, outline = ''): Q
   if (isContract(act)) return [];
   if (isRhizo(act)) return items(act.trails, 'Passage', 'passage');
   if (act.type === 'questionset') return items(act.questions, 'Question');
+  if (act.type === 'summary') return items(act.sets, 'Statement');
+  if (act.type === 'crossword') return items(act.words, 'Word');
+  if (act.type === 'timeline') return items(act.events, 'Event');
   if (act.type === 'dialogcards') return items(act.cards, 'Card');
   return [one('This activity', act.source_quote)];
 }
@@ -517,11 +520,14 @@ export function buildReadings(mod: ReadingModule, opts: BuildOptions): BuildResu
   for (const { act } of built) {
     const r = mod.readings.find((x) => x.id === act.reading);
     const checks = checkQuotes(act, r?.text ?? '');
-    const parts = (act.type === 'questionset' ? act.questions : act.type === 'dialogcards' ? act.cards : [act]) as Record<string, unknown>[];
+    const parts = (act.type === 'questionset' ? act.questions : act.type === 'dialogcards' ? act.cards : act.type === 'summary' ? act.sets
+      : act.type === 'crossword' ? act.words : act.type === 'timeline' ? act.events : [act]) as Record<string, unknown>[];
     checks.forEach((q, i) => {
       const part = parts[i] ?? {};
-      const what = act.type === 'dialogcards' ? cell(part.front) : cell(String(part.question ?? act.title).replace(/<[^>]+>/g, ''));
-      const key = act.type === 'dialogcards' ? cell(String(part.back ?? '').replace(/<[^>]+>/g, '')) : cell(keyOf(part));
+      const what = act.type === 'dialogcards' ? cell(part.front) : act.type === 'summary' ? `Statement set ${i + 1}` : act.type === 'crossword' ? cell(part.clue)
+        : act.type === 'timeline' ? cell(part.headline) : cell(String(part.question ?? act.title).replace(/<[^>]+>/g, ''));
+      const key = act.type === 'dialogcards' ? cell(String(part.back ?? '').replace(/<[^>]+>/g, '')) : act.type === 'summary' ? cell(part.correct)
+        : act.type === 'crossword' ? cell(part.answer) : act.type === 'timeline' ? cell(part.date) : cell(keyOf(part));
       report += `| ${cell(r?.title)} | ${cell(act.title)} | ${what.slice(0, 120)} | ${key.slice(0, 120)} | ${cell(q.quote).slice(0, 200)} | ${q.found ? 'yes' : 'NO'} |\n`;
     });
   }

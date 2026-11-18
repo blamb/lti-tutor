@@ -39,6 +39,7 @@ import { ImportError } from '../../core/importers.js';
 import type { Scope } from '../../core/materials.js';
 import { ACTIVITY_TYPES } from '../engine/index.js';
 import { TYPE_LABELS } from './interpret.js';
+import { ROLES, EXTRA_ROLES } from './drafting.js';
 import {
   DRAFT_MAX_BYTES, listBuilds, getBuild, createBuild, deleteBuild, updateSettings, reviewActivity, rereadActivity, runBuild,
   createReadingsBuild, addReading, addContract, updateReading, removeReading, forClient, READING_MAX_BYTES,
@@ -153,6 +154,7 @@ lti.app.get('/api/me', async (_req: Request, res: Response) => {
       contract_parts: CONTRACT_PARTS,
       rhizo_credit: CREDIT_TEXT,
       rubric_levels: RUBRIC_LEVELS.map((l) => l.label),
+      extra_roles: EXTRA_ROLES.map((r) => ({ id: r, label: ROLES[r].title, asks: ROLES[r].asks })),
       discussion_how: DISCUSSION_HOW,
     });
   } catch (e) {
@@ -253,7 +255,7 @@ lti.app.post('/api/builds/:id/pages', async (req: Request, res: Response) => {
   try {
     const c = await ctx(req, res);
     if (!c) return;
-    const { role, reading } = z.object({ role: z.enum(['overview', 'guide', 'takeaways', 'discussion', 'assignment', 'breadcrumb', 'trust', 'unsettled', 'missing']), reading: z.number().int().positive().optional() }).parse(req.body);
+    const { role, reading } = z.object({ role: z.enum(['overview', 'guide', 'takeaways', 'discussion', 'assignment', 'breadcrumb', 'trust', 'unsettled', 'missing', 'summary', 'crossword', 'timeline']), reading: z.number().int().positive().optional() }).parse(req.body);
     const me = await studentFromToken(c.token);
     res.json({ build: view(await addPage(c.build, role, reading, attr(c.token, me.id, null, 'builder.page.draft'))) });
   } catch (e) {

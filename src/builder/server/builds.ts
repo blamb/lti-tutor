@@ -16,7 +16,7 @@ import { ImportError, importFromUrl, extractFromFile } from '../../core/importer
 import { inspectDraft, buildModule, checkActivity, type Activity, type BuildResult, type ModuleSpec, type Slot } from '../engine/index.js';
 import { buildReadings, checkDrafted, type Reading, type ReadingActivity } from '../engine/reading.js';
 import { readSpec } from './interpret.js';
-import { draftActivity, draftContract, ROLES, MODE_ROLES, TRAIL_ROLES, type Role, type Mode } from './drafting.js';
+import { draftActivity, draftContract, ROLES, MODE_ROLES, TRAIL_ROLES, EXTRA_ROLES, type Role, type Mode } from './drafting.js';
 import { env } from './env.js';
 import { TRAIL_TYPES, isRhizo } from '../engine/rhizo.js';
 import { isPageKind, PAGE_KINDS } from '../engine/coursepage.js';
@@ -222,6 +222,8 @@ function draftedEntry(n: number, spec: Activity, problems: string[]): ReviewedAc
   // The same for a RhizMode kind the model declined: the reading gave it nothing honest to work with.
   const none = (v: unknown): boolean => Array.isArray(v) && v.length === 0;
   const empty = (spec.type === 'dialogcards' && none(spec.cards))
+    // The same for the practice types added on request: too few terms for a crossword, no dated events for a timeline.
+    || (spec.type === 'summary' && none(spec.sets)) || (spec.type === 'crossword' && none(spec.words)) || (spec.type === 'timeline' && none(spec.events))
     || (TRAIL_TYPES.includes(spec.type) && none(spec.trails))
     // A course page the model declined: the material was too thin to draft from.
     || (isPageKind(spec) && none(spec.type === 'overview' ? spec.covers : spec.type === 'discussion' ? spec.passages : spec.type === 'assignment' ? (spec.task ? null : []) : spec.points));
@@ -546,8 +548,11 @@ export async function addPage(build: BuildRow, role: PageRole | Role, rid: numbe
   if (!build.readings.length) throw new ImportError('Add a reading first: course pages are drafted from the module’s readings.', 400);
   // A RhizMode discussion can be added to one reading of a practice module: the same kinds, drafted and built the same way.
   const trail = TRAIL_ROLES.includes(role as Role);
-  if (!trail && !PAGE_KINDS[role]) throw new ImportError('Unknown kind of page.', 400);
-  const scope = trail ? 'reading' : PAGE_KINDS[role]!.scope;
+  // A further practice activity for one reading, in a practice module.
+  const extra = EXTRA_ROLES.includes(role as Role);
+  if (extra && build.mode === 'rhizmode') throw new ImportError('Practice activities with an answer key belong to a practice module, not a RhizMode one.', 400);
+  if (!trail && !extra && !PAGE_KINDS[role]) throw new ImportError('Unknown kind of page.', 400);
+  const scope = trail || extra ? 'reading' : PAGE_KINDS[role]!.scope;
   const reading = scope === 'reading' ? build.readings.find((r) => r.id === rid) : undefined;
   if (scope === 'reading' && !reading) throw new ImportError('That reading is not in this module.', 404);
   if (build.slots.some((s) => (s as ReadingSlot).role === role && (scope === 'module' || (s as ReadingSlot).reading === rid))) {

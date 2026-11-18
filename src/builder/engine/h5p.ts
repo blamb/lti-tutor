@@ -16,6 +16,12 @@
  *   dialogcards  {description?, cards: [{front, back}]}
  *   sort         {instructions, paragraphs: [in the correct order], feedback?}
  *   questionset  {intro?, questions: [any of the above with a type], check_at_end?, pass_percentage?}
+ *   accordion    {panels: [{title, text}]}
+ *   summary      {instructions?, sets: [{correct, wrong: [..]}], feedback?}     (choose the correct statement, set by set)
+ *   markwords    {instructions, text: "... *word* ..." | [lines], feedback?}     (single words only, never phrases)
+ *   singlechoice {questions: [{question, correct, wrong: [..]}], feedback?}      (quick questions, one tap each)
+ *   crossword    {instructions?, words: [{clue, answer}]}                        (answers without spaces)
+ *   timeline     {headline, intro?, events: [{date: "YYYY" | "YYYY-MM" | "YYYY-MM-DD", headline, text?}]}
  *
  * Ported from the Python module builder's h5p.py. `packageH5p` throws on a spec
  * it cannot build (a missing field, an unknown type), as the Python does;
@@ -25,7 +31,10 @@
 
 import { randomUUID } from 'node:crypto';
 import { strToU8, zipSync } from 'fflate';
-import { SEMANTICS, type SemField } from './semantics.js';
+import { SEMANTICS as FIRST_SEMANTICS, type SemField, type SemLibrary } from './semantics.js';
+import { MORE_SEMANTICS } from './semantics-more.js';
+
+const SEMANTICS: Record<string, SemLibrary> = { ...FIRST_SEMANTICS, ...MORE_SEMANTICS };
 import { PyFloat, cut, floorDiv, lstrip, plen, pyJson, pyRound, truthy } from './py.js';
 
 export type Spec = Record<string, unknown>;
@@ -35,11 +44,15 @@ export const LIB: Record<string, string> = {
   multichoice: 'H5P.MultiChoice', truefalse: 'H5P.TrueFalse', blanks: 'H5P.Blanks',
   dragtext: 'H5P.DragText', dragdrop: 'H5P.DragQuestion', dialogcards: 'H5P.Dialogcards',
   sort: 'H5P.SortParagraphs', questionset: 'H5P.QuestionSet',
+  accordion: 'H5P.Accordion', summary: 'H5P.Summary', markwords: 'H5P.MarkTheWords',
+  singlechoice: 'H5P.SingleChoiceSet', crossword: 'H5P.Crossword', timeline: 'H5P.Timeline',
 };
 export const NAMES: Record<string, string> = {
   multichoice: 'Multiple Choice', truefalse: 'True/False Question', blanks: 'Fill in the Blanks',
   dragtext: 'Drag the Words', dragdrop: 'Drag and Drop', dialogcards: 'Dialog Cards',
   sort: 'Sort the Paragraphs', questionset: 'Question Set',
+  accordion: 'Accordion', summary: 'Summary', markwords: 'Mark the Words',
+  singlechoice: 'Single Choice Set', crossword: 'Crossword', timeline: 'Timeline',
 };
 
 const own = (o: object, k: string): boolean => Object.prototype.hasOwnProperty.call(o, k);
@@ -316,7 +329,107 @@ function questionset(s: Spec, versions?: Record<string, string> | null): Params 
   return out;
 }
 
-const BUILD: Record<string, (s: Spec) => Params> = { multichoice, truefalse, blanks, dragtext, dragdrop, dialogcards, sort };
+function accordion(s: Spec): Params {
+  return {
+    panels: needList(s, 'panels').map((panel) => ({
+      title: stripTags(need(panel, 'title')),
+      content: {
+        library: 'H5P.AdvancedText ' + SEMANTICS['H5P.AdvancedText']!.version,
+        params: { text: p(need(panel, 'text')) }, subContentId: randomUUID(),
+        metadata: { contentType: 'Text', license: 'U', title: cut(stripTags(panel['title']), 60) },
+      },
+    })),
+    hTag: 'h4',
+  };
+}
+
+function summary(s: Spec): Params {
+  return {
+    intro: p(get(s, 'instructions', 'Choose the correct statement.')),
+    // H5P takes the first statement of each set as the correct one and shuffles them for the learner.
+    summaries: needList(s, 'sets').map((set) => {
+      const wrong = need(set, 'wrong');
+      if (!Array.isArray(wrong)) throw new Error('"wrong" must be a list');
+      return { summary: [need(set, 'correct'), ...wrong].map((x) => p(x)), tip: '', subContentId: randomUUID() };
+    }),
+    overallFeedback: overall(get(s, 'feedback')),
+  };
+}
+
+function markwords(s: Spec): Params {
+  const lines = asList(need(s, 'text'));
+  for (const l of lines) if (typeof l !== 'string') throw new Error('"text" must be text or a list of text');
+  return {
+    taskDescription: p(need(s, 'instructions')), textField: (lines as string[]).map((l) => p(l)).join(''),
+    overallFeedback: overall(get(s, 'feedback')),
+    behaviour: { enableRetry: true, enableSolutionsButton: true, enableCheckButton: true, showScorePoints: true },
+  };
+}
+
+function singlechoice(s: Spec): Params {
+  return {
+    choices: needList(s, 'questions').map((q) => {
+      const wrong = need(q, 'wrong');
+      if (!Array.isArray(wrong)) throw new Error('"wrong" must be a list');
+      // The first answer is the correct one; H5P shuffles them.
+      return { question: p(need(q, 'question')), answers: [need(q, 'correct'), ...wrong].map((x) => p(x)), subContentId: randomUUID() };
+    }),
+    overallFeedback: overall(get(s, 'feedback')),
+    behaviour: { autoContinue: true, timeoutCorrect: 2000, timeoutWrong: 3000, soundEffectsEnabled: false, enableRetry: true, enableSolutionsButton: true, passPercentage: 100 },
+  };
+}
+
+/** A crossword answer as H5P wants it: no spaces or punctuation. "Hydrogen bond" becomes "HYDROGENBOND"; the clue says it is two words. */
+export function crosswordAnswer(answer: unknown): string {
+  return stripTags(answer).normalize('NFC').replace(/[^\p{L}\p{N}]/gu, '').toUpperCase();
+}
+
+function crossword(s: Spec): Params {
+  const theme: Params = {};
+  for (const f of (SEMANTICS['H5P.Crossword']!.semantics.find((x) => x.name === 'theme')?.fields ?? [])) {
+    if (typeof f.default === 'string') theme[f.name as string] = f.default;
+  }
+  return {
+    taskDescription: p(get(s, 'instructions', 'Fill in the crossword from the clues.')),
+    words: needList(s, 'words').map((w) => {
+      const raw = stripTags(need(w, 'answer')).trim();
+      const parts = raw.split(/[\s-]+/).filter(Boolean);
+      // A learner cannot see spaces in the grid, so the clue gives the word lengths of a phrase.
+      const clue = stripTags(need(w, 'clue')).trim() + (parts.length > 1 ? ` (${parts.map((x) => crosswordAnswer(x).length).join(', ')})` : '');
+      return { clue, answer: crosswordAnswer(raw), fixWord: false, orientation: 'across' };
+    }),
+    theme,
+    behaviour: { enableInstantFeedback: false, scoreWords: true, applyPenalties: false, enableRetry: true, enableSolutionsButton: true, keepCorrectAnswers: false },
+  };
+}
+
+/** "1998", "1998-03" or "1998-03-07" (also with commas or slashes) as TimelineJS wants it: "1998,3,7". Throws on anything else. */
+export function timelineDate(date: unknown): string {
+  const m = /^\s*(-?\d{1,6})(?:[-,/](\d{1,2})(?:[-,/](\d{1,2}))?)?\s*$/.exec(String(date ?? ''));
+  if (!m) throw new Error(`"${String(date)}" is not a date the timeline can place: use a year, year-month or year-month-day`);
+  const month = m[2] ? parseInt(m[2], 10) : 0, day = m[3] ? parseInt(m[3], 10) : 0;
+  if (m[2] && (month < 1 || month > 12)) throw new Error(`"${String(date)}" has no such month`);
+  if (m[3] && (day < 1 || day > 31)) throw new Error(`"${String(date)}" has no such day`);
+  return [m[1], ...(m[2] ? [String(month)] : []), ...(m[3] ? [String(day)] : [])].join(',');
+}
+
+function timeline(s: Spec): Params {
+  return {
+    timeline: {
+      headline: stripTags(need(s, 'headline')), text: truthy(get(s, 'intro')) ? p(s['intro']) : '', defaultZoomLevel: '0', height: 600, language: 'en',
+      date: needList(s, 'events').map((e) => ({
+        startDate: timelineDate(need(e, 'date')), headline: stripTags(need(e, 'headline')), text: truthy(get(e, 'text')) ? p(e['text']) : '',
+        asset: {},     // no media, but the player reads the group and fails without it
+      })),
+      asset: {},
+    },
+  };
+}
+
+const BUILD: Record<string, (s: Spec) => Params> = {
+  multichoice, truefalse, blanks, dragtext, dragdrop, dialogcards, sort,
+  accordion, summary, markwords, singlechoice, crossword, timeline,
+};
 
 /** The types this file can build. */
 export const ACTIVITY_TYPES: string[] = Object.keys(LIB);
@@ -338,8 +451,9 @@ export function librariesUsed(s: Spec, versions?: Record<string, string> | null)
     }
   };
   add(libFor(need(s, 'type')));
-  if (s['type'] === 'dragdrop') add('H5P.AdvancedText');
-  const questions = get(s, 'questions', []);
+  if (s['type'] === 'dragdrop' || s['type'] === 'accordion') add('H5P.AdvancedText');
+  // Only a question set's questions are activities of their own; a single choice set's are plain text.
+  const questions = s['type'] === 'questionset' ? get(s, 'questions', []) : [];
   if (!Array.isArray(questions)) throw new Error('"questions" must be a list');
   for (const q of questions as Spec[]) add(libFor(need(q, 'type')));
   return used;
@@ -434,6 +548,45 @@ function checkOne(s: Spec, where: string, out: string[], nested: boolean): void 
     const ps = s['paragraphs'];
     if (!Array.isArray(ps) || ps.length < 2) say('needs at least two "paragraphs"');
     else if (ps.some((x) => !text(x))) say('"paragraphs" must be a list of text');
+  } else if (type === 'accordion') {
+    const panels = list('panels');
+    if (panels) panels.forEach((x, i) => { if (!text(x['title']) || !text(x['text'])) say(`panel ${i + 1} needs a "title" and "text"`); });
+  } else if (type === 'summary' || type === 'singlechoice') {
+    const key = type === 'summary' ? 'sets' : 'questions', word = type === 'summary' ? 'set' : 'question';
+    optionalText('instructions');
+    const sets = list(key);
+    if (sets) sets.forEach((x, i) => {
+      if (type === 'singlechoice' && !text(x['question'])) say(`question ${i + 1} needs a "question"`);
+      if (!text(x['correct'])) say(`${word} ${i + 1} needs the "correct" ${type === 'summary' ? 'statement' : 'answer'}`);
+      const wrong = x['wrong'];
+      if (!Array.isArray(wrong) || wrong.length === 0 || wrong.some((w) => !text(w))) say(`${word} ${i + 1} needs at least one "wrong" ${type === 'summary' ? 'statement' : 'answer'}`);
+    });
+  } else if (type === 'markwords') {
+    if (!text(s['instructions'])) say('needs "instructions" saying which words to mark');
+    starred('text', 'words to mark');
+    const lines = (Array.isArray(s['text']) ? s['text'] : [s['text']]).filter((l): l is string => typeof l === 'string');
+    for (const l of lines) for (const m of l.matchAll(/\*([^*\n]+)\*/g)) if (/\s/.test(m[1]!.trim())) say(`marks the phrase "${cut(m[1]!, 40)}", but this type can only mark single words`);
+  } else if (type === 'crossword') {
+    optionalText('instructions');
+    const words = list('words');
+    if (words) {
+      if (words.length < 2) say('needs at least two words');
+      const seen = new Set<string>();
+      words.forEach((w, i) => {
+        if (!text(w['clue'])) say(`word ${i + 1} needs a "clue"`);
+        const a = text(w['answer']) ? crosswordAnswer(w['answer']) : '';
+        if (a.length < 2) say(`word ${i + 1} needs an "answer" of at least two letters`);
+        else if (seen.has(a)) say(`word ${i + 1} repeats the answer "${a}"`);
+        seen.add(a);
+      });
+    }
+  } else if (type === 'timeline') {
+    if (!text(s['headline'])) say('needs a "headline"');
+    const events = list('events');
+    if (events) events.forEach((e, i) => {
+      if (!text(e['headline'])) say(`event ${i + 1} needs a "headline"`);
+      try { timelineDate(e['date']); } catch (err) { say(`event ${i + 1}: ${(err as Error).message}`); }
+    });
   } else if (type === 'questionset') {
     if (nested) say('is a question set inside a question set, which H5P does not allow');
     if (own(s, 'intro') && truthy(s['intro']) && typeof s['intro'] !== 'string') say('"intro" must be text');

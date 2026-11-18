@@ -421,6 +421,14 @@
     renderHead();
     const pane = $('#pane-acts');
     renderCoursePages();
+    // A practice module can ask for more kinds of practice activity from any of its readings.
+    const extraOffer = () => (!isReadings() || isRhizo() || !build.readings.length || !(me.extra_roles || []).length ? '' : `<div class="card"><h2>Draft another practice activity</h2>
+        <p class="muted">From one reading, on request. Each item rests on a sentence of the reading, checked like the questions above. If the reading does not suit the kind (too few defined terms for a crossword, no dated events for a timeline), nothing is drafted and the note says why.</p>
+        <form id="extra-form"><label class="field" for="extra-reading">Reading
+            <select id="extra-reading">${build.readings.map((r, i) => `<option value="${r.id}">${i + 1}. ${esc(r.title)}</option>`).join('')}</select></label>
+          <label class="field" for="extra-role">Kind of activity
+            <select id="extra-role">${me.extra_roles.map((k) => `<option value="${k.id}">${esc(k.label)}: ${esc(k.asks)}</option>`).join('')}</select></label>
+          <button class="btn btn-small" type="submit" style="margin-top:.6rem">Draft it</button> <span id="extra-msg" role="status"></span></form></div>`);
     if (!actSlots().length && isReadings()) { pane.innerHTML = '<p class="empty" style="margin-top:1rem">No activities yet. Add a reading on the Readings tab and its activities are drafted from it.</p>'; }
     else if (!actSlots().length) { pane.innerHTML = '<p class="empty" style="margin-top:1rem">No H5P specifications were found in this draft. The builder looks for a production note that says “Insert H5P activity using the specification below”.</p>'; }
     else {
@@ -429,7 +437,17 @@
         : isReadings()
         ? `<p class="muted" style="margin-top:1rem">These activities were written by AI (${esc(me.model || '')}) from the readings. Each question and card is shown beside the sentence of the reading it rests on; a program has checked that each sentence is really there. Read them as a subject expert would: the check confirms the source, not the quality of the question.</p>`
         : `<p class="muted" style="margin-top:1rem">Each specification is shown as the author wrote it, beside how it was read by AI (${esc(me.model || '')}). Nothing here was written by the AI except where a note says so. An activity is built from the right-hand side.</p>`) +
-        (isRhizo() ? rhizoGroups() : actSlots().map(article).join(''));
+        (isRhizo() ? rhizoGroups() : actSlots().map(article).join('')) + extraOffer();
+      const extraForm = $('#extra-form');
+      if (extraForm) extraForm.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const msg = $('#extra-msg');
+        msg.className = 'muted'; msg.textContent = 'Drafting…';
+        try {
+          setBuild((await api(`/api/builds/${build.id}/pages`, { method: 'POST', body: { role: $('#extra-role').value, reading: Number($('#extra-reading').value) } })).build);
+          announce('The activity is being drafted.');
+        } catch (e) { msg.className = 'err'; msg.textContent = friendly(e); }
+      });
       const addBtn = $('#add-contract');
       if (addBtn) addBtn.addEventListener('click', async () => {
         addBtn.disabled = true; $('#contract-msg').className = 'muted'; $('#contract-msg').textContent = 'Drafting…';
@@ -557,6 +575,26 @@
       if (q.type === 'dialogcards') {
         return `<p class="muted">${inline(q.description || '')}</p><div class="scroll-x"><table class="tbl"><thead><tr><th scope="col">Front</th><th scope="col">Back</th></tr></thead><tbody>` +
           (q.cards || []).map((c) => `<tr><td>${inline(c.front)}</td><td>${inline(c.back)}</td></tr>`).join('') + '</tbody></table></div>';
+      }
+      if (q.type === 'accordion') {
+        return '<p class="muted">Click-to-open panels. Nothing is answered or scored.</p>' + (q.panels || []).map((x) => `<p><strong>${inline(x.title)}</strong></p><div>${inline(x.text)}</div>`).join('');
+      }
+      if (q.type === 'summary' || q.type === 'singlechoice') {
+        const sets = (q.type === 'summary' ? q.sets : q.questions) || [];
+        return `<p class="muted">${q.type === 'summary' ? inline(q.instructions || 'Choose the correct statement.') + ' Each correct pick is added to a summary that builds up.' : 'Quick questions, one tap each.'} Shown shuffled.</p>` +
+          sets.map((x, i) => `${q.type === 'singlechoice' ? `<p><strong>${inline(x.question)}</strong></p>` : `<p class="muted">Group ${i + 1}</p>`}<ul><li><span class="key">✓ Correct:</span> ${inline(x.correct)}</li>${(x.wrong || []).map((w) => `<li><span class="muted">✗</span> ${inline(w)}</li>`).join('')}</ul>`).join('') + fb(q.feedback);
+      }
+      if (q.type === 'markwords') {
+        const lines = Array.isArray(q.text) ? q.text : [q.text || ''];
+        return `<p class="muted">${inline(q.instructions || '')}</p>` + lines.map((t) => `<p>${gaps(t)}</p>`).join('') + `<p class="muted">Highlighted words are the ones to click. Only single words can be marked.</p>${fb(q.feedback)}`;
+      }
+      if (q.type === 'crossword') {
+        return `<p class="muted">${inline(q.instructions || 'Fill in the crossword from the clues.')} The grid is laid out when the activity opens.</p><div class="scroll-x"><table class="tbl"><thead><tr><th scope="col">Clue</th><th scope="col">Answer</th></tr></thead><tbody>` +
+          (q.words || []).map((w) => `<tr><td>${inline(w.clue)}</td><td><span class="key">${inline(w.answer)}</span></td></tr>`).join('') + '</tbody></table></div><p class="muted">Spaces and hyphens are taken out of an answer in the grid; the clue then gives the word lengths.</p>';
+      }
+      if (q.type === 'timeline') {
+        return `<p><strong>${inline(q.headline || '')}</strong></p>${q.intro ? `<p>${inline(q.intro)}</p>` : ''}<p class="muted">Dated events to scroll through. Nothing is answered or scored.</p><div class="scroll-x"><table class="tbl"><thead><tr><th scope="col">Date</th><th scope="col">Event</th></tr></thead><tbody>` +
+          (q.events || []).map((e) => `<tr><td>${esc(e.date)}</td><td><strong>${inline(e.headline)}</strong>${e.text ? `<div>${inline(e.text)}</div>` : ''}</td></tr>`).join('') + '</tbody></table></div>';
       }
       if (q.type === 'sort') {
         return `<p class="muted">${inline(q.instructions || '')}</p><p class="muted">Correct order (shown shuffled to the learner):</p><ol>` +

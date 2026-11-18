@@ -27,6 +27,12 @@ export const TYPE_LABELS: Record<string, string> = {
   dialogcards: 'Dialog cards',
   sort: 'Sort the paragraphs',
   questionset: 'Question set',
+  accordion: 'Accordion',
+  summary: 'Summary (choose the correct statement)',
+  markwords: 'Mark the words',
+  singlechoice: 'Single choice set',
+  crossword: 'Crossword',
+  timeline: 'Timeline',
 };
 
 const Answer = z.object({ text: z.string(), correct: z.boolean(), feedback: z.string().optional() });
@@ -49,7 +55,8 @@ const Question = z.object({
  * checkActivity() then enforces what each type needs.
  */
 export const Reading = z.object({
-  type: z.enum(['multichoice', 'truefalse', 'blanks', 'dragtext', 'dragdrop', 'dialogcards', 'sort', 'questionset']),
+  type: z.enum(['multichoice', 'truefalse', 'blanks', 'dragtext', 'dragdrop', 'dialogcards', 'sort', 'questionset',
+    'accordion', 'summary', 'markwords', 'singlechoice', 'crossword', 'timeline']),
   title: z.string(),
   interpretation: z.string(),
   question: z.string().optional(),
@@ -63,11 +70,18 @@ export const Reading = z.object({
   description: z.string().optional(),
   cards: z.array(z.object({ front: z.string(), back: z.string() })).optional(),
   paragraphs: z.array(z.string()).optional(),
-  questions: z.array(Question).optional(),
+  // A question set's questions, or a single choice set's ({ question, correct, wrong }).
+  questions: z.array(z.union([Question, z.object({ question: z.string(), correct: z.string(), wrong: z.array(z.string()) })])).optional(),
   check_at_end: z.boolean().optional(),
   feedback: z.string().optional(),
   feedback_correct: z.string().optional(),
   feedback_incorrect: z.string().optional(),
+  panels: z.array(z.object({ title: z.string(), text: z.string() })).optional(),
+  sets: z.array(z.object({ correct: z.string(), wrong: z.array(z.string()) })).optional(),
+  words: z.array(z.object({ clue: z.string(), answer: z.string() })).optional(),
+  headline: z.string().optional(),
+  intro: z.string().optional(),
+  events: z.array(z.object({ date: z.string(), headline: z.string(), text: z.string().optional() })).optional(),
 });
 export type Reading = z.infer<typeof Reading>;
 
@@ -89,6 +103,12 @@ Return one object. "type", "title" and "interpretation" are always present; incl
 - dialogcards (flip cards): "description"? (one line telling the learner what to do); "cards" [{ "front", "back" }].
 - sort (put paragraphs in order): "instructions"; "paragraphs": the items in the CORRECT order (the activity shuffles them). "feedback"?.
 - questionset (several questions, one at a time): "questions" [{ "type": "multichoice", "truefalse", "blanks" or "dragtext", then that type's fields }]. A question's "feedback" is its own. Keep every question the spec lists, in its order. "check_at_end"? true only when the spec says answers are checked or feedback is shown at the end rather than after each question.
+- accordion (click-to-open panels of text; nothing is answered or scored): "panels" [{ "title", "text" }]. "text" may hold several paragraphs as <p>...</p>.
+- summary (the learner picks the one correct statement out of each group, and the correct ones build up into a summary): "instructions"?; "sets" [{ "correct": the true statement, "wrong": [the false ones] }]; "feedback"?.
+- markwords (the learner clicks the words that fit a rule, for example every verb): "instructions" (which words to click); "text": an array of paragraphs with each correct word written as *word*. Only single words can be marked, never phrases: if the spec marks a phrase, mark its key word and say so. "feedback"?.
+- singlechoice (several quick questions, one tap each, answered at speed): "questions" [{ "question", "correct": the right answer, "wrong": [the others] }]; "feedback"?. Use it only when the spec asks for a single choice set or for quick-fire questions with no feedback per answer; otherwise multiple choice questions belong in a questionset.
+- crossword: "instructions"?; "words" [{ "clue", "answer" }]. Give each answer as the spec writes it; spaces and hyphens are removed when it is built.
+- timeline (dated events the learner scrolls through; nothing is answered or scored): "headline"; "intro"?; "events" [{ "date", "headline", "text"? }] with "date" as a year ("1998"), year and month ("1998-03") or full date ("1998-03-07"). An event the spec gives no usable date for cannot be placed: leave it out and say so.
 
 Inline HTML is allowed in every field except dragtext "text": <code>, <strong>, <em>. Keep the author's <code> marking. Never output <mark>.
 
@@ -98,7 +118,7 @@ Authors name H5P types loosely, and some specs ask for things a type cannot do. 
 - Several multiple-choice questions under one spec: a questionset.
 - Feedback per blank in a fill-in-the-blanks (the type has none): put the notes together in "feedback".
 - A matching task (pairs): dragdrop with one zone per left-hand item, or dragtext if the pairs read as sentences.
-- A type this tool cannot build (interactive video, course presentation, branching scenario, image hotspots, anything needing an image or media you do not have): do not approximate it with something that changes the task. Return the closest buildable type only if the learning task survives; otherwise return type "dialogcards" with no cards and explain in "interpretation" that it could not be built and why. The designer will see that and handle it by hand.
+- A type this tool cannot build (interactive video, course presentation, branching scenario, interactive book, essay, image hotspots, anything needing an image or media you do not have): do not approximate it with something that changes the task. Return the closest buildable type only if the learning task survives; otherwise return type "dialogcards" with no cards and explain in "interpretation" that it could not be built and why. The designer will see that and handle it by hand.
 
 "interpretation" is for the designer, who reads sixteen of these in a row: keep it to what they need to check, in one to three plain sentences. Leave it as an empty string when you followed the spec as written. Do not report routine clean-up (removing option letters, tick boxes, "(Correct)" markers or quotation marks, reading bold or red as the answer key, mixing the order of drag items). Do say when you wrote a title or instruction line, changed the activity type, moved or merged feedback, dropped formatting the type cannot show, or left anything out. And flag anything in the spec that looks like a mistake (an answer key that contradicts the feedback, a missing correct answer, a count that does not match). Do not correct such mistakes silently: build what the spec says and flag it.
 
@@ -125,6 +145,12 @@ function tidy(r: Reading): Record<string, unknown> {
     dialogcards: ['description', 'cards'],
     sort: ['instructions', 'paragraphs', 'feedback'],
     questionset: ['questions', 'check_at_end'],
+    accordion: ['panels'],
+    summary: ['instructions', 'sets', 'feedback'],
+    markwords: ['instructions', 'text', 'feedback'],
+    singlechoice: ['questions', 'feedback'],
+    crossword: ['instructions', 'words'],
+    timeline: ['headline', 'intro', 'events'],
   };
   const allowed = new Set(['type', 'title', 'interpretation', ...(keep[r.type] ?? [])]);
   for (const k of Object.keys(out)) if (!allowed.has(k)) delete out[k];

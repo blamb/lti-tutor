@@ -26,7 +26,7 @@ Each reading becomes one Book page. For each, the designer chooses what the page
 - **The full text, then the activities.** For open or self-owned material. This is the default only when an open licence was found; otherwise the build flags the page until someone confirms the right to reuse.
 - **A link to the reading, then the activities.** For copyrighted readings such as library articles. The text is used to draft the activities and is not put on the page.
 
-Two activities are drafted by AI from each reading: a set of practice questions (multiple choice and true/false, with feedback on every answer) and a deck of key-term flashcards (the reading's own definitions; skipped when the reading defines fewer than three terms). Here the wording is the model's, so the safeguards are stronger than for a Word draft:
+Two activities are drafted by AI from each reading (a summary, a crossword and a timeline can be added on request; see "H5P types it can build"): a set of practice questions (multiple choice and true/false, with feedback on every answer) and a deck of key-term flashcards (the reading's own definitions; skipped when the reading defines fewer than three terms). Here the wording is the model's, so the safeguards are stronger than for a Word draft:
 
 - Every question and card must quote the sentence of the reading it rests on. Code checks that the sentence is really there (`engine/reading.ts`). An item whose quotation is not found is sent back to the model once; if it still fails, the activity cannot be approved or built until a person fixes or removes the item.
 - The review screen shows each item beside its supporting sentence. The model is told to use only what the reading says and to avoid sentences that look wrong, and it reports those to the designer.
@@ -186,9 +186,28 @@ Accordions, hints and panels use the HTML `<details>` element with inline styles
 
 ## H5P types it can build
 
-Multiple choice (single and select-all), true/false, fill in the blanks, drag the words, drag and drop (text items onto labelled zones, laid out automatically), dialog cards, sort the paragraphs, and question set (multiple choice and true/false questions). The packages carry content only; the Moodle site must have the content types installed. The versions the file names are listed at the end of the build report, and a site with newer versions upgrades the content on first view (seen on moodbox, Moodle 5.2).
+Fourteen. The first eight: multiple choice (single and select-all), true/false, fill in the blanks, drag the words, drag and drop (text items onto labelled zones, laid out automatically), dialog cards, sort the paragraphs, and question set (multiple choice, true/false, blanks and drag-the-words questions).
 
-Not built: interactive video, course presentation, branching scenario, image hotspots, or anything that needs media the draft does not contain. The AI step is told to say so rather than substitute a different task.
+Six added on 17 Nov 2026, none of which needs an image or other media:
+
+| Type | What the learner does | Scored | Limits the builder enforces |
+|---|---|---|---|
+| Accordion | Opens panels of text | No | Each panel needs a title and text |
+| Summary | Picks the true statement from each group; the correct ones build into a summary | Yes | At least one wrong statement per group |
+| Mark the words | Clicks the words that fit a rule | Yes | Single words only: a marked phrase is refused, because the type cannot mark one |
+| Single choice set | Answers quick questions with one tap each | Yes | At least one wrong answer per question |
+| Crossword | Fills a grid from clues; the layout is made when the activity opens | Yes | At least two words, no answer twice. Spaces and hyphens are taken out of an answer ("Hydrogen bond" becomes HYDROGENBOND) and the clue then gives the word lengths, "(8, 4)" |
+| Timeline | Scrolls through dated events | No | Every event needs a year, a year and month, or a full date; "the late 1990s" is refused |
+
+**From a Word draft**, the AI step that reads a specification now knows all fourteen, with the same rule as before: carry the author's wording across and add nothing. It is told to use a single choice set only when the spec asks for one or for quick-fire questions, since ordinary multiple-choice questions belong in a question set.
+
+**From readings**, in a practice-mode module, three of the new types can be drafted on request from any reading, from "Draft another practice activity" at the foot of the H5P activities tab: a **Summary**, a **Crossword** of the terms the reading defines, and a **Timeline** of the events it dates. Each statement group, word and event carries the sentence of the reading it rests on, checked by code like the practice questions, and listed in the build report. The model is told not to estimate dates and to return nothing when a reading defines fewer than four usable terms or dates fewer than four events; the activity then arrives as "Left out" with the reason. Like the other H5P drafts they are built unless left out, and the report says which were not reviewed.
+
+The packages carry content only; the Moodle site must have the content types installed. The versions the file names are listed at the end of the build report, and a site with newer versions upgrades the content on first view (seen on moodbox, Moodle 5.2, for the first eight). Crossword is a community content type (version 0.5 here) and is the one most likely to be missing or at another version on a given site.
+
+Tested locally on 17 Nov 2026. One hand-written activity of each of the six types was restored into Moodle 5.0.1 and opened in a browser as a guest: all six ran, after one fix (a timeline event with no media group stopped the player). From the Digital divide article a summary (6 groups), a crossword (8 words) and a timeline (10 events) were drafted, and a second timeline (7 events) from the Digital literacy article; all 31 supporting sentences passed the check on the first pass, and the model's notes named the dated claims it left out as doubtful. Restored with the module, the summary, crossword and timeline each initialised on the reading's page with their content. Not yet tested: the AI step reading a real Word spec for any of the six types, playing each activity through to a score, moodbox, and a reading with too few terms or dates.
+
+Not built: interactive video, course presentation, branching scenario, interactive book, essay, image hotspots, or anything that needs media the draft does not contain. The AI step is told to say so rather than substitute a different task.
 
 ## Why a restore file
 
