@@ -320,7 +320,7 @@
       const { builds } = await api('/api/builds');
       if (!builds.length) { box.innerHTML = '<p class="empty">No modules yet. Start one above.</p>'; return; }
       box.innerHTML = `<div class="scroll-x"><table class="tbl"><thead><tr><th scope="col"><span class="visually-hidden">Include in one file</span></th><th scope="col">Module</th><th scope="col">Uploaded</th><th scope="col">Activities</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead><tbody>` +
-        builds.map((b) => `<tr><td><input type="checkbox" data-pick="${b.id}" aria-label="Include ${esc(b.title)} in one file"></td><th scope="row" style="font-weight:500;color:inherit;font-size:inherit">${esc(b.title)}<div class="muted">${b.kind === 'readings' ? `From ${b.reading_count} reading${b.reading_count === 1 ? '' : 's'}${b.mode === 'rhizmode' ? ' · RhizMode' : ''}` : esc(b.source_name)}</div></th>
+        builds.map((b) => `<tr><td><input type="checkbox" data-pick="${b.id}" aria-label="Include ${esc(b.title)} in one file"></td><th scope="row" style="font-weight:500;color:inherit;font-size:inherit">${esc(b.title)}<div class="muted">${b.kind === 'readings' ? `From ${b.reading_count} reading${b.reading_count === 1 ? '' : 's'}${b.mode === 'rhizmode' ? ' · RhizMode' : ''}` : esc(b.source_name)} · goes to section ${esc(b.section_number)}</div></th>
           <td>${when(b.created_at)}</td>
           <td>${b.kind === 'readings' && !b.reading_count ? 'No readings yet' : b.state === 'reading' ? '<span class="chip">Being read…</span>' : b.spec_count ? `${b.approved} of ${b.spec_count} approved${b.to_review ? ` · <span class="chip draft">${b.to_review} to review</span>` : ''}${b.failed ? ` · <span class="chip bad">${b.failed} failed</span>` : ''}` : 'None in this draft'}</td>
           <td><button class="btn btn-small" type="button" data-open="${b.id}">Open<span class="visually-hidden"> ${esc(b.title)}</span></button></td></tr>`).join('') +
@@ -1226,6 +1226,12 @@
             <label class="field" for="set-section">Section number
               <span class="hint">Where in the course the module should land. 0 is the “General” section at the top of the course page, 1 is the first section under it, 2 the next, and so on. The module is added to the end of that section, after whatever is already there.</span>
               <input id="set-section" type="number" min="0" max="200" value="${esc(build.section_number)}" style="max-width:8rem"></label>
+            ${(() => {
+              const others = (p.neighbours || []).slice().sort((a, b) => a.section - b.section);
+              const same = others.filter((o) => Number(o.section) === Number(build.section_number));
+              return (same.length ? `<div class="banner warn" role="status"><strong>Section ${esc(build.section_number)} is also where ${same.map((o) => `“${esc(o.title)}”`).join(' and ')} went.</strong> This module will be added underneath, and the section keeps the name it already has, so it can look as if nothing arrived. For a section of its own, change the number to one no module uses and save.</div>` : '')
+                + (others.length ? `<p class="muted">Sections this tool’s other modules use in this course: ${others.map((o) => `${o.section} (${esc(o.title)})`).join(', ')}.</p>` : '');
+            })()}
             ${hasReadings() && !isRhizo() ? `<fieldset class="modes"><legend>Where the practice questions go</legend>
               ${[['h5p', 'On each reading’s page', 'as an H5P question set. Not graded.'], ['quiz', 'In one Moodle Quiz for the module', 'with the questions in its question bank. Graded out of 10, unlimited attempts. Only question sets you have approved go in.'], ['both', 'Both', 'practice on the pages, then the Quiz.']]
                 .map(([v, label, hint]) => `<label class="opt"><input type="radio" name="set-questions" value="${v}" ${build.questions_as === v ? 'checked' : ''}> ${label} <span>· ${hint}</span></label>`).join('')}
@@ -1263,7 +1269,7 @@
                 <tr><th scope="row">6. Complete</th><td>When it says the course was restored, press <strong>Continue</strong>. You are back on the course page.</td></tr>
               </tbody></table></div></li>
             <li><h3>Find what arrived</h3>
-              <p>Turn <strong>Edit mode</strong> on (top right of the course page). Go to <strong>section ${esc(build.section_number)}</strong>${Number(build.section_number) === 0 ? ', the “General” section at the top of the course' : `, the ${['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth'][Number(build.section_number) - 1] || 'numbered'} section under “General”`}. The new items are at the end of that section, each marked <strong>Hidden from students</strong>:</p>
+              <p>Turn <strong>Edit mode</strong> on (top right of the course page). Go to <strong>section ${esc(build.section_number)}</strong>${Number(build.section_number) === 0 ? ', the “General” section at the top of the course' : `, the ${['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth'][Number(build.section_number) - 1] || 'numbered'} section under “General”`}. The new items are at the end of that section, <strong>below anything that was already there</strong>, each marked <strong>Hidden from students</strong>. If the section already had a name it keeps it, so look for the items, not for a section called “${esc(build.title)}”:</p>
               <ul class="arrived">${(p.contents || []).map((c) => `<li><span class="chip type">${esc(c.kind)}</span> ${esc(c.name)}</li>`).join('')}</ul>
               <p class="muted">Not there? Check the section number in the settings above matches the section you looked in, and that Edit mode is on: with it off, hidden items can be easy to miss. Restoring the same file twice adds a second copy; delete the one you do not want.</p></li>
             <li><h3>Check it, then show it</h3>

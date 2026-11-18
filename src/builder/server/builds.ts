@@ -153,8 +153,9 @@ export async function createBuild(scope: Scope & { title: string }, createdBy: n
   }
   const activities: ReviewedActivity[] = found.slots.map((s) => ({ n: s.n, status: 'pending', spec: null, problems: [] }));
   const rows = await query<BuildRow>(
-    `insert into build (lti_iss, lti_context_id, created_by, title, source_name, docx, slots, activities, course_shortname, state)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning ${COLUMNS}`,
+    // A new module is filed in the section after the last one this tool has used in the course, so modules do not pile into section 1.
+    `insert into build (lti_iss, lti_context_id, created_by, title, source_name, docx, slots, activities, course_shortname, state, section_number)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, (select coalesce(max(section_number), 0) + 1 from build where lti_iss = $1 and lti_context_id = $2)) returning ${COLUMNS}`,
     [scope.iss, scope.contextId, createdBy, found.name, file.name, Buffer.from(file.bytes), JSON.stringify(found.slots),
       JSON.stringify(activities), '', found.slots.length ? 'reading' : 'ready']
   );
@@ -480,8 +481,8 @@ export const READINGS_MAX = 20;
 
 export async function createReadingsBuild(scope: Scope, createdBy: number, title: string, mode: Mode = 'practice'): Promise<BuildRow> {
   const rows = await query<BuildRow>(
-    `insert into build (kind, mode, lti_iss, lti_context_id, created_by, title, source_name, state)
-     values ('readings', $5, $1, $2, $3, $4, 'Readings', 'ready') returning ${COLUMNS}`,
+    `insert into build (kind, mode, lti_iss, lti_context_id, created_by, title, source_name, state, section_number)
+     values ('readings', $5, $1, $2, $3, $4, 'Readings', 'ready', (select coalesce(max(section_number), 0) + 1 from build where lti_iss = $1 and lti_context_id = $2)) returning ${COLUMNS}`,
     [scope.iss, scope.contextId, createdBy, title, mode]
   );
   return rows[0]!;

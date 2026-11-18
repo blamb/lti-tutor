@@ -389,6 +389,8 @@ lti.app.get('/api/builds/:id/pages', async (req: Request, res: Response) => {
     res.json({
       chapters: b.chapters, forums: b.forums ?? [], todo: b.todo, judgement: b.judgement, counts: b.counts, included: b.included, file_name: b.fileName,
       h5p: Object.keys(b.h5p), size: b.mbz.byteLength, quiz: b.quiz ?? null, glossary: Boolean(b.glossaryXml),
+      // Where this tool's other modules in the course are filed, so two are not sent to one section by accident.
+      neighbours: (await listBuilds(c.scope)).filter((x) => x.id !== c.build.id).map((x) => ({ title: x.title, section: x.section_number })),
       // What the designer will see arrive in the course, by name, for the "find it" step.
       contents: b.parts ? [
         { kind: 'Book', name: b.parts.book.name }, ...b.parts.forums.map((f) => ({ kind: 'Forum', name: f.name })),
