@@ -231,6 +231,12 @@ Restoring by "Merge into this course" puts section N of the file into section N 
 
 Tested locally: a pasted reading added to the COMP 2131 Module 8 draft (16 specifications, 11 pages) gave a twelfth page with its three drafts, all 18 supporting sentences found, and the 16 Word activities unchanged. That module, a readings module with two forums, an assignment and a glossary, and a second readings module were built into one file starting at section 2 and restored into Moodle 5.0.1: three sections, each named after its module and holding its own activities, three Books of 12, 4 and 2 pages, no link left undecoded, and all ten links between pages pointing inside their own Book. The Word-plus-reading module's own file restored as one Book of 12 pages. Not yet tested: a merge into a course that already has content in those sections, a course file on moodbox, RhizMode in a Word-draft module, and a file of many modules.
 
+## The restore walk-through on the Download tab (17 Nov 2026)
+
+The four-line restore note became a six-step walk-through for people who restore rarely: download, open the restore page, give Moodle the file, click through Moodle's six stages (a table says what to press on each, and that only Destination asks for a decision), find what arrived, check and show. It uses Moodle's own wording for every screen and button, taken from the 5.0 language files. Two things are filled in for the module in hand: a button that opens Moodle's Course reuse page for the course the tool was launched from (`/backup/view.php?id=<course id>`, built from the launch's issuer and course id, and left out when either is missing), and the list of items that will arrive, by kind and name, with the section they land in. The section-number setting now says what the numbers mean. A designer guide covering all the November features is a Claude doc titled "Module Builder: a guide for course designers".
+
+Checked locally without a Moodle launch, so the Course reuse button itself has not been seen or clicked; the fallback wording shows in its place.
+
 ## Why a restore file
 
 LTI can add links to a course but not pages, Books or H5P activities, and Moodle's core web services cannot create activities. A backup file is the one route that works on a stock Moodle with no plugin and no administrator action: any editing teacher can restore it.

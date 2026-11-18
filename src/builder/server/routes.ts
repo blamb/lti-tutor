@@ -148,6 +148,8 @@ lti.app.get('/api/me', async (_req: Request, res: Response) => {
       name: me.display_name,
       course: { id: contextIdOf(token), title: scopeOf(token).title },
       model: env.BUILDER_MODEL,
+      // Moodle's Course reuse page for this course, when the launch came from a Moodle whose course id we can read.
+      reuse_url: /^https?:\/\//i.test(token.iss) && /^\d+$/.test(contextIdOf(token)) ? `${token.iss.replace(/\/+$/, '')}/backup/view.php?id=${contextIdOf(token)}` : '',
       ai_ready: Boolean(env.ANTHROPIC_API_KEY),
       types: [
         ...ACTIVITY_TYPES.map((t) => ({ id: t, label: TYPE_LABELS[t] ?? t })),
@@ -387,6 +389,12 @@ lti.app.get('/api/builds/:id/pages', async (req: Request, res: Response) => {
     res.json({
       chapters: b.chapters, forums: b.forums ?? [], todo: b.todo, judgement: b.judgement, counts: b.counts, included: b.included, file_name: b.fileName,
       h5p: Object.keys(b.h5p), size: b.mbz.byteLength, quiz: b.quiz ?? null, glossary: Boolean(b.glossaryXml),
+      // What the designer will see arrive in the course, by name, for the "find it" step.
+      contents: b.parts ? [
+        { kind: 'Book', name: b.parts.book.name }, ...b.parts.forums.map((f) => ({ kind: 'Forum', name: f.name })),
+        ...b.parts.quizzes.map((q) => ({ kind: 'Quiz', name: q.name })), ...b.parts.assignments.map((x) => ({ kind: 'Assignment', name: x.name })),
+        ...b.parts.glossaries.map((g) => ({ kind: 'Glossary', name: g.name })),
+      ] : [],
     });
   } catch (e) {
     fail(res, e, 'GET /api/builds/:id/pages');

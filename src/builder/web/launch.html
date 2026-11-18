@@ -58,6 +58,13 @@
   .chip.bad { background: var(--bad-bg); border-color: var(--bad-bg); color: var(--bad); }
   .view { display: none; } .view.active { display: block; }
   .steps { margin: .25rem 0 0 1.2rem; padding: 0; } .steps li { margin: .2rem 0; }
+  ol.walk { margin: .6rem 0 0; padding: 0; list-style: none; counter-reset: walk; }
+  ol.walk > li { counter-increment: walk; position: relative; padding: 0 0 .9rem 2.6rem; margin: 0; }
+  ol.walk > li::before { content: counter(walk); position: absolute; left: 0; top: .1rem; width: 1.8rem; height: 1.8rem; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; font-weight: 700; background: var(--accent); color: var(--accent-fg); }
+  ol.walk h3 { margin: .15rem 0 .3rem; font-size: 1rem; }
+  ol.walk p { margin: .3rem 0; }
+  ul.arrived { margin: .3rem 0 .4rem 0; padding: 0; list-style: none; } ul.arrived li { margin: .25rem 0; }
   table.tbl { border-collapse: collapse; width: 100%; font-size: .92rem; }
   table.tbl th, table.tbl td { text-align: left; padding: .45rem .5rem; border-bottom: 1px solid var(--border); vertical-align: top; }
   table.tbl th { color: var(--muted); font-weight: 500; font-size: .82rem; }
@@ -1204,7 +1211,7 @@
               <span class="hint">Only used if you restore the file as a new course. Restoring into an existing course ignores it.</span>
               <input id="set-short" value="${esc(build.course_shortname)}" maxlength="100"></label>
             <label class="field" for="set-section">Section number
-              <span class="hint">Which course section the module is filed under in the backup. When you restore into an existing course, Moodle merges it into the section with this number.</span>
+              <span class="hint">Where in the course the module should land. 0 is the “General” section at the top of the course page, 1 is the first section under it, 2 the next, and so on. The module is added to the end of that section, after whatever is already there.</span>
               <input id="set-section" type="number" min="0" max="200" value="${esc(build.section_number)}" style="max-width:8rem"></label>
             ${hasReadings() && !isRhizo() ? `<fieldset class="modes"><legend>Where the practice questions go</legend>
               ${[['h5p', 'On each reading’s page', 'as an H5P question set. Not graded.'], ['quiz', 'In one Moodle Quiz for the module', 'with the questions in its question bank. Graded out of 10, unlimited attempts. Only question sets you have approved go in.'], ['both', 'Both', 'practice on the pages, then the Quiz.']]
@@ -1220,13 +1227,37 @@
             <a class="btn btn-ghost" href="${esc(apiUrl(`/api/builds/${build.id}/report.md?download=1`))}">Download the build report</a>
             ${p.glossary ? `<a class="btn btn-ghost" href="${esc(apiUrl(`/api/builds/${build.id}/glossary.xml`))}">Download the glossary entries</a>` : ''}</p>
         </div>
-        <div class="card"><h2>Restoring it in Moodle</h2>
-          <ol class="steps"><li>In the course: <strong>More › Course reuse › Restore</strong>.</li>
-            <li>Upload the .mbz file and choose <strong>Restore into this course › Merge the backup course into this course</strong>.</li>
-            <li>Keep the defaults and finish. The module arrives as one Book${isRhizo() ? ', followed by one discussion forum for each activity that has one, all' : ','} hidden from students.</li>
-            <li>${isRhizo()
-              ? 'Open the Book and each forum, work through any yellow “To do” boxes, then show them to students. Each forum’s first post appears under the name of whoever restored the file.'
-              : 'Open the Book, work through the yellow “To do” boxes, try each activity, then show it to students.'}</li></ol>
+        <div class="card"><h2>Put it in your course</h2>
+          <p class="muted">Six steps, about three minutes. Keep this page open and follow along in a second tab. Nothing is shown to students until you choose to show it.</p>
+          <ol class="walk">
+            <li><h3>Download the file</h3>
+              <p>Use the <strong>Download</strong> button above. The file is saved where your browser keeps downloads, usually the <strong>Downloads</strong> folder, as <code>${esc(p.file_name)}</code>. Leave it as it is: do not open, rename or unzip it.</p></li>
+            <li><h3>Open the restore page in Moodle</h3>
+              ${me.reuse_url ? `<p><a class="btn btn-small" href="${esc(me.reuse_url)}" target="_blank" rel="noopener">Open Course reuse for this course <span class="visually-hidden">(opens in a new tab)</span>↗</a></p>
+                <p>It opens in a new tab. In the menu at the top left of that page, choose <strong>Restore</strong>.</p>
+                <p class="muted">Or from the course itself: <strong>More › Course reuse</strong>, then choose <strong>Restore</strong> in the menu.</p>`
+                : '<p>In the course, choose <strong>More › Course reuse</strong>. In the menu at the top left of that page, choose <strong>Restore</strong>.</p>'}</li>
+            <li><h3>Give Moodle the file</h3>
+              <p>Under <strong>Upload a backup file</strong>, drag the file from your Downloads folder into the box with the arrow, or press <strong>Choose a file…</strong> and pick it. When its name shows in the box, press <strong>Restore</strong>.</p></li>
+            <li><h3>Click through Moodle’s screens</h3>
+              <p>Moodle shows a row of stage names across the top. Only the second one asks for a decision.</p>
+              <div class="scroll-x"><table class="tbl"><thead><tr><th scope="col">Stage</th><th scope="col">What to do</th></tr></thead><tbody>
+                <tr><th scope="row">1. Confirm</th><td>Scroll to the bottom and press <strong>Continue</strong>.</td></tr>
+                <tr><th scope="row">2. Destination</th><td>Find the block headed <strong>Restore into this course</strong>. Leave <strong>Merge the backup course into this course</strong> selected and press the <strong>Continue</strong> button <em>inside that block</em>. Do not use “Restore as a new course”, and never “Delete the contents of this course and then restore”.</td></tr>
+                <tr><th scope="row">3. Settings</th><td>Change nothing. Press <strong>Next</strong>.</td></tr>
+                <tr><th scope="row">4. Schema</th><td>Change nothing. Press <strong>Next</strong>.</td></tr>
+                <tr><th scope="row">5. Review</th><td>Scroll to the bottom and press <strong>Perform restore</strong>.</td></tr>
+                <tr><th scope="row">6. Complete</th><td>When it says the course was restored, press <strong>Continue</strong>. You are back on the course page.</td></tr>
+              </tbody></table></div></li>
+            <li><h3>Find what arrived</h3>
+              <p>Turn <strong>Edit mode</strong> on (top right of the course page). Go to <strong>section ${esc(build.section_number)}</strong>${Number(build.section_number) === 0 ? ', the “General” section at the top of the course' : `, the ${['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth'][Number(build.section_number) - 1] || 'numbered'} section under “General”`}. The new items are at the end of that section, each marked <strong>Hidden from students</strong>:</p>
+              <ul class="arrived">${(p.contents || []).map((c) => `<li><span class="chip type">${esc(c.kind)}</span> ${esc(c.name)}</li>`).join('')}</ul>
+              <p class="muted">Not there? Check the section number in the settings above matches the section you looked in, and that Edit mode is on: with it off, hidden items can be easy to miss. Restoring the same file twice adds a second copy; delete the one you do not want.</p></li>
+            <li><h3>Check it, then show it</h3>
+              <p>${isRhizo()
+                ? 'Open the Book and each forum and work through any yellow “To do” boxes. Each forum’s first post appears under the name of whoever restored the file.'
+                : 'Open the Book, work through any yellow “To do” boxes, and try each activity as a student would.'} When you are happy, open the three-dot menu beside each item, choose <strong>Availability</strong>, then <strong>Show on course page</strong>.</p></li>
+          </ol>
           ${(p.chapters && build.activities.some((a) => a.status === 'approved' && a.spec && (a.spec.type === 'assignment' || a.spec.type === 'discussion'))) ? '<p><strong>The Assignment and the Discussion.</strong> Each arrives as its own activity after the Book, hidden. The Assignment is marked out of 100 with its rubric attached as advanced grading, takes online text or files, and has no due date; set dates and check the rubric with the instructor before showing it. The Discussion is an ungraded forum whose first post appears under the name of whoever restored the file.</p>' : ''}
           ${p.quiz ? `<p><strong>The Quiz.</strong> “${esc(p.quiz.name)}” arrives after the Book with ${p.quiz.questions} questions in its own question bank, hidden. It is marked out of 10 with unlimited attempts and the highest grade kept, and it has a gradebook column. Preview it, then set dates, attempts and grade to suit before showing it.</p>` : ''}
           ${p.glossary ? '<p><strong>The Glossary.</strong> Moodle restores glossary entries only for site managers, so the Glossary arrives empty. Open it, choose <strong>Import entries</strong>, and give it the glossary entries file from the button above. Import into the <em>current</em> glossary.</p>' : ''}
