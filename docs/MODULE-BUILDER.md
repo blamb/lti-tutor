@@ -69,6 +69,37 @@ Tested locally on 12 Nov 2026: a module from two Wikipedia articles. All nine ac
 
 Known rough edges: a passage copied from a web page keeps that page's artefacts (Wikipedia's note numbers, for example), and the model once used a site's "needs updating" banner as a passage; the "what the page says about it" line occasionally reads slightly more into a sentence than is there, which is what the designer's review is for; the fixed "how to take part" wording is not yet editable in the tool.
 
+## Course pages: an overview, reading guides and key takeaways (added 17 Nov 2026)
+
+A module started from readings, in either mode, can also carry page content drafted from those readings. It is reviewed on its own tab, **Course pages**.
+
+| Page | Where it goes | What is drafted | What is not drafted |
+|---|---|---|---|
+| Reading guide | The top of a reading's page, above the reading or the link to it | Why this reading; three to six key ideas, each with a short explanation and the passage where it comes up (click to open); two to four questions the reading answers | The headings |
+| Module overview | The first page of the Book | An introduction; three to six topics the readings cover | Learning outcomes, which are copied from the course outline. The "What you will do" list, which code builds from the module's contents with a link to each reading and a reading time (200 words a minute, rounded up to five minutes) |
+| Key takeaways | The last page of the Book | Four to eight main points, each with its passage under "Where this comes from" | The name of the reading under each point, which code finds by locating the passage |
+
+A guide is drafted for each reading when it is added. The overview and the takeaways are drafted on request, once the readings are in, because they draw on all of them. A reading added before this feature existed gets a "Draft a reading guide" button.
+
+**The course outline.** The designer may paste or upload the course outline or syllabus (PDF, Word, HTML, text). The drafts use it to see what matters in the course. It is also the only source of learning outcomes: the model may copy an outcome from the outline and may not write one. With no outline, or an outline with no outcomes, the overview has none and says so in its note. The model is told to copy only the outcomes the module's readings serve, and in testing it left one out and said why (see below).
+
+The safeguards, which are those of the other drafted material with one addition:
+
+- **Passage check.** Every key idea, topic and takeaway carries a passage copied from a reading. Code confirms it is there (`checkQuotes` in `engine/reading.ts`); a miss is sent back to the model once, and a page with a passage still missing cannot be approved or built. A passage is at most 420 characters, so a page that links to a copyrighted reading quotes it only briefly.
+- **Outcome check.** Every learning outcome must be in the outline word for word, checked the same way against the outline alone. A reworded or invented outcome blocks the page. Changing the outline re-checks an overview already drafted.
+- **Only approved pages are built**, in practice mode as well as RhizMode, because the page says it was reviewed.
+- **The model adds no facts** and does not judge the reading. Things it thinks the designer should know go in its note.
+- **Editing is in plain text boxes**, and a changed passage or outcome is checked again on saving.
+- **Disclosure.** Each drafted section ends with a line saying it was drafted with AI, naming the model, and reviewed by the course team. The build report lists every drafted statement beside its passage, and says which parts of the pages are fixed wording or built by code.
+
+The checks show where a statement comes from. They do not show that the statement is a fair account of the reading: the introduction, the "why this reading" line and each explanation are the model's own words, and reading them against the source is the designer's job.
+
+Code: `engine/coursepage.ts` (the kinds, checks and page HTML), the page parts of `engine/reading.ts`, the prompts in `server/pagedraft.ts`, `addPage` and `setOutline` in `server/builds.ts`, migration `004_course_pages.sql` (`build.outline`).
+
+Tested locally on 17 Nov 2026: a practice-mode module from two Wikipedia articles (Digital divide, Digital literacy) with a made-up outline listing four outcomes. Both guides, the overview and the takeaways were drafted; all 26 passages and all three copied outcomes passed their checks on the first pass. The model left out the fourth outcome (evaluating a Canadian policy response) and noted that neither reading covers it. An outcome typed in by hand that is not in the outline blocked approval. A request to drop one takeaway did that and left the rest. With the four pages approved, the file restored into the local Moodle 5.0.1 as a Book of four pages in the right order, with the overview's and the takeaways' links pointing at the right reading pages. Not yet tested: the pages seen in Moodle's own theme, a RhizMode module with course pages and a contract together, an uploaded outline file, a real course outline and real course readings, moodbox.
+
+Limits: one outline per module (paste the whole course outline into each, or the part that applies); the outline does not yet lay out a whole course; a passage shown to students has a web page's note markers ("[12]") removed, and nothing else.
+
 ## The two steps, and where AI is used
 
 | Step | What does it | AI? |
@@ -78,6 +109,8 @@ Known rough edges: a passage copied from a web page keeps that page's artefacts 
 | Build the `.h5p` packages and the backup | Fixed code (`h5p.ts`, `mbz.ts`) | No |
 | Readings route: fetch or extract the text, lay out the pages, check every quotation | `core/importers.ts`, `engine/reading.ts` | No |
 | Readings route: draft practice questions and flashcards from one reading | `src/builder/server/drafting.ts`, model `BUILDER_MODEL` | Yes |
+| Course pages: draft a reading guide, a module overview and key takeaways | `src/builder/server/pagedraft.ts`, model `BUILDER_MODEL` | Yes |
+| Course pages: check every passage and outcome, lay out the pages, build the "What you will do" list | `engine/coursepage.ts`, `engine/reading.ts` | No |
 
 The AI step is told to carry the author's wording across and add nothing of its own. Where a spec does not fit H5P as written (a "True/False" spec with four statements, feedback per blank), it picks the closest type and says so in a note the designer sees. Every reading is checked by code before it can be built (`checkActivity`), and the build report records, per activity, whether a person approved it, whether it was edited by hand, or whether it went into the file unreviewed.
 

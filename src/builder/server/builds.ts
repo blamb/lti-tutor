@@ -19,6 +19,8 @@ import { readSpec } from './interpret.js';
 import { draftActivity, draftContract, ROLES, MODE_ROLES, type Role, type Mode } from './drafting.js';
 import { env } from './env.js';
 import { TRAIL_TYPES } from '../engine/rhizo.js';
+import { isPageKind, PAGE_KINDS } from '../engine/coursepage.js';
+import { draftPage, isPageRole, type PageRole } from './pagedraft.js';
 
 export const DRAFT_MAX_BYTES = 40 * 1024 * 1024;
 /** Specs read at once: enough to finish a module in under a minute without tripping rate limits. */
@@ -56,6 +58,8 @@ export interface BuildRow {
   /** For a readings module: practice questions with a key, or RhizMode's open prompts with none. */
   mode: Mode;
   readings: StoredReading[];
+  /** The course outline the designer pasted or uploaded, '' if none. Course pages draw on it. */
+  outline: string;
   lti_iss: string;
   lti_context_id: string;
   created_by: number | null;
@@ -71,7 +75,7 @@ export interface BuildRow {
   updated_at: string;
 }
 
-const COLUMNS = `id, kind, mode, readings, lti_iss, lti_context_id, created_by, title, source_name, slots, activities, leave_out,
+const COLUMNS = `id, kind, mode, readings, outline, lti_iss, lti_context_id, created_by, title, source_name, slots, activities, leave_out,
   course_shortname, section_number, state, created_at, updated_at`;
 
 function escapeRegExp(s: string): string {
@@ -165,10 +169,32 @@ async function saveActivity(id: number, entry: ReviewedActivity): Promise<void> 
   );
 }
 
-async function readOne(id: number, kind: BuildRow['kind'], slot: Slot, readings: StoredReading[], attribution: Attribution, title = ''): Promise<void> {
+/** What a drafted item's passages are checked against: its reading, or for a page drafted from the whole module, all the readings and the outline. */
+export function sourceOf(build: Pick<BuildRow, 'readings' | 'outline'>, slot: Slot | undefined): { text: string; outline: string } {
+  const rs = slot as ReadingSlot | undefined;
+  if (rs && (rs.role === 'overview' || rs.role === 'takeaways')) {
+    return { text: build.readings.map((r) => r.text).join('\n\n'), outline: rs.role === 'overview' ? build.outline : '' };
+  }
+  return { text: build.readings.find((r) => r.id === rs?.reading)?.text ?? '', outline: '' };
+}
+
+async function draftPageFor(build: Pick<BuildRow, 'readings' | 'outline' | 'title'>, slot: ReadingSlot, attribution: Attribution, change?: { previous: unknown; note: string }) {
+  const reading = build.readings.find((r) => r.id === slot.reading);
+  if (slot.role === 'guide' && !reading) throw new ImportError('The reading this guide was drafted from has been removed.', 404);
+  if (!build.readings.length) throw new ImportError('Add a reading first: this page is drafted from the module’s readings.', 400);
+  return draftPage({ n: slot.n, role: slot.role as PageRole, moduleName: build.title, readings: build.readings, reading, outline: build.outline }, attribution, change);
+}
+
+async function readOne(id: number, kind: BuildRow['kind'], slot: Slot, readings: StoredReading[], attribution: Attribution, title = '', outline = ''): Promise<void> {
   try {
     if (kind === 'readings') {
       const rs = slot as ReadingSlot;
+      if (isPageRole(rs.role)) {
+        if (rs.role === 'guide' && !readings.some((r) => r.id === rs.reading)) return; // the reading was removed while its guide was queued
+        const { spec, problems } = await draftPageFor({ readings, outline, title }, rs, attribution);
+        await saveActivity(id, draftedEntry(slot.n, spec, problems));
+        return;
+      }
       if (rs.role === 'contract') {
         const { spec, problems } = await draftContract(slot.n, title, readings, attribution);
         await saveActivity(id, { n: slot.n, status: 'draft', spec, problems });
@@ -191,8 +217,11 @@ async function readOne(id: number, kind: BuildRow['kind'], slot: Slot, readings:
 /** A reading that defines too few terms gets no flashcards: the empty deck is left out, with the model's note kept. */
 function draftedEntry(n: number, spec: Activity, problems: string[]): ReviewedActivity {
   // The same for a RhizMode kind the model declined: the reading gave it nothing honest to work with.
-  const empty = (spec.type === 'dialogcards' && Array.isArray(spec.cards) && spec.cards.length === 0)
-    || (TRAIL_TYPES.includes(spec.type) && Array.isArray(spec.trails) && spec.trails.length === 0);
+  const none = (v: unknown): boolean => Array.isArray(v) && v.length === 0;
+  const empty = (spec.type === 'dialogcards' && none(spec.cards))
+    || (TRAIL_TYPES.includes(spec.type) && none(spec.trails))
+    // A course page the model declined: the material was too thin to draft from.
+    || (isPageKind(spec) && none(spec.type === 'overview' ? spec.covers : spec.points));
   return empty ? { n, status: 'skipped', spec, problems: [] } : { n, status: 'draft', spec, problems };
 }
 
@@ -207,13 +236,13 @@ async function readAll(id: number, attribution: Attribution): Promise<void> {
   try {
     for (;;) {
       running.set(id, false);
-      const rows = await query<Pick<BuildRow, 'kind' | 'slots' | 'activities' | 'readings' | 'title'>>(`select kind, title, slots, activities, readings from build where id = $1`, [id]);
+      const rows = await query<Pick<BuildRow, 'kind' | 'slots' | 'activities' | 'readings' | 'title' | 'outline'>>(`select kind, title, slots, activities, readings, outline from build where id = $1`, [id]);
       const row = rows[0];
       if (!row) return;
       const pending = new Set(row.activities.filter((a) => a.status === 'pending').map((a) => a.n));
       const queue = row.slots.filter((s) => pending.has(s.n));
       const workers = Array.from({ length: Math.min(READ_CONCURRENCY, queue.length) }, async () => {
-        for (let slot = queue.shift(); slot; slot = queue.shift()) await readOne(id, row.kind, slot, row.readings, attribution, row.title);
+        for (let slot = queue.shift(); slot; slot = queue.shift()) await readOne(id, row.kind, slot, row.readings, attribution, row.title, row.outline);
       });
       await Promise.all(workers);
       if (!running.get(id)) break;
@@ -250,6 +279,12 @@ export async function rereadActivity(build: BuildRow, n: number, note: string, a
   let entry: ReviewedActivity;
   if (build.kind === 'readings') {
     const rs = slot as ReadingSlot;
+    if (isPageRole(rs.role)) {
+      const { spec, problems } = await draftPageFor(build, rs, attribution, change);
+      entry = draftedEntry(n, spec, problems);
+      await saveActivity(build.id, entry);
+      return entry;
+    }
     if (rs.role === 'contract') {
       if (!build.readings.length) throw new ImportError('Add a reading first: the contract is drafted from what the module is about.', 400);
       const { spec, problems } = await draftContract(n, build.title, build.readings, attribution, change);
@@ -279,7 +314,8 @@ export async function reviewActivity(build: BuildRow, n: number, change: { statu
       // An edited question must still rest on a sentence of its reading.
       const rid = (slot as ReadingSlot).reading;
       entry.spec = { ...change.spec, n, reading: rid } as unknown as Activity;
-      entry.problems = checkDrafted(entry.spec, build.readings.find((r) => r.id === rid)?.text ?? '');
+      const src = sourceOf(build, slot);
+      entry.problems = checkDrafted(entry.spec, src.text, src.outline);
     } else {
       entry.spec = { ...change.spec, n } as Activity;
       entry.problems = checkActivity(entry.spec);
@@ -319,12 +355,13 @@ export async function updateSettings(scope: Scope, id: number, s: { course_short
 /** Which activities go into the file: everything read without problems that the designer has not left out. */
 function specFor(build: BuildRow): ModuleSpec {
   // RhizMode builds only what a person has approved: its pages say the prompts were reviewed.
+  // So does a drafted course page, in either mode: its wording is a model's and the page says it was reviewed.
   const statuses: ActivityStatus[] = build.mode === 'rhizmode' ? ['approved'] : ['draft', 'approved'];
   return {
     prefix: prefixFor(build.id),
     overrides: overridesOf(build.leave_out),
     activities: build.activities
-      .filter((a) => a.spec && !a.problems.length && statuses.includes(a.status))
+      .filter((a) => a.spec && !a.problems.length && (isPageKind(a.spec) ? a.status === 'approved' : statuses.includes(a.status)))
       .map((a) => a.spec!),
   };
 }
@@ -342,7 +379,8 @@ function reviewSection(build: BuildRow): string {
     '| # | Title | Status | Edited by hand |', '|---|---|---|---|'];
   for (const s of build.slots) {
     const a = build.activities.find((x) => x.n === s.n);
-    const status = !a ? label.pending : a.spec && a.problems.length && a.status !== 'skipped' ? 'Not built: ' + a.problems.join(' ') : label[a.status];
+    const status = !a ? label.pending : a.spec && a.problems.length && a.status !== 'skipped' ? 'Not built: ' + a.problems.join(' ')
+      : a.status === 'draft' && a.spec && isPageKind(a.spec) ? 'Not built: waiting for a person to approve it' : label[a.status];
     lines.push(`| ${s.n} | ${(a?.spec?.title || s.title || '(no title)').replace(/\|/g, '/')} | ${status.replace(/\|/g, '/')} | ${a?.edited ? 'yes' : ''} |`);
   }
   return lines.join('\n') + '\n';
@@ -359,7 +397,7 @@ export async function runBuild(build: BuildRow, opts: { visible?: boolean } = {}
   if (build.kind === 'readings') {
     const result = buildReadings({
       name: build.title, prefix: spec.prefix, readings: build.readings, activities: (spec.activities ?? []) as ReadingActivity[],
-      mode: build.mode, model: env.BUILDER_MODEL,
+      mode: build.mode, model: env.BUILDER_MODEL, outline: build.outline,
     }, {
       sourceName: `${build.readings.length} reading${build.readings.length === 1 ? '' : 's'}`,
       course: build.course_shortname || undefined, section: build.section_number, visible: opts.visible,
@@ -424,7 +462,8 @@ export async function addReading(build: BuildRow, input: ReadingInput, attributi
   // RhizMode pages link to the reading by default, even an open one: the passages under discussion are quoted on the page.
   if (build.mode === 'rhizmode') reading.include_text = false;
   const next = Math.max(0, ...build.slots.map((s) => s.n)) + 1;
-  const slots: ReadingSlot[] = (MODE_ROLES[build.mode] ?? MODE_ROLES.practice).map((role, i) => ({
+  // The mode's activities, and a reading guide for the top of the page.
+  const slots: ReadingSlot[] = [...(MODE_ROLES[build.mode] ?? MODE_ROLES.practice), 'guide' as Role].map((role, i) => ({
     n: next + i, title: ROLES[role].title, chapter: reading.title, under: 'Drafted by AI from this reading', type: ROLES[role].asks, text: '',
     reading: reading.id, role,
   }));
@@ -488,5 +527,57 @@ export async function addContract(build: BuildRow, attribution: Attribution): Pr
     [build.id, JSON.stringify([slot]), JSON.stringify([{ n, status: 'pending', spec: null, problems: [] }])]
   );
   void readAll(build.id, attribution);
+  return rows[0]!;
+}
+
+// ─── Course pages ───────────────────────────────────────────────────────────
+
+export const OUTLINE_MAX_CHARS = 200_000;
+
+/** Add a course page to a readings module and start drafting it: the overview or takeaways (one each), or the guide for a reading that has none. */
+export async function addPage(build: BuildRow, role: PageRole, rid: number | undefined, attribution: Attribution): Promise<BuildRow> {
+  if (build.kind !== 'readings') throw new ImportError('Course pages are drafted for a module that was started from readings.', 400);
+  if (!build.readings.length) throw new ImportError('Add a reading first: course pages are drafted from the module’s readings.', 400);
+  const scope = PAGE_KINDS[role]!.scope;
+  const reading = scope === 'reading' ? build.readings.find((r) => r.id === rid) : undefined;
+  if (scope === 'reading' && !reading) throw new ImportError('That reading is not in this module.', 404);
+  if (build.slots.some((s) => (s as ReadingSlot).role === role && (scope === 'module' || (s as ReadingSlot).reading === rid))) {
+    throw new ImportError(`This ${scope === 'module' ? 'module' : 'reading'} already has a ${ROLES[role].title}. Ask for a change to it instead.`, 400);
+  }
+  const n = Math.max(0, ...build.slots.map((s) => s.n)) + 1;
+  const slot: ReadingSlot = {
+    n, title: ROLES[role].title, chapter: reading ? reading.title : 'The whole module', under: reading ? 'Drafted by AI from this reading' : 'Drafted by AI from the readings',
+    type: ROLES[role].asks, text: '', reading: reading ? reading.id : 0, role,
+  };
+  const rows = await query<BuildRow>(
+    `update build set slots = slots || $2::jsonb, activities = activities || $3::jsonb, state = 'reading', updated_at = now()
+     where id = $1 returning ${COLUMNS}`,
+    [build.id, JSON.stringify([slot]), JSON.stringify([{ n, status: 'pending', spec: null, problems: [] }])]
+  );
+  void readAll(build.id, attribution);
+  return rows[0]!;
+}
+
+/**
+ * Store the course outline. Pages already drafted are kept as they are; an
+ * overview's outcomes are checked against the new outline at once, so one
+ * that is no longer in it stops the page being built until it is redrafted.
+ */
+export async function setOutline(build: BuildRow, input: { text: string } | { file: { name: string; bytes: Uint8Array } }): Promise<BuildRow> {
+  if (build.kind !== 'readings') throw new ImportError('An outline belongs to a module that was started from readings.', 400);
+  const text = ('file' in input ? (await extractFromFile(input.file.name, Buffer.from(input.file.bytes))).text : input.text).trim().slice(0, OUTLINE_MAX_CHARS);
+  if ('file' in input && text.length < 40) throw new ImportError('No text could be read from that file. A scanned PDF has no text until it has been through OCR; paste the outline instead.', 400);
+  const next = { ...build, outline: text };
+  const activities = build.activities.map((a) => {
+    const slot = build.slots.find((s) => s.n === a.n);
+    if (!a.spec || a.spec.type !== 'overview') return a;
+    const src = sourceOf(next, slot);
+    const problems = checkDrafted(a.spec, src.text, src.outline);
+    return { ...a, problems, status: problems.length && a.status === 'approved' ? 'draft' as ActivityStatus : a.status };
+  });
+  const rows = await query<BuildRow>(
+    `update build set outline = $2, activities = $3::jsonb, updated_at = now() where id = $1 returning ${COLUMNS}`,
+    [build.id, text, JSON.stringify(activities)]
+  );
   return rows[0]!;
 }

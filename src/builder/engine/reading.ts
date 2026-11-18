@@ -19,6 +19,10 @@ import {
   isRhizo, isContract, checkRhizo, rhizoDisclosure, rhizoPageHtml, rhizoForumHtml, contractPageHtml, contractForumHtml,
   trailsOf, partsOf, placeOf, RHIZO_KINDS, CREDIT_TEXT,
 } from './rhizo.js';
+import {
+  isPageKind, checkPage, pageDisclosure, guideHtml, overviewHtml, takeawaysHtml, pointsOf, coveredOf, outcomesOf, questionsOf, readingMinutes,
+  PAGE_KINDS, type OverviewStep,
+} from './coursepage.js';
 import { slug } from './pages.js';
 import { cmp, pad } from './py.js';
 import type { Activity, BuildOptions, BuildResult } from './index.js';
@@ -54,6 +58,8 @@ export interface ReadingModule {
   mode?: 'practice' | 'rhizmode';
   /** The model that drafted the activities, named on RhizMode pages. */
   model?: string;
+  /** The course outline, when the designer gave one. Learning outcomes on the overview page must be in it word for word. */
+  outline?: string;
 }
 
 const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -127,16 +133,26 @@ export function normForQuote(s: string): string {
 
 export interface QuoteCheck { label: string; quote: string; found: boolean }
 
-/** Every item of an activity that should rest on a sentence of the reading, with whether that sentence is there. */
-export function checkQuotes(act: Activity, readingText: string): QuoteCheck[] {
+/**
+ * Every item of an activity that should rest on a sentence of the reading, with whether that sentence is there.
+ * For a page drafted from the whole module (coursepage.ts) `readingText` is all the readings together, and
+ * `outline` is the course outline its learning outcomes must be copied from.
+ */
+export function checkQuotes(act: Activity, readingText: string, outline = ''): QuoteCheck[] {
   const source = normForQuote(readingText);
-  const one = (label: string, q: unknown): QuoteCheck => {
+  const one = (label: string, q: unknown, within = source): QuoteCheck => {
     const quote = typeof q === 'string' ? q : '';
     const n = normForQuote(quote);
-    return { label, quote, found: n.length >= 12 && source.includes(n) };
+    return { label, quote, found: n.length >= 12 && within.includes(n) };
   };
   const items = (list: unknown, word: string, field = 'source_quote'): QuoteCheck[] =>
     Array.isArray(list) ? list.map((x, i) => one(`${word} ${i + 1}`, (x as Record<string, unknown> | null)?.[field])) : [];
+  if (act.type === 'guide') return items(act.points, 'Key idea', 'passage');
+  if (act.type === 'takeaways') return items(act.points, 'Takeaway', 'passage');
+  if (act.type === 'overview') {
+    const o = normForQuote(outline);
+    return [...outcomesOf(act).map((text, i) => one(`Outcome ${i + 1}`, text, o)), ...items(act.covers, 'Topic', 'passage')];
+  }
   // RhizMode: the passage each prompt is anchored to. A Community Contract belongs to the whole module and has none.
   if (isContract(act)) return [];
   if (isRhizo(act)) return items(act.trails, 'Passage', 'passage');
@@ -146,7 +162,16 @@ export function checkQuotes(act: Activity, readingText: string): QuoteCheck[] {
 }
 
 /** Problems that keep a drafted activity out of the file: what checkActivity finds, plus any item whose quotation is not in the reading. */
-export function checkDrafted(act: Activity, readingText: string): string[] {
+export function checkDrafted(act: Activity, readingText: string, outline = ''): string[] {
+  if (isPageKind(act)) {
+    const problems = checkPage(act);
+    for (const q of checkQuotes(act, readingText, outline)) {
+      if (q.found) continue;
+      if (q.label.startsWith('Outcome')) problems.push(`${q.label}: it is not in the course outline word for word. Outcomes are copied from the outline, never drafted.`);
+      else problems.push(q.quote ? `${q.label}: its passage is not in the ${act.type === 'guide' ? 'reading' : 'readings'} as quoted.` : `${q.label}: no passage was given.`);
+    }
+    return problems;
+  }
   if (isRhizo(act)) {
     const problems = checkRhizo(act);
     for (const q of checkQuotes(act, readingText)) {
@@ -180,8 +205,18 @@ export function buildReadings(mod: ReadingModule, opts: BuildOptions): BuildResu
   const rhizmode = mod.mode === 'rhizmode';
   const open: ReadingActivity[] = [];      // RhizMode activities that passed their checks
   const forums: MbzForum[] = [];
+  const drafted: ReadingActivity[] = [];   // course pages that passed their checks
+  const corpus = mod.readings.map((r) => r.text).join('\n\n');
 
   for (const act of mod.activities) {
+    if (isPageKind(act)) {
+      const r = mod.readings.find((x) => x.id === act.reading);
+      const problems = act.type !== 'guide' ? checkDrafted(act, corpus, mod.outline ?? '')
+        : r ? checkDrafted(act, r.text) : ['its reading is no longer in the module.'];
+      if (problems.length) todo.push(`${String(act.title)} could not be built: ${problems.join(' ')}`);
+      else drafted.push(act);
+      continue;
+    }
     if (isRhizo(act)) {
       const r = mod.readings.find((x) => x.id === act.reading);
       const problems = isContract(act) ? checkRhizo(act) : r ? checkDrafted(act, r.text) : ['its reading is no longer in the module.'];
@@ -203,7 +238,11 @@ export function buildReadings(mod: ReadingModule, opts: BuildOptions): BuildResu
 
   // The Community Contract, when there is one, is the first page and the first forum.
   const contract = open.find(isContract);
-  const first = contract ? 1 : 0;
+  const overview = drafted.find((a) => a.type === 'overview');
+  const takeaways = drafted.find((a) => a.type === 'takeaways');
+  // Pages ahead of the first reading: the overview, then the contract.
+  const first = (overview ? 1 : 0) + (contract ? 1 : 0);
+  const readingHref = (i: number): string => bookPageLink(0, first + i + 1);
   let contractPage: { title: string; html: string } | undefined;
   if (contract) {
     const note = rhizoDisclosure(mod.model, true);
@@ -216,6 +255,8 @@ export function buildReadings(mod: ReadingModule, opts: BuildOptions): BuildResu
     const mine = built.filter((b) => b.act.reading === r.id);
     const prompts = open.filter((a) => !isContract(a) && a.reading === r.id);
     let html = '';
+    const guide = drafted.find((a) => a.type === 'guide' && a.reading === r.id);
+    if (guide) html += guideHtml(guide, pageDisclosure('guide', mod.model)) + '\n<h4>The reading</h4>\n';
     if (r.include_text) {
       html += textToHtml(r.text, r.title);
       if (!r.license) todo.push(`${r.title}: the text of this reading is on the page and no open licence was found. Confirm you have the right to reuse it, or switch the page to "link only".`);
@@ -252,6 +293,26 @@ export function buildReadings(mod: ReadingModule, opts: BuildOptions): BuildResu
     return { title: r.title, html };
   });
   const chapters = contractPage ? [contractPage, ...readingPages] : readingPages;
+  if (overview) {
+    const steps: OverviewStep[] = mod.readings.map((r, i) => ({
+      title: r.title, href: readingHref(i), minutes: readingMinutes(r.text), linkOnly: !r.include_text,
+      doing: [
+        ...(built.some((b) => b.act.reading === r.id) ? ['try the practice activities on its page'] : []),
+        ...(open.some((a) => !isContract(a) && a.reading === r.id) ? ['answer the prompts on its page'] : []),
+      ],
+    }));
+    const after = takeaways ? [`Review the <a href="${bookPageLink(0, first + mod.readings.length + 1)}">${esc(PAGE_KINDS.takeaways!.title)}</a>.`] : [];
+    chapters.unshift({ title: PAGE_KINDS.overview!.title, html: overviewHtml(overview, pageDisclosure('overview', mod.model), steps, after) });
+  }
+  if (takeaways) {
+    // Which reading each takeaway rests on is found by code, not taken from the model.
+    const sources = coveredOf(takeaways).map((p) => {
+      const n = normForQuote(p.passage);
+      const i = mod.readings.findIndex((r) => normForQuote(r.text).includes(n));
+      return i < 0 ? undefined : { title: mod.readings[i]!.title, href: readingHref(i) };
+    });
+    chapters.push({ title: PAGE_KINDS.takeaways!.title, html: takeawaysHtml(takeaways, pageDisclosure('takeaways', mod.model), sources) });
+  }
 
   const fileName = `${slug(mod.name) || 'module'}.mbz`;
   const stats = buildMbz(fileName, { fullname: mod.name, shortname: opts.course || slug(mod.name).toUpperCase() }, { name: mod.name },
@@ -262,6 +323,7 @@ export function buildReadings(mod: ReadingModule, opts: BuildOptions): BuildResu
     ['Book pages', chapters.length],
     ['Pages carrying the reading’s text', mod.readings.filter((r) => r.include_text).length],
     ['Pages that link to the reading', mod.readings.filter((r) => !r.include_text).length],
+    ...(drafted.length ? [['AI-drafted course pages (overview, reading guides, takeaways)', drafted.length]] as [string, number][] : []),
     ...(rhizmode ? [
       ['Open-prompt activities on the pages', open.length],
       ['Discussion forums', forums.length],
@@ -305,6 +367,34 @@ export function buildReadings(mod: ReadingModule, opts: BuildOptions): BuildResu
       if (open.some((a) => a.type === type)) report += `- ${k.title}, on the page: ${k.how}\n- ${k.title}, in the discussion: ${k.forum_how}\n`;
     }
     report += `- Disclosure: ${rhizoDisclosure(mod.model)}\n`;
+  }
+  if (drafted.length) {
+    report += '\n## Every AI-drafted course page, for the reviewer\n\n'
+      + 'The wording of these pages is a model’s. Each key idea, topic and takeaway points at a passage of a reading, and a program checked that the passage is there as quoted. '
+      + 'Learning outcomes are copied from the course outline, and a program checked each is there word for word. '
+      + 'The checks show where a statement comes from; they do not judge whether it is a fair account of the reading. Only pages a person approved are in the file.\n\n'
+      + '| Page | Part | What the page says | Passage or source | Found |\n|---|---|---|---|---|\n';
+    for (const act of drafted) {
+      const r = mod.readings.find((x) => x.id === act.reading);
+      const where = act.type === 'guide' ? `${PAGE_KINDS.guide!.title}: ${cell(r?.title)}` : PAGE_KINDS[act.type]!.title;
+      const checks = act.type === 'guide' ? checkQuotes(act, r?.text ?? '') : checkQuotes(act, corpus, mod.outline ?? '');
+      const row = (part: string, says: string, source = '', found = ''): void => { report += `| ${where} | ${part} | ${cell(says)} | ${cell(source)} | ${found} |\n`; };
+      const yes = (i: number): string => (checks[i]?.found ? 'yes' : 'NO');
+      if (act.type === 'guide') {
+        row('Why this reading', String(act.why ?? ''), '(no passage: a summary of the reading)');
+        pointsOf(act).forEach((p, i) => row(`Key idea ${i + 1}`, `${p.idea}: ${p.explanation}`, p.passage, yes(i)));
+        questionsOf(act).forEach((q, i) => row(`Question ${i + 1}`, q, '(no passage)'));
+      } else if (act.type === 'overview') {
+        row('Introduction', String(act.intro ?? ''), '(no passage: a summary of the readings)');
+        const outcomes = outcomesOf(act);
+        outcomes.forEach((o, i) => row(`Outcome ${i + 1}`, o, 'the course outline', yes(i)));
+        coveredOf(act).forEach((c, i) => row(`Topic ${i + 1}`, c.text, c.passage, yes(outcomes.length + i)));
+      } else {
+        coveredOf(act).forEach((p, i) => row(`Takeaway ${i + 1}`, p.text, p.passage, yes(i)));
+      }
+    }
+    report += '\nFixed wording and lists not drafted by AI: the headings, the “What you will do” list on the overview (built from the module’s contents, with reading times at 200 words a minute), and the name of the reading under each takeaway.\n';
+    for (const t of new Set(drafted.map((a) => a.type))) report += `- Disclosure, ${PAGE_KINDS[t]!.title}: ${pageDisclosure(t, mod.model)}\n`;
   }
   if (!rhizmode || built.length) report += '\n## Every AI-drafted item, for the subject reviewer\n\n'
     + 'Each answer key was checked against the quoted sentence of the reading, not against outside knowledge. '

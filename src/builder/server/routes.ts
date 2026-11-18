@@ -12,6 +12,8 @@
  *   POST   /api/builds/readings                   { title, mode? } -> { build }   (an empty module to add readings to; mode 'practice' | 'rhizmode')
  *   POST   /api/builds/:id/readings               multipart 'file' | { url } | { text, title } -> { build }   (starts drafting its activities)
  *   POST   /api/builds/:id/contract               -> { build }   (RhizMode: draft the module's Community Contract)
+ *   POST   /api/builds/:id/pages                  { role: 'overview' | 'guide' | 'takeaways', reading? } -> { build }   (draft a course page)
+ *   PUT    /api/builds/:id/outline                multipart 'file' | { text } -> { build }   (the course outline; '' clears it)
  *   PUT    /api/builds/:id/readings/:rid          { title?, include_text?, source_url?, license?, attribution? } -> { build }
  *   DELETE /api/builds/:id/readings/:rid          -> { build }
  *   GET    /api/builds/:id/pages                  -> { chapters, todo, judgement, counts, included, file_name }
@@ -39,10 +41,12 @@ import { TYPE_LABELS } from './interpret.js';
 import {
   DRAFT_MAX_BYTES, listBuilds, getBuild, createBuild, deleteBuild, updateSettings, reviewActivity, rereadActivity, runBuild,
   createReadingsBuild, addReading, addContract, updateReading, removeReading, forClient, READING_MAX_BYTES,
+  addPage, setOutline, sourceOf, OUTLINE_MAX_CHARS,
   type BuildRow, type Built, type ReadingInput,
 } from './builds.js';
 import { checkQuotes } from '../engine/reading.js';
 import { RHIZO_KINDS, RHIZO_TYPES, CONTRACT_PARTS, CREDIT_TEXT } from '../engine/rhizo.js';
+import { PAGE_KINDS, PAGE_TYPES } from '../engine/coursepage.js';
 
 lti.app.use('/api', express.json({ limit: '2mb' }));
 
@@ -90,17 +94,16 @@ function view(build: BuildRow): unknown {
   return {
     ...b,
     activities: build.activities.map((a) => {
-      const slot = build.slots.find((s) => s.n === a.n) as { reading?: number } | undefined;
-      const text = build.readings.find((r) => r.id === slot?.reading)?.text ?? '';
-      return a.spec ? { ...a, quotes: checkQuotes(a.spec, text) } : a;
+      const src = sourceOf(build, build.slots.find((s) => s.n === a.n));
+      return a.spec ? { ...a, quotes: checkQuotes(a.spec, src.text, src.outline) } : a;
     }),
   };
 }
 
 function withQuotes(build: BuildRow, a: { n: number; spec: Parameters<typeof checkQuotes>[0] | null }): unknown {
   if (build.kind !== 'readings' || !a.spec) return a;
-  const slot = build.slots.find((s) => s.n === a.n) as { reading?: number } | undefined;
-  return { ...a, quotes: checkQuotes(a.spec, build.readings.find((r) => r.id === slot?.reading)?.text ?? '') };
+  const src = sourceOf(build, build.slots.find((s) => s.n === a.n));
+  return { ...a, quotes: checkQuotes(a.spec, src.text, src.outline) };
 }
 
 // The engine rebuilds a module in well under a second, but a page preview
@@ -141,7 +144,11 @@ lti.app.get('/api/me', async (_req: Request, res: Response) => {
       course: { id: contextIdOf(token), title: scopeOf(token).title },
       model: env.BUILDER_MODEL,
       ai_ready: Boolean(env.ANTHROPIC_API_KEY),
-      types: [...ACTIVITY_TYPES.map((t) => ({ id: t, label: TYPE_LABELS[t] ?? t })), ...RHIZO_TYPES.map((t) => ({ id: t, label: RHIZO_KINDS[t]!.title, asks: RHIZO_KINDS[t]!.asks }))],
+      types: [
+        ...ACTIVITY_TYPES.map((t) => ({ id: t, label: TYPE_LABELS[t] ?? t })),
+        ...RHIZO_TYPES.map((t) => ({ id: t, label: RHIZO_KINDS[t]!.title, asks: RHIZO_KINDS[t]!.asks })),
+        ...PAGE_TYPES.map((t) => ({ id: t, label: PAGE_KINDS[t]!.title, page: true, does: PAGE_KINDS[t]!.asks, scope: PAGE_KINDS[t]!.scope })),
+      ],
       contract_parts: CONTRACT_PARTS,
       rhizo_credit: CREDIT_TEXT,
     });
@@ -235,6 +242,33 @@ lti.app.post('/api/builds/:id/contract', async (req: Request, res: Response) => 
     res.json({ build: view(await addContract(c.build, attr(c.token, me.id, null, 'builder.draft'))) });
   } catch (e) {
     fail(res, e, 'POST /api/builds/:id/contract');
+  }
+});
+
+// Course pages: the overview and takeaways for the module, or the guide for one reading.
+lti.app.post('/api/builds/:id/pages', async (req: Request, res: Response) => {
+  try {
+    const c = await ctx(req, res);
+    if (!c) return;
+    const { role, reading } = z.object({ role: z.enum(['overview', 'guide', 'takeaways']), reading: z.number().int().positive().optional() }).parse(req.body);
+    const me = await studentFromToken(c.token);
+    res.json({ build: view(await addPage(c.build, role, reading, attr(c.token, me.id, null, 'builder.page.draft'))) });
+  } catch (e) {
+    fail(res, e, 'POST /api/builds/:id/pages');
+  }
+});
+
+lti.app.put('/api/builds/:id/outline', uploadReading.single('file'), async (req: Request, res: Response) => {
+  try {
+    const c = await ctx(req, res);
+    if (!c) return;
+    const file = (req as Request & { file?: Express.Multer.File }).file;
+    const input = file
+      ? { file: { name: Buffer.from(file.originalname, 'latin1').toString('utf8'), bytes: new Uint8Array(file.buffer) } }
+      : z.object({ text: z.string().max(OUTLINE_MAX_CHARS * 2) }).parse(req.body);
+    res.json({ build: view(await setOutline(c.build, input)) });
+  } catch (e) {
+    fail(res, e, 'PUT /api/builds/:id/outline');
   }
 });
 
@@ -395,14 +429,15 @@ lti.app.put('/api/builds/:id/activities/:n', async (req: Request, res: Response)
     const change = Review.parse(req.body);
     if (change.spec) {
       // A module's activities stay of its own kind: open prompts in RhizMode, H5P types everywhere else.
-      const allowed = c.build.mode === 'rhizmode' ? RHIZO_TYPES : ACTIVITY_TYPES;
+      // An edit keeps the kind it was drafted as: a Trust Audit does not become a contract, nor a reading guide a quiz.
+      const was = c.build.activities.find((a) => a.n === n)?.spec?.type;
+      const page = PAGE_TYPES.includes(String(was ?? change.spec.type));
+      const allowed = page ? PAGE_TYPES : c.build.mode === 'rhizmode' ? RHIZO_TYPES : ACTIVITY_TYPES;
       if (!allowed.includes(String(change.spec.type))) {
         res.status(400).json({ error: `"type" must be one of: ${allowed.join(', ')}.` });
         return;
       }
-      // An edit keeps the kind it was drafted as: a Trust Audit does not become a contract.
-      const was = c.build.activities.find((a) => a.n === n)?.spec?.type;
-      if (c.build.mode === 'rhizmode' && was && was !== change.spec.type) {
+      if ((c.build.mode === 'rhizmode' || page) && was && was !== change.spec.type) {
         res.status(400).json({ error: 'An activity keeps the kind it was drafted as.' });
         return;
       }

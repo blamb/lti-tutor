@@ -18,6 +18,7 @@ import type { Attribution } from '../../core/costs.js';
 import type { Activity } from '../engine/index.js';
 import { checkDrafted, type Reading } from '../engine/reading.js';
 import { RHIZO_KINDS, checkRhizo } from '../engine/rhizo.js';
+import { PAGE_KINDS } from '../engine/coursepage.js';
 import { env } from './env.js';
 
 /** The activities that can be drafted from a reading. Which ones a module gets depends on its mode. */
@@ -29,6 +30,10 @@ export const ROLES = {
   unsettled: { title: 'What’s Unsettled', type: 'unsettled', asks: RHIZO_KINDS.unsettled!.asks },
   missing: { title: 'Who’s Missing', type: 'missing', asks: RHIZO_KINDS.missing!.asks },
   contract: { title: 'Community Contract', type: 'contract', asks: RHIZO_KINDS.contract!.asks },
+  // Course pages (engine/coursepage.ts), drafted in either mode by pagedraft.ts.
+  overview: { title: PAGE_KINDS.overview!.title, type: 'overview', asks: PAGE_KINDS.overview!.asks },
+  guide: { title: PAGE_KINDS.guide!.title, type: 'guide', asks: PAGE_KINDS.guide!.asks },
+  takeaways: { title: PAGE_KINDS.takeaways!.title, type: 'takeaways', asks: PAGE_KINDS.takeaways!.asks },
 } as const;
 export type Role = keyof typeof ROLES;
 /** The RhizMode kinds drafted from one reading. The contract is drafted from the whole module (draftContract). */
@@ -225,6 +230,7 @@ export async function draftActivity(n: number, reading: Reading, role: Role, att
   const ask = async (extra: string, endpoint: string): Promise<Record<string, unknown>> => {
     const common = { system: isTrail(role) ? trailSystem(role) : SYSTEM[role as 'questions' | 'cards'], userPrompt: base + extra, maxTokens: 6000, effort: 'medium' as const, attribution, endpoint, model: env.BUILDER_MODEL, promptOnly: true, preprocess: dropNulls };
     if (role === 'contract') throw new Error('A Community Contract is drafted from the whole module, not from one reading.');
+    if (role === 'overview' || role === 'guide' || role === 'takeaways') throw new Error('Course pages are drafted by pagedraft.ts.');
     if (isTrail(role)) return await jsonCall({ ...common, schema: Trails });
     return role === 'questions' ? await jsonCall({ ...common, schema: Questions }) : await jsonCall({ ...common, schema: Cards });
   };
