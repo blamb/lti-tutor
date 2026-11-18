@@ -58,6 +58,7 @@
   .chip.bad { background: var(--bad-bg); border-color: var(--bad-bg); color: var(--bad); }
   .view { display: none; } .view.active { display: block; }
   .steps { margin: .25rem 0 0 1.2rem; padding: 0; } .steps li { margin: .2rem 0; }
+  h3.how { margin: .9rem 0 .2rem; font-size: 1rem; } ol.steps li { margin: .35rem 0; }
   ol.walk { margin: .6rem 0 0; padding: 0; list-style: none; counter-reset: walk; }
   ol.walk > li { counter-increment: walk; position: relative; padding: 0 0 .9rem 2.6rem; margin: 0; }
   ol.walk > li::before { content: counter(walk); position: absolute; left: 0; top: .1rem; width: 1.8rem; height: 1.8rem; border-radius: 50%;
@@ -162,17 +163,27 @@
       </div>
       <div class="card">
         <h2 id="readings-h">Start from readings</h2>
-        <p class="muted">Give the module a name, then add readings: an open textbook chapter or web page by address, a file (PDF, Word, text), or pasted text. Each reading becomes a page, and its activities are drafted from it by AI for you to review. Add the course outline and it can also draft the overview page with the course’s own learning outcomes, a discussion and an assignment.</p>
-        <form id="readings-form">
+        <p>Give the tool your readings and it builds the module around them: a page for each reading, with activities drafted from it for you to review. Nothing is built into the file until you have seen it.</p>
+        <h3 class="how">How it goes</h3>
+        <ol class="steps">
+          <li><strong>Name the module</strong> and choose how to begin, below.</li>
+          <li><strong>Readings tab: add your readings.</strong> Each one by web address, file (PDF, Word, HTML, text) or pasted text. For each, choose whether its page carries the full text or a link to it, and set its title and credit line.</li>
+          <li><strong>Course content tab: add the course outline and build the pages.</strong> Paste or upload the outline if you have one. A guide to each reading is already drafted. Ask for the module overview, the key takeaways, a discussion, and an assignment with a rubric.</li>
+          <li><strong>H5P activities tab: review the practice activities.</strong> Approve, change, edit in a form, or leave out. Draft a summary, a crossword or a timeline from any reading if you want more.</li>
+          <li><strong>Pages and To do tabs: check the result.</strong> Preview every page and clear anything flagged.</li>
+          <li><strong>Download tab: put it in your course.</strong> Choose whether the questions also go to a Moodle Quiz and the key terms to a Glossary, download the file, and follow the six restore steps shown there.</li>
+        </ol>
+        <p class="muted">Learning outcomes on the overview, and the criteria of the assignment’s rubric, are copied from your course outline and never written by the AI. Without an outline you get neither.</p>
+        <form id="readings-form" style="margin-top:1rem">
           <label class="field" for="readings-title">Module name
             <input id="readings-title" maxlength="160" required placeholder="Unit 3: The Chemistry of Life"></label>
-          <fieldset class="modes"><legend>What is drafted from each reading to begin with</legend>
+          <fieldset class="modes"><legend>How to begin</legend>
             <label class="opt"><input type="radio" name="readings-mode" value="practice" checked> <strong>Practice</strong>
-              <span>· practice questions and key-term flashcards, with an answer key checked against the reading. You can then add a summary, a crossword or a timeline, send the questions to a Moodle Quiz and the terms to a Glossary, and add a RhizMode discussion to any reading.</span></label>
+              <span>· each reading gets practice questions and key-term flashcards, with an answer key checked against the reading. The usual choice. You can still add a RhizMode discussion to any reading.</span></label>
             <label class="opt"><input type="radio" name="readings-mode" value="rhizmode"> <strong>RhizMode</strong>
-              <span>· open prompts with no answer key, about how the reading knows what it says. Students answer in a discussion forum. Nothing is graded. <span id="rhizo-credit"></span></span></label>
+              <span>· each reading gets four open prompts to pick from (Breadcrumb Trail, Trust Audit, What’s Unsettled, Who’s Missing), with no answer key. Students answer in ungraded discussion forums. <span id="rhizo-credit"></span></span></label>
           </fieldset>
-          <p class="muted">Either way, a guide to each reading is drafted too, and the overview, key takeaways, discussion and assignment are drafted when you ask for them.</p>
+          <p class="muted">This choice is fixed once the module is started. Everything in steps 3 to 6 is available either way, except that a Quiz, a Glossary and the extra practice activities belong to Practice.</p>
           <button class="btn" type="submit" style="margin-top:.8rem">Start the module</button>
           <div id="readings-msg" role="status"></div>
         </form>
@@ -183,7 +194,8 @@
         <ol class="steps">
           <li>Upload the draft, with its <code>[@Production: …]</code> notes and H5P specifications left in.</li>
           <li>Check how each H5P specification was read. Approve it, ask for a change, edit it, or leave it out.</li>
-          <li>Download one restore file and restore it into the course. The module arrives hidden from students.</li>
+          <li>Optional: add readings on the Readings tab. Each gets a page after the draft’s pages, and the overview, discussion, assignment, Quiz and Glossary become available.</li>
+          <li>Download one restore file and follow the six restore steps on the Download tab. The module arrives hidden from students.</li>
         </ol>
         <form id="upload-form" style="margin-top:1rem">
           <label class="field" for="upload-file">Word draft (.docx)
