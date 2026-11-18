@@ -4,6 +4,9 @@
  * route is instructor-only: the tool has no student side.
  *
  *   GET    /api/me                                -> { name, course, model }
+ *   GET    /api/moodle                            -> { status, sections | null, problem }   (the course's sections, when connected)
+ *   PUT    /api/moodle                            { token } -> verify and store a Moodle web-service token for this course
+ *   DELETE /api/moodle                            forget it
  *   GET    /api/builds                            -> { builds: [summary] }
  *   GET    /api/course-file?ids=1,2&section=1     several modules as one restore file, one section each; &list=1 for what it would hold
  *   POST   /api/builds                            multipart 'file' (.docx) -> { build }   (starts the AI step)
@@ -50,6 +53,7 @@ import {
 import { checkQuotes } from '../engine/reading.js';
 import { RHIZO_KINDS, RHIZO_TYPES, CONTRACT_PARTS, CREDIT_TEXT } from '../engine/rhizo.js';
 import { PAGE_KINDS, PAGE_TYPES, RUBRIC_LEVELS, DISCUSSION_HOW } from '../engine/coursepage.js';
+import { moodleState, connectMoodle, disconnectMoodle, SECTION_FUNCTION } from './moodle.js';
 
 lti.app.use('/api', express.json({ limit: '2mb' }));
 
@@ -178,6 +182,40 @@ lti.app.post('/api/fullscreen-init', (req: Request, res: Response) => {
     res.json({ url: `/fullscreen?n=${encodeURIComponent(mintFullscreenNonce(cookieHeader, ltik))}` });
   } catch (e) {
     fail(res, e, 'POST /api/fullscreen-init');
+  }
+});
+
+// ─── The course in Moodle: its sections, for choosing where a module lands ───
+
+lti.app.get('/api/moodle', async (_req: Request, res: Response) => {
+  try {
+    const token = gateTeacher(res);
+    if (!token) return;
+    res.json({ ...(await moodleState(token.iss, contextIdOf(token))), wwwroot: token.iss, needs: SECTION_FUNCTION });
+  } catch (e) {
+    fail(res, e, 'GET /api/moodle');
+  }
+});
+
+lti.app.put('/api/moodle', async (req: Request, res: Response) => {
+  try {
+    const token = gateTeacher(res);
+    if (!token) return;
+    const { token: ws } = z.object({ token: z.string().trim().max(200) }).parse(req.body);
+    res.json(await connectMoodle(token.iss, contextIdOf(token), ws));
+  } catch (e) {
+    fail(res, e, 'PUT /api/moodle');
+  }
+});
+
+lti.app.delete('/api/moodle', async (_req: Request, res: Response) => {
+  try {
+    const token = gateTeacher(res);
+    if (!token) return;
+    await disconnectMoodle(token.iss, contextIdOf(token));
+    res.json({ connected: false });
+  } catch (e) {
+    fail(res, e, 'DELETE /api/moodle');
   }
 });
 

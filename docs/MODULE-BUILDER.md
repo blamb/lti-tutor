@@ -237,6 +237,22 @@ The four-line restore note became a six-step walk-through for people who restore
 
 Checked locally without a Moodle launch, so the Course reuse button itself has not been seen or clicked; the fallback wording shows in its place.
 
+## Choosing the section (18 Nov 2026)
+
+A designer restored a module on moodbox and could not find it. It had arrived, twice, in section 1, under an earlier module and under that section's name. Three things were behind it: every module defaulted to section 1; Moodle's restore never asks where to put things, the section number in the file decides; and Moodle adds to an existing section and keeps its name.
+
+Two changes.
+
+**Defaults and warnings, with no setup.** A new module defaults to the section after the highest one the tool has used in that course. The Download tab warns when the chosen section is one another module of the tool went to, lists the sections in use, and the home list shows each module's section. The tool only knows its own modules here, not what a person has put in the course by hand.
+
+**A section picker, with a Moodle connection.** On the Download tab, "Pick the section by name instead: connect to Moodle" takes a web-service token for the designer's own account. The tool checks whose it is, that its service allows `core_course_get_contents`, and that the account can read this course, then stores it encrypted, one per course (`moodle_connection`, migration 006). From then on the section field is a list of the course's real sections, each with its name and how many items it holds, plus "a new section at the end, named after the module". Choosing saves at once. A section that already holds items brings a warning that the module will go below them and the section keeps its name. If Moodle cannot be reached or the token stops working, the number box comes back with a line saying why. The token is only sent to the Moodle the tool was launched from and only to read; "Disconnect from Moodle" deletes it.
+
+On moodbox the existing web service "LTI Tutor course sync" already allows that function, so a token made for the Tutor's sync works here too.
+
+Code: `server/moodle.ts`, the `/api/moodle` routes, the section field in `renderGet` (launch.html).
+
+Tested locally against a stand-in for Moodle's REST service that returns sections in Moodle's shape: a malformed token and a wrong token were refused with plain messages; a good one listed five sections with their item counts; picking an empty section and the new section at the end saved at once and updated the "find it" step; disconnecting brought the number box back. Not yet tested against a real Moodle, so the first connection on moodbox is the real check.
+
 ## Why a restore file
 
 LTI can add links to a course but not pages, Books or H5P activities, and Moodle's core web services cannot create activities. A backup file is the one route that works on a stock Moodle with no plugin and no administrator action: any editing teacher can restore it.

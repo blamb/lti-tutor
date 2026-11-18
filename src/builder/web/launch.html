@@ -58,6 +58,7 @@
   .chip.bad { background: var(--bad-bg); border-color: var(--bad-bg); color: var(--bad); }
   .view { display: none; } .view.active { display: block; }
   .steps { margin: .25rem 0 0 1.2rem; padding: 0; } .steps li { margin: .2rem 0; }
+  details.connect { margin: .7rem 0; } details.connect summary { cursor: pointer; color: var(--accent); }
   h3.how { margin: .9rem 0 .2rem; font-size: 1rem; } ol.steps li { margin: .35rem 0; }
   ol.walk { margin: .6rem 0 0; padding: 0; list-style: none; counter-reset: walk; }
   ol.walk > li { counter-increment: walk; position: relative; padding: 0 0 .9rem 2.6rem; margin: 0; }
@@ -1208,6 +1209,11 @@
     try {
       const p = await loadPages();
       const c = counts();
+      // The course's real sections, when the tool is connected to Moodle; otherwise the plain number box.
+      const moodle = await api('/api/moodle').catch(() => null);
+      const sections = moodle && Array.isArray(moodle.sections) ? moodle.sections : null;
+      const lastSection = sections && sections.length ? Math.max(...sections.map((x) => x.number)) : 0;
+      const here = sections ? sections.find((x) => x.number === Number(build.section_number)) : null;
       const mb = p.size < 104858 ? '' : (p.size / 1048576).toFixed(1);
       const sizeLabel = mb ? `${mb} MB` : `${Math.max(1, Math.round(p.size / 1024))} KB`;
       pane.innerHTML = `<div class="card"><h2>The restore file</h2>
@@ -1223,10 +1229,33 @@
             <label class="field" for="set-short">Course short name (optional)
               <span class="hint">Only used if you restore the file as a new course. Restoring into an existing course ignores it.</span>
               <input id="set-short" value="${esc(build.course_shortname)}" maxlength="100"></label>
-            <label class="field" for="set-section">Section number
-              <span class="hint">Where in the course the module should land. 0 is the “General” section at the top of the course page, 1 is the first section under it, 2 the next, and so on. The module is added to the end of that section, after whatever is already there.</span>
+            ${sections ? `<label class="field" for="set-section">Where the module goes in the course
+              <span class="hint">These are the course’s sections as they are in Moodle now, read as ${esc(moodle.status.user)}. The module is added to the end of the section you pick. Your choice is saved as soon as you make it.</span>
+              <select id="set-section">
+                ${sections.map((x) => `<option value="${x.number}" ${x.number === Number(build.section_number) ? 'selected' : ''}>${x.number}. ${esc(x.name)} · ${x.items ? `${x.items} item${x.items === 1 ? '' : 's'} already` : 'empty'}${x.visible ? '' : ' · hidden'}</option>`).join('')}
+                <option value="${lastSection + 1}" ${Number(build.section_number) === lastSection + 1 ? 'selected' : ''}>${lastSection + 1}. A new section at the end, named “${esc(build.title)}”</option>
+                ${Number(build.section_number) > lastSection + 1 ? `<option value="${esc(build.section_number)}" selected>${esc(build.section_number)}. Past the end of the course (Moodle will add empty sections before it)</option>` : ''}
+              </select></label>
+            ${here && here.items ? `<div class="banner warn" role="status"><strong>“${esc(here.name)}” already holds ${here.items} item${here.items === 1 ? '' : 's'}.</strong> This module will be added below ${here.items === 1 ? 'it' : 'them'}, and the section keeps its name. For a section of its own, pick an empty one or the new section at the end.</div>` : ''}
+            ${Number(build.section_number) > lastSection + 1 ? '<div class="banner warn" role="status">The section saved for this module is past the end of the course. Pick one from the list.</div>' : ''}
+            <p class="muted"><button class="btn btn-ghost btn-small" type="button" id="moodle-refresh">Read the sections again</button>
+              <button class="btn btn-ghost btn-small" type="button" id="moodle-off">Disconnect from Moodle</button> <span id="moodle-msg" role="status"></span></p>`
+            : `<label class="field" for="set-section">Section number
+              <span class="hint">Where in the course the module should land. 0 is the “General” section at the top of the course page, 1 is the first section under it, 2 the next, and so on. The module is added to the end of that section, after whatever is already there. Moodle does not ask where to put it during the restore: this number decides.</span>
               <input id="set-section" type="number" min="0" max="200" value="${esc(build.section_number)}" style="max-width:8rem"></label>
+            ${moodle && moodle.problem ? `<div class="banner warn" role="status">${esc(moodle.problem)}</div>` : ''}
+            <details class="connect" ${moodle && moodle.problem ? 'open' : ''}><summary>Pick the section by name instead: connect to Moodle</summary>
+              <p class="muted">With a Moodle web-service token the tool reads this course’s sections and shows them here by name, with how many items each holds, and offers a new section at the end. The token is stored encrypted, used only to read this course from ${esc((moodle && moodle.wwwroot) || 'your Moodle')}, and can be removed at any time.</p>
+              <ol class="steps">
+                <li>In Moodle, get a token for your own account on a web service that allows <code>${esc((moodle && moodle.needs) || 'core_course_get_contents')}</code>. An administrator makes it under <em>Site administration › Server › Web services › Manage tokens</em>; on some sites you can make your own under <em>Preferences › Security keys</em>.</li>
+                <li>Paste it below and press Connect. The tool checks whose token it is and that the account can read this course.</li>
+              </ol>
+              <label class="field" for="moodle-token">Web-service token
+                <input id="moodle-token" type="password" autocomplete="off" maxlength="64" style="max-width:24rem"></label>
+              <p><button class="btn btn-ghost btn-small" type="button" id="moodle-on">Connect</button> <span id="moodle-msg" role="status"></span></p>
+            </details>`}
             ${(() => {
+              if (sections) return '';       // the list above shows what every section really holds
               const others = (p.neighbours || []).slice().sort((a, b) => a.section - b.section);
               const same = others.filter((o) => Number(o.section) === Number(build.section_number));
               return (same.length ? `<div class="banner warn" role="status"><strong>Section ${esc(build.section_number)} is also where ${same.map((o) => `“${esc(o.title)}”`).join(' and ')} went.</strong> This module will be added underneath, and the section keeps the name it already has, so it can look as if nothing arrived. For a section of its own, change the number to one no module uses and save.</div>` : '')
@@ -1269,7 +1298,7 @@
                 <tr><th scope="row">6. Complete</th><td>When it says the course was restored, press <strong>Continue</strong>. You are back on the course page.</td></tr>
               </tbody></table></div></li>
             <li><h3>Find what arrived</h3>
-              <p>Turn <strong>Edit mode</strong> on (top right of the course page). Go to <strong>section ${esc(build.section_number)}</strong>${Number(build.section_number) === 0 ? ', the “General” section at the top of the course' : `, the ${['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth'][Number(build.section_number) - 1] || 'numbered'} section under “General”`}. The new items are at the end of that section, <strong>below anything that was already there</strong>, each marked <strong>Hidden from students</strong>. If the section already had a name it keeps it, so look for the items, not for a section called “${esc(build.title)}”:</p>
+              <p>Turn <strong>Edit mode</strong> on (top right of the course page). Go to <strong>section ${esc(build.section_number)}${here ? ` (“${esc(here.name)}”)` : sections && Number(build.section_number) === lastSection + 1 ? ', a new section at the end of the course' : ''}</strong>${Number(build.section_number) === 0 ? ', the “General” section at the top of the course' : `, the ${['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth'][Number(build.section_number) - 1] || 'numbered'} section under “General”`}. The new items are at the end of that section, <strong>below anything that was already there</strong>, each marked <strong>Hidden from students</strong>. If the section already had a name it keeps it, so look for the items, not for a section called “${esc(build.title)}”:</p>
               <ul class="arrived">${(p.contents || []).map((c) => `<li><span class="chip type">${esc(c.kind)}</span> ${esc(c.name)}</li>`).join('')}</ul>
               <p class="muted">Not there? Check the section number in the settings above matches the section you looked in, and that Edit mode is on: with it off, hidden items can be easy to miss. Restoring the same file twice adds a second copy; delete the one you do not want.</p></li>
             <li><h3>Check it, then show it</h3>
@@ -1281,6 +1310,16 @@
           ${p.quiz ? `<p><strong>The Quiz.</strong> “${esc(p.quiz.name)}” arrives after the Book with ${p.quiz.questions} questions in its own question bank, hidden. It is marked out of 10 with unlimited attempts and the highest grade kept, and it has a gradebook column. Preview it, then set dates, attempts and grade to suit before showing it.</p>` : ''}
           ${p.glossary ? '<p><strong>The Glossary.</strong> Moodle restores glossary entries only for site managers, so the Glossary arrives empty. Open it, choose <strong>Import entries</strong>, and give it the glossary entries file from the button above. Import into the <em>current</em> glossary.</p>' : ''}
           ${isRhizo() ? '<p class="muted">The forums are ungraded and need nothing installed on the Moodle site.</p>' : '<p class="muted">The H5P activities need the matching H5P content types on the Moodle site. They are listed at the end of the build report.</p>'}</div>`;
+      const mmsg = $('#moodle-msg');
+      const moodleDo = async (fn, working) => {
+        mmsg.className = 'muted'; mmsg.textContent = working;
+        try { await fn(); await renderGet(); } catch (e) { mmsg.className = 'err'; mmsg.textContent = friendly(e); }
+      };
+      if ($('#moodle-on')) $('#moodle-on').addEventListener('click', () => moodleDo(() => api('/api/moodle', { method: 'PUT', body: { token: $('#moodle-token').value.trim() } }), 'Checking the token with Moodle…'));
+      if ($('#moodle-off')) $('#moodle-off').addEventListener('click', () => moodleDo(() => api('/api/moodle', { method: 'DELETE' }), 'Disconnecting…'));
+      if ($('#moodle-refresh')) $('#moodle-refresh').addEventListener('click', () => moodleDo(async () => undefined, 'Reading the sections…'));
+      // Choosing a section from the list saves at once: the Save button is a long way down the form.
+      if ($('#set-section').tagName === 'SELECT') $('#set-section').addEventListener('change', () => $('#settings-form').requestSubmit());
       $('#settings-form').addEventListener('submit', async (ev) => {
         ev.preventDefault();
         const msg = $('#set-msg');
